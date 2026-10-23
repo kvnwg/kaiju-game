@@ -111,8 +111,8 @@ export const CITIES = {
 
 // Enemy types by escalation stage. aoe = telegraph radius / beam width; proj = projectile speed.
 export const ENEMIES = {
-  cop: { name: 'Cop', tier: 1, r: 1.2, hp: 8, speed: 14, standoff: 22, range: 60, cd: 1.5, attack: 'bullet', dmg: 1, proj: 90, soft: true, human: true },
-  police: { name: 'Police car', tier: 2, r: 6, hp: 32, speed: 60, standoff: 45, range: 120, cd: 1.5, attack: 'bullet', dmg: 2, proj: 160, vehicle: true },
+  cop: { name: 'Cop', tier: 1, r: 1.2, hp: 8, speed: 14, standoff: 22, range: 60, cd: 1.5, attack: 'bullet', dmg: 1, proj: 90, soft: true, human: true, skittish: true },
+  police: { name: 'Police car', tier: 2, r: 6, hp: 32, speed: 60, standoff: 45, range: 120, cd: 1.5, attack: 'bullet', dmg: 2, proj: 160, vehicle: true, skittish: true },
   dog: { name: 'K9 unit', tier: 2, r: 2, hp: 15, speed: 70, standoff: 0, range: 0, cd: 0.9, attack: 'melee', dmg: 3, soft: true },
   swat: { name: 'SWAT van', tier: 3, r: 9, hp: 200, speed: 75, standoff: 90, range: 230, cd: 1.8, attack: 'burst', dmg: 3, proj: 240, vehicle: true, soft: true },
   roadblock: { name: 'Roadblock', tier: 3, r: 11, hp: 320, speed: 0, standoff: 0, range: 250, cd: 1.8, attack: 'bullet', dmg: 6, proj: 260, soft: true },

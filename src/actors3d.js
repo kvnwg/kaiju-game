@@ -181,9 +181,14 @@ export class Actors {
       if (u.type === 'heli') y = Math.max(20, k.r * 2.2) + Math.sin(t * 2 + u.age) * 2;
       else if (u.type === 'jet') y = Math.max(40, k.r * 3);
       else if (u.type === 'mech' || u.type === 'cop' || u.type === 'dog') y = Math.abs(Math.sin(u.age * 6)) * u.r * 0.15;
-      m.position.set(u.x, y, u.y);
-      m.rotation.y = -(u.type === 'heli' || u.type === 'tank' || u.type === 'artillery' || u.type === 'mech' || u.type === 'cop' || u.type === 'roadblock' ? u.aim : u.heading);
-      if (u.type === 'heli') m.rotation.z = Math.sin(t * 3 + u.age) * 0.08;
+      // Panic: trembling, running hunched away instead of facing the kaiju, cars fishtailing.
+      const st = u.stress || 0;
+      const shake = st > 0.2 ? Math.sin(t * 60 + u.id * 50) * u.r * 0.12 * st : 0;
+      m.position.set(u.x + shake, y, u.y - shake * 0.6);
+      const faceAim = st < 0.12 && (u.type === 'heli' || u.type === 'tank' || u.type === 'artillery' || u.type === 'mech' || u.type === 'cop' || u.type === 'roadblock');
+      m.rotation.y = -(faceAim ? u.aim : u.heading) + (u.type === 'police' ? Math.sin(t * 9 + u.age) * 0.18 * st : 0);
+      m.rotation.order = 'YXZ';
+      m.rotation.z = u.type === 'heli' ? Math.sin(t * 3 + u.age) * 0.08 : u.type === 'cop' ? -st * 0.35 : 0;
       const pulse = u.flash > 0 ? 1.25 : 1;
       m.scale.setScalar(pulse);
     }

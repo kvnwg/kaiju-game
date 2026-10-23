@@ -24,9 +24,9 @@ const FOV = 32;
 
 // Lighting keyframes: golden afternoon -> sunset -> neon night.
 const SKY = [
-  { sun: 0xffd9a8, sunI: 0.95, elev: 0.6, az: -0.9, hemiS: 0xd8e0f0, hemiG: 0x7a6a4e, hemiI: 0.5, fog: 0xf0d6b8, night: 0, bloom: 0.22, water: 0x3a8ac0 },
-  { sun: 0xff8a50, sunI: 0.85, elev: 0.26, az: -1.25, hemiS: 0x9a7ab8, hemiG: 0x4a3a4a, hemiI: 0.45, fog: 0xd08a98, night: 0.4, bloom: 0.55, water: 0x2a5a8a },
-  { sun: 0x8fa8ff, sunI: 0.32, elev: 0.95, az: 0.6, hemiS: 0x2a3770, hemiG: 0x0d0f1a, hemiI: 0.48, fog: 0x0c1230, night: 1, bloom: 0.75, water: 0x0e2a4a },
+  { sun: 0xffdcb0, sunI: 0.8, elev: 0.6, az: -0.9, hemiS: 0xe4eaf6, hemiG: 0xa0907a, hemiI: 0.68, fog: 0xf0d6b8, night: 0, bloom: 0.2, water: 0x3a8ac0 },
+  { sun: 0xff9a60, sunI: 0.8, elev: 0.3, az: -1.25, hemiS: 0xc0a8d8, hemiG: 0x7a6670, hemiI: 0.78, fog: 0xd99aa6, night: 0.35, bloom: 0.45, water: 0x3a6a9a },
+  { sun: 0xa8bcff, sunI: 0.38, elev: 0.95, az: 0.6, hemiS: 0x6a7cc0, hemiG: 0x3a3a52, hemiI: 0.78, fog: 0x18204a, night: 1, bloom: 0.65, water: 0x163a60 },
 ];
 
 function lerpKey(t) {
@@ -89,7 +89,9 @@ export function makeVoxelMaterial(uniforms, selfLit = 0) {
           totalEmissiveRadiance += baseCol * uNight * 1.45;
         }
         if (fE > 0.5) totalEmissiveRadiance += baseCol * mix(0.55, 1.75, uNight);
-        totalEmissiveRadiance += baseCol * uSelf;`);
+        // City glow at night: every surface keeps a little of its own colour so facades read.
+        totalEmissiveRadiance += baseCol * 0.2 * smoothstep(0.0, 0.7, uNight);
+        totalEmissiveRadiance += baseCol * uSelf * (0.35 + 0.65 * uNight);`);
     // Separate program per self-lit level.
     m.customProgramCacheKey = () => `voxel-${selfLit}`;
   };
@@ -165,7 +167,7 @@ export class Renderer3D {
     if (this.quality.bloom && THREE.EffectComposer && THREE.UnrealBloomPass) {
       const c = new THREE.EffectComposer(this.renderer);
       c.addPass(new THREE.RenderPass(this.scene, this.camera));
-      this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 0.86);
+      this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 0.93);
       c.addPass(this.bloom);
       this.tilt = this.quality.tilt ? new THREE.ShaderPass(TILT_SHIFT) : null;
       if (this.tilt) c.addPass(this.tilt);
@@ -438,7 +440,8 @@ export class Renderer3D {
     const gx = gv.getContext('2d');
     gx.fillStyle = '#000';
     gx.fillRect(0, 0, gv.width, gv.height);
-    gx.globalCompositeOperation = 'lighter';
+    // 'lighten' keeps the brightest pool instead of summing, so rows of lamps don't burn out to white.
+    gx.globalCompositeOperation = 'lighten';
     const pool = (x, y, r, color, a) => {
       const c = new THREE.Color(color);
       const grad = gx.createRadialGradient(x / G, y / G, 0, x / G, y / G, r / G);
@@ -449,7 +452,7 @@ export class Renderer3D {
       gx.fillStyle = grad;
       gx.fillRect((x - r) / G, (y - r) / G, (2 * r) / G, (2 * r) / G);
     };
-    for (const l of city.lights) pool(l.x, l.y, l.big ? 260 : Math.max(26, l.h * 3.2), l.color, l.big ? 0.5 : 0.75);
+    for (const l of city.lights) pool(l.x, l.y, l.big ? 220 : Math.max(26, l.h * 3.2), l.color, l.big ? 0.4 : 0.62);
     const neon = [0xff2bd6, 0x22e6ff, 0x7b5cff, 0xffd23f];
     for (const o of city.objects) {
       if (o.kind !== 'building' || o.walkable) continue;
@@ -458,6 +461,10 @@ export class Renderer3D {
     }
     const glow = new THREE.CanvasTexture(gv);
     this.groundMat = new THREE.MeshLambertMaterial({ map, emissiveMap: glow, emissive: 0xffffff, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 });
+    // Light pools tint the surface they fall on, so pale paving doesn't burn out to white.
+    this.groundMat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance *= 0.5 + diffuseColor.rgb * 0.5;');
+    };
     const geo = new THREE.PlaneGeometry(WORLD.width, WORLD.height);
     geo.rotateX(-Math.PI / 2);
     const ground = new THREE.Mesh(geo, this.groundMat);
@@ -1100,7 +1107,7 @@ export class Renderer3D {
       arr.sort((a, b) => a.d - b.d);
       for (const { l } of arr.slice(0, 5)) {
         const flick = l.ref.flicker ? 0.8 + Math.random() * 0.4 : 1;
-        cands.push({ x: l.x, y: l.h2 * 0.9, z: l.y, color: l.color, intensity: 1.0 * night * flick, radius: l.ref.big ? 400 : Math.max(30, l.h2 * 4), prio: 1 });
+        cands.push({ x: l.x, y: l.h2 * 0.9, z: l.y, color: l.color, intensity: (l.ref.big ? 0.8 : 0.55) * night * flick, radius: l.ref.big ? 400 : Math.max(30, l.h2 * 4), prio: 1 });
       }
     }
     cands.sort((a, b) => b.prio - a.prio);
@@ -1183,7 +1190,7 @@ export class Renderer3D {
     this.sun.intensity = key.sunI;
     this.scene.fog.color.copy(key.fog);
     this.scene.background.copy(key.fog);
-    this.groundMat.emissiveIntensity = key.night * 1.5;
+    this.groundMat.emissiveIntensity = key.night * 0.75;
     this.waterMat.color.copy(key.water);
     this.seaMat.color.copy(key.water);
     this.waterNormal.offset.set(this.t * 0.01, this.t * 0.006);

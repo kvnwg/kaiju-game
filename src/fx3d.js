@@ -96,6 +96,13 @@ class Particles {
   }
 }
 
+const AIM_LINES = 48;
+
+function norm2(x, y) {
+  const l = Math.hypot(x, y) || 1;
+  return { x: x / l, y: y / l };
+}
+
 function rgb(c) {
   return { r: ((c >> 16) & 255) / 255, g: ((c >> 8) & 255) / 255, b: (c & 255) / 255 };
 }
@@ -127,6 +134,16 @@ export class FX {
     this.glowMesh.frustumCulled = false;
     this.glowMesh.count = 0;
     scene.add(this.glowMesh);
+
+    // Sight lines for shooters winding up a shot.
+    this.aimGeo = new THREE.BufferGeometry();
+    this.aimPos = new Float32Array(AIM_LINES * 6);
+    this.aimCol = new Float32Array(AIM_LINES * 6);
+    this.aimGeo.setAttribute('position', new THREE.BufferAttribute(this.aimPos, 3).setUsage(THREE.DynamicDrawUsage));
+    this.aimGeo.setAttribute('color', new THREE.BufferAttribute(this.aimCol, 3).setUsage(THREE.DynamicDrawUsage));
+    this.aimLines = new THREE.LineSegments(this.aimGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.aimLines.frustumCulled = false;
+    scene.add(this.aimLines);
 
     this.ringPool = [];
     this.beamPool = [];
@@ -234,6 +251,7 @@ export class FX {
 
   // ---------------------------------------------------------------- per-frame
   update(dt, game) {
+    this.t = (this.t || 0) + dt;
     this.updateDebris(dt);
     this.dust.update(dt);
     this.glow.update(dt);
@@ -466,28 +484,88 @@ export class FX {
     const mesh = this.glowMesh;
     const m = this._m;
     let n = 0;
-    const put = (x, y, z, s, color, rotY = 0, len = 1) => {
+    const put = (x, y, z, s, color, rotY = 0, len = 1, tall = 1) => {
       if (n >= 600) return;
       this._e.set(0, rotY, 0);
       this._q.setFromEuler(this._e);
       this._v.set(x, y, z);
-      this._s.set(s * len, s, s);
+      this._s.set(s * len, s * tall, s);
       m.compose(this._v, this._q, this._s);
       mesh.setMatrixAt(n, m);
       this._c.setHex(color);
       mesh.setColorAt(n, this._c);
       n++;
     };
+    const k0 = game.kaiju;
     for (const p of game.projectiles) {
       const rot = -Math.atan2(p.vy, p.vx);
-      if (p.kind === 'bullet') put(p.x, p.h ?? 1, p.y, Math.max(0.3, p.r), 0xffe16b, rot, 4);
+      if (p.kind === 'bullet') {
+        // Hot tracer: a bright core, a long orange streak and a fading glow trail.
+        const sz = p.size || Math.max(0.3, p.r);
+        put(p.x, p.h ?? 1, p.y, sz, 0xfff6c0, rot, 2.2);
+        const sp = Math.hypot(p.vx, p.vy) || 1;
+        put(p.x - (p.vx / sp) * sz * 2.4, p.h ?? 1, p.y - (p.vy / sp) * sz * 2.4, sz * 0.7, 0xff8a2a, rot, 5);
+        if (Math.random() < 0.5) this.glow.add({ x: p.x, y: p.h ?? 1, z: p.y, vx: 0, vy: 0, vz: 0, size: sz * 3.2, grow: -0.5, life: 0.18, max: 0.18, a: 0.75, ...rgb(0xffb347) });
+      }
       else if (p.kind === 'rock') put(p.x, game.kaiju.r, p.y, p.r * 1.5, 0x8a7a66, rot, 1);
       else {
-        put(p.x, p.h ?? 2, p.y, Math.max(0.5, p.r * 1.5), 0xdddddd, rot, 2.5);
+        put(p.x, p.h ?? 2, p.y, p.size || Math.max(0.5, p.r * 1.5), 0xeeeeee, rot, 2.5);
+        put(p.x, p.h ?? 2, p.y, (p.size || p.r) * 0.6, 0xff4a2a, rot + Math.PI / 2, 1);
         if (Math.random() < 0.6) this.dust.add({ x: p.x, y: p.h ?? 2, z: p.y, vx: 0, vy: 0.5, vz: 0, size: p.r * 4, grow: 2, life: 0.6, max: 0.6, a: 0.4, drag: 2, ...rgb(0xaaaaaa) });
         if (Math.random() < 0.6) this.glow.add({ x: p.x, y: p.h ?? 2, z: p.y, vx: 0, vy: 0, vz: 0, size: p.r * 3, grow: 0, life: 0.15, max: 0.15, a: 0.9, ...rgb(0xff9a3c) });
       }
     }
+    // Shooters winding up: a blinking muzzle glint. Panicked cops: a shaking "!" and sweat.
+    const span = game.viewSpan();
+    let a = 0;
+    for (const u of game.units) {
+      if (u.dead) continue;
+      const head = u.r * (u.def.vehicle ? 1.7 : 3.2);
+      if (u.windup > 0 && u.windupMax > 0) {
+        const f = 1 - u.windup / u.windupMax;
+        const aim = norm2(k0.x - u.x, k0.y - u.y);
+        const mx = u.x + aim.x * u.r * 1.2;
+        const my = u.y + aim.y * u.r * 1.2;
+        const blink = Math.sin(f * 40) > -0.2 ? 1 : 0.4;
+        const dot = Math.max(0.35, span * 0.0045);
+        put(mx, u.flying ? u.r * 3 : u.r * 0.8, my, dot * 1.6 * (0.6 + f) * blink, 0xff3b2f, 0, 1);
+        // Dotted sight line that fills in from the shooter toward the kaiju as the shot charges.
+        const tx = k0.x - aim.x * k0.r * 0.8;
+        const ty = k0.y - aim.y * k0.r * 0.8;
+        const len = Math.hypot(tx - mx, ty - my);
+        const dots = Math.max(3, Math.min(14, Math.round(len / (dot * 5))));
+        const yy = u.flying ? u.r * 3 : u.r * 0.6;
+        for (let d = 1; d <= dots; d++) {
+          const q = d / dots;
+          if (q > f + 0.15) break;
+          put(mx + (tx - mx) * q, yy + (Math.min(k0.r * 0.8, 6 + k0.r * 0.4) - yy) * q, my + (ty - my) * q, dot * (0.7 + 0.5 * f), f > 0.7 ? 0xff3b2f : 0xff9a3c, 0, 1);
+        }
+        if (a < AIM_LINES) {
+          const y = u.flying ? u.r * 3 : u.r * 0.6;
+          const ky = Math.min(k0.r * 0.8, 6 + k0.r * 0.4);
+          const i = a * 6;
+          this.aimPos.set([mx, y, my, k0.x, ky, k0.y], i);
+          const c = 0.25 + 0.75 * f;
+          this.aimCol.set([c, c * 0.25, c * 0.15, c * 0.6, c * 0.1, c * 0.05], i);
+          a++;
+        }
+      }
+      if (u.stress > 0.2) {
+        const s = Math.max(u.r * 0.5, span * 0.013);
+        const shake = Math.sin(this.t * 55 + u.id * 100) * s * 0.25 * u.stress;
+        const color = u.stress > 0.6 ? 0xff3b2f : 0xffd23f;
+        const y = head + s * 1.6;
+        put(u.x + shake, y + s * 1.1, u.y, s * 0.55, color, 0, 1, 2.6);
+        put(u.x + shake, y - s * 0.6, u.y, s * 0.55, color, 0, 1, 1);
+        if (Math.random() < u.stress * 0.25) {
+          this.bits.add({ x: u.x, y: head, z: u.y, vx: (Math.random() - 0.5) * s * 6, vy: s * 5, vz: (Math.random() - 0.5) * s * 6, lift: -s * 18, drag: 0.5, size: s * 0.45, grow: 0, life: 0.45, max: 0.45, a: 0.9, ...rgb(0x9fdcff) });
+        }
+      }
+    }
+    this.aimPos.fill(0, a * 6);
+    this.aimGeo.attributes.position.needsUpdate = true;
+    this.aimGeo.attributes.color.needsUpdate = true;
+    this.aimGeo.setDrawRange(0, a * 2);
     const k = game.kaiju;
     for (const o of game.fx.orbs) put(o.x, k.r * 0.8 + Math.sin(o.t * 10) * k.r * 0.2, o.y, Math.max(0.35, k.r * 0.12), o.color, o.t * 5, 1);
     for (const f of game.fires) {

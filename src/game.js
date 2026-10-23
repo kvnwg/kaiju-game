@@ -8,6 +8,9 @@ import { createRng } from './rng.js';
 import { PERSON_VARIANTS } from './models.js';
 
 const CITY_SEED = 1337;
+// Aim time before a projectile leaves the barrel (seconds); shells, artillery and lasers
+// already telegraph with ground markers.
+const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6 };
 let cachedCity = null;
 
 export function distToRect(px, py, o) {
@@ -184,6 +187,10 @@ export class Game {
   }
 
   // 0 = golden afternoon, 1 = neon night. Follows run progress so the boss fight is at night.
+  kaijuSpeed() {
+    return this.stage.speed * this.def.speedMult;
+  }
+
   get dusk() {
     const k = this.kaiju;
     const prog = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / this.stage.biomassToNext);
@@ -290,11 +297,11 @@ export class Game {
   }
 
   // Drive along the road network: toward the kaiju until in firing distance, away when scared.
-  driveUnit(u, dt, dist, want) {
+  driveUnit(u, dt, dist, want, flee = false, speedMul = 1) {
     const k = this.kaiju;
     const r = u.road;
     const len = Math.hypot(r.x1 - r.x0, r.y1 - r.y0) || 1;
-    const away = u.fear > 0 || dist < want * 0.75;
+    const away = flee || u.fear > 0 || dist < want * 0.75;
     let move = 0;
     if (away) {
       move = Math.hypot(r.x1 - k.x, r.y1 - k.y) > Math.hypot(r.x0 - k.x, r.y0 - k.y) ? 1 : -1;
@@ -307,7 +314,7 @@ export class Game {
     }
     if (move) {
       u.dir = move;
-      u.t += (move * u.def.speed * (u.fear > 0 ? 1.3 : 1) * dt) / len;
+      u.t += (move * u.def.speed * (u.fear > 0 ? 1.3 : 1) * speedMul * dt) / len;
       if (u.t > 1 || u.t < 0) {
         const nx = u.t > 1 ? r.x1 : r.x0;
         const ny = u.t > 1 ? r.y1 : r.y0;
@@ -1242,6 +1249,7 @@ export class Game {
       hp: def.hp * this.diff.enemyHp, maxHp: def.hp * this.diff.enemyHp,
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
       heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
+      stress: 0, windup: 0, windupMax: 0,
     };
     // Ground vehicles and roadblocks live on the road network.
     if ((def.vehicle && !def.flying) || type === 'roadblock') {
@@ -1296,10 +1304,24 @@ export class Game {
         u.dead = true; // left far behind; the director sends fresh units
         continue;
       }
+      // Cops and patrol cars lose their nerve up close: they turn and run, and the closer the
+      // kaiju gets the more panic slows them down, so a determined chase catches them.
+      let flee = false;
+      let speedMul = 1;
+      if (def.skittish) {
+        const want = k.r + def.standoff + u.r;
+        const target = dist < want * 1.05 ? Math.min(1, (want * 1.05 - dist) / Math.max(1, want * 1.05 - k.r - u.r)) : 0;
+        u.stress += (target - u.stress) * Math.min(1, dt * (target > u.stress ? 6 : 1.5));
+        if (u.stress > 0.12) {
+          flee = true;
+          speedMul = 1.2 - 0.85 * u.stress;
+          u.windup = 0;
+        }
+      }
       let mx = 0;
       let my = 0;
       if (u.road) {
-        if (def.speed > 0) this.driveUnit(u, dt, dist, k.r + def.standoff + u.r);
+        if (def.speed > 0) this.driveUnit(u, dt, dist, k.r + def.standoff + u.r, flee, speedMul);
         if (u.fear > 0) {
           u.fear -= dt;
           continue;
@@ -1308,6 +1330,9 @@ export class Game {
         u.fear -= dt;
         mx = -to.x;
         my = -to.y;
+      } else if (flee) {
+        mx = -to.x - to.y * u.strafe * 0.3;
+        my = -to.y + to.x * u.strafe * 0.3;
       } else if (def.speed > 0) {
         const want = k.r + def.standoff + u.r;
         if (dist > want + want * 0.1) {
@@ -1324,7 +1349,7 @@ export class Game {
       }
       const ml = Math.hypot(mx, my);
       if (ml > 0.01) {
-        const sp = def.speed * (u.fear > 0 ? 1.3 : 1);
+        const sp = def.speed * (u.fear > 0 ? 1.3 : 1) * speedMul;
         const nx = u.x + (mx / ml) * sp * dt * Math.min(1, ml);
         const ny = u.y + (my / ml) * sp * dt * Math.min(1, ml);
         // Mechs trample anything up to house size; everything else walks around buildings.
@@ -1357,9 +1382,17 @@ export class Game {
           this.takeDamage(def.dmg, 'bullet');
           u.cd = def.cd;
         }
-      } else if (u.cd <= 0 && dist - k.r <= def.range) {
-        this.unitFire(u, dist);
+      } else if (u.windup > 0) {
+        // Telegraphed shot: the shooter aims (shown as a sight line) before the round leaves.
+        u.windup -= dt;
+        if (u.windup <= 0) this.unitFire(u, dist);
+      } else if (u.cd <= 0 && dist - k.r <= def.range && u.stress < 0.12) {
         u.cd = def.cd * this.rng.range(0.85, 1.15);
+        const w = WINDUP[def.attack];
+        if (w) {
+          u.windup = w;
+          u.windupMax = w;
+        } else this.unitFire(u, dist);
       }
     }
     this.units = this.units.filter((u) => !u.dead);
@@ -1399,8 +1432,13 @@ export class Game {
       const s = Math.sin(angleOff);
       const vx = aim.x * c - aim.y * s;
       const vy = aim.x * s + aim.y * c;
-      const sp = def.proj;
-      this.projectiles.push({ kind, x: u.x, y: u.y, vx: vx * sp, vy: vy * sp, r: Math.max(0.4, u.r * 0.1), dmg: def.dmg, type, life: (def.range + k.r * 2) / sp + 0.4, homing: kind === 'missile', h: u.flying ? u.r * 3 : u.r * 0.6 });
+      // Never faster than the kaiju can sidestep, and drawn big enough to read at any zoom.
+      const sp = Math.min(def.proj, this.kaijuSpeed() * 2.2);
+      const r = Math.max(0.4, u.r * 0.1);
+      this.projectiles.push({
+        kind, x: u.x, y: u.y, vx: vx * sp, vy: vy * sp, r, size: Math.max(r, k.r * (kind === 'bullet' ? 0.2 : 0.26)),
+        dmg: def.dmg, type, life: (def.range + k.r * 3) / sp + 0.4, age: 0, homing: kind === 'missile', h: u.flying ? u.r * 3 : u.r * 0.6,
+      });
     };
     switch (def.attack) {
       case 'bullet':
@@ -1636,13 +1674,14 @@ export class Game {
           }
         } else p.life = Math.min(p.life, 0.3);
       } else {
-        if (p.homing) {
+        p.age += dt;
+        if (p.homing && p.age < 0.8) {
           const d = norm(k.x - p.x, k.y - p.y);
           const sp = Math.hypot(p.vx, p.vy);
           p.vx += (d.x * sp - p.vx) * Math.min(1, dt * 0.6);
           p.vy += (d.y * sp - p.vy) * Math.min(1, dt * 0.6);
         }
-        if (Math.hypot(k.x - p.x, k.y - p.y) < k.r + p.r) {
+        if (Math.hypot(k.x - p.x, k.y - p.y) < k.r * 0.8 + p.r) {
           this.takeDamage(p.dmg, p.type);
           if (p.kind !== 'bullet') this.spawnExplosion(p.x, p.y, k.r * 0.5);
           else this.fxEvent({ t: 'sparks', x: p.x, y: p.y, h: k.r, color: 0xffe16b });
