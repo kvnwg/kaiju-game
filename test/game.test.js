@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game } from '../src/game.js';
+import { Game, distToRect } from '../src/game.js';
 import { STAGES, MAX_STAGE } from '../src/config.js';
-import { simulate } from './bot.js';
+import { simulate, botStep } from './bot.js';
 
 test('a human-sized kaiju starts among people and grows by eating them', () => {
   const g = new Game({ seed: 5 });
@@ -113,6 +113,27 @@ test('chain collapses drop biomass only with the Demolition Crew set', () => {
   for (const id of ['dominoEffect', 'gasMain', 'debrisToss']) g.held.set(id, 1);
   g.destroyObject(b, { x: 1, y: 0 }, 'chain');
   assert.ok(g.stats.biomass > bio0);
+});
+
+test('military vehicles and soldiers never drive or walk through intact buildings', () => {
+  const g = new Game({ seed: 3 });
+  const inside = (u) => g.grid.query(u.x - u.r, u.y - u.r, u.x + u.r, u.y + u.r)
+    .some((o) => o.kind === 'building' && o.state === 'intact' && !o.walkable && distToRect(u.x, u.y, o) < u.r * 0.5);
+  let samples = 0;
+  for (let i = 0; i < 30 * 300; i++) {
+    botStep(g);
+    g.update(1 / 30);
+    g.drainEvents();
+    g.drainVfx();
+    if (i % 15) continue;
+    for (const u of g.units) {
+      if (u.flying || u.dead) continue;
+      samples++;
+      assert.ok(!inside(u), `${u.type} inside a building at ${Math.round(u.x)},${Math.round(u.y)}`);
+      if (u.def.vehicle) assert.ok(u.road, `${u.type} is on the road network`);
+    }
+  }
+  assert.ok(samples > 500);
 });
 
 test('autopiloted runs grow through all six stages, fight the boss and mostly win', () => {

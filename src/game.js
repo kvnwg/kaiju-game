@@ -252,11 +252,88 @@ export class Game {
     return this.city.cells[r * WORLD.cols + c];
   }
 
-  blockedAt(x, y, pad = 0) {
+  blockedAt(x, y, pad = 0, minTier = 0) {
     for (const o of this.grid.query(x - pad, y - pad, x + pad, y + pad)) {
-      if (o.state === 'intact' && o.structure && !o.walkable && distToRect(x, y, o) <= pad) return true;
+      if (o.state === 'intact' && o.structure && !o.walkable && o.tier >= minTier && distToRect(x, y, o) <= pad) return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------- road driving for military vehicles
+  nearestRoad(x, y) {
+    let best = null;
+    let bestD = Infinity;
+    let bestT = 0;
+    for (const r of this.city.roads) {
+      const vx = r.x1 - r.x0;
+      const vy = r.y1 - r.y0;
+      const t = Math.max(0, Math.min(1, ((x - r.x0) * vx + (y - r.y0) * vy) / (vx * vx + vy * vy || 1)));
+      const px = r.x0 + vx * t;
+      const py = r.y0 + vy * t;
+      const d = Math.hypot(x - px, y - py);
+      if (d < bestD && !isWater(px, py)) {
+        bestD = d;
+        best = r;
+        bestT = t;
+      }
+    }
+    return best ? { road: best, t: bestT } : null;
+  }
+
+  placeOnRoad(u) {
+    const r = u.road;
+    const n = norm((r.x1 - r.x0) * u.dir, (r.y1 - r.y0) * u.dir);
+    const lane = u.type === 'roadblock' ? 0 : 12;
+    u.x = r.x0 + (r.x1 - r.x0) * u.t - n.y * lane;
+    u.y = r.y0 + (r.y1 - r.y0) * u.t + n.x * lane;
+    u.heading = u.type === 'roadblock' ? Math.atan2(n.x, -n.y) : Math.atan2(n.y, n.x);
+  }
+
+  // Drive along the road network: toward the kaiju until in firing distance, away when scared.
+  driveUnit(u, dt, dist, want) {
+    const k = this.kaiju;
+    const r = u.road;
+    const len = Math.hypot(r.x1 - r.x0, r.y1 - r.y0) || 1;
+    const away = u.fear > 0 || dist < want * 0.75;
+    let move = 0;
+    if (away) {
+      move = Math.hypot(r.x1 - k.x, r.y1 - k.y) > Math.hypot(r.x0 - k.x, r.y0 - k.y) ? 1 : -1;
+    } else if (dist > want * 1.1) {
+      const vx = r.x1 - r.x0;
+      const vy = r.y1 - r.y0;
+      const tp = Math.max(0, Math.min(1, ((k.x - r.x0) * vx + (k.y - r.y0) * vy) / (len * len)));
+      if (Math.abs(tp - u.t) * len > 4) move = Math.sign(tp - u.t);
+      else if (tp < 0.01 || tp > 0.99) move = tp < 0.5 ? -1 : 1;
+    }
+    if (move) {
+      u.dir = move;
+      u.t += (move * u.def.speed * (u.fear > 0 ? 1.3 : 1) * dt) / len;
+      if (u.t > 1 || u.t < 0) {
+        const nx = u.t > 1 ? r.x1 : r.x0;
+        const ny = u.t > 1 ? r.y1 : r.y0;
+        const { graph, key } = this.city.roadGraph;
+        const options = (graph.get(key(nx, ny)) || []).filter((o) => o !== r && !isWater((o.x0 + o.x1) / 2, (o.y0 + o.y1) / 2));
+        if (!options.length) u.t = Math.max(0, Math.min(1, u.t));
+        else {
+          let pick = null;
+          let score = Infinity;
+          for (const o of options) {
+            const atStart = Math.round(o.x0) === Math.round(nx) && Math.round(o.y0) === Math.round(ny);
+            const fx = atStart ? o.x1 : o.x0;
+            const fy = atStart ? o.y1 : o.y0;
+            const sc = (away ? -1 : 1) * Math.hypot(fx - k.x, fy - k.y) + this.rng.range(0, 40);
+            if (sc < score) {
+              score = sc;
+              pick = { o, atStart };
+            }
+          }
+          u.road = pick.o;
+          u.t = pick.atStart ? 0 : 1;
+          u.dir = pick.atStart ? 1 : -1;
+        }
+      }
+    }
+    this.placeOnRoad(u);
   }
 
   // The nearest thing worth eating at this size: guides the player when the area is cleared.
@@ -1121,7 +1198,13 @@ export class Game {
         const type = this.rng.weighted(esc.weights);
         const count = type === 'infantry' ? 2 : type === 'cop' ? 2 : 1;
         const pos = this.spawnPoint(type);
-        for (let i = 0; i < count; i++) this.spawnUnit(type, pos.x + i * ENEMIES[type].r * 2.5, pos.y + (i % 2) * ENEMIES[type].r * 2.5);
+        const r = ENEMIES[type].r;
+        for (let i = 0; i < count; i++) {
+          const x = pos.x + i * r * 2.5;
+          const y = pos.y + (i % 2) * r * 2.5;
+          const ok = !isWater(x, y) && !this.blockedAt(x, y, r);
+          this.spawnUnit(type, ok ? x : pos.x, ok ? y : pos.y);
+        }
       }
     }
     if (esc.jetEvery) {
@@ -1144,7 +1227,12 @@ export class Game {
       const y = k.y + Math.sin(a) * dist;
       if (x > 20 && x < WORLD.width - 20 && y > 20 && y < WORLD.height - 20 && (def.flying || (!isWater(x, y) && !this.blockedAt(x, y, def.r)))) return { x, y };
     }
-    return { x: Math.max(WORLD.seaWidth + 20, Math.min(WORLD.width - 20, k.x + dist)), y: Math.max(20, Math.min(WORLD.height - 20, k.y)) };
+    const x = Math.max(WORLD.seaWidth + 20, Math.min(WORLD.width - 20, k.x + dist));
+    const y = Math.max(20, Math.min(WORLD.height - 20, k.y));
+    if (def.flying) return { x, y };
+    // Fall back to the nearest street so ground units never appear inside a building.
+    const nr = this.nearestRoad(x, y);
+    return nr ? { x: nr.road.x0 + (nr.road.x1 - nr.road.x0) * nr.t, y: nr.road.y0 + (nr.road.y1 - nr.road.y0) * nr.t } : { x, y };
   }
 
   spawnUnit(type, x, y) {
@@ -1155,6 +1243,16 @@ export class Game {
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
       heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
     };
+    // Ground vehicles and roadblocks live on the road network.
+    if ((def.vehicle && !def.flying) || type === 'roadblock') {
+      const nr = this.nearestRoad(x, y);
+      if (nr) {
+        u.road = nr.road;
+        u.t = nr.t;
+        u.dir = 1;
+        this.placeOnRoad(u);
+      }
+    }
     this.units.push(u);
     return u;
   }
@@ -1200,7 +1298,13 @@ export class Game {
       }
       let mx = 0;
       let my = 0;
-      if (u.fear > 0) {
+      if (u.road) {
+        if (def.speed > 0) this.driveUnit(u, dt, dist, k.r + def.standoff + u.r);
+        if (u.fear > 0) {
+          u.fear -= dt;
+          continue;
+        }
+      } else if (u.fear > 0) {
         u.fear -= dt;
         mx = -to.x;
         my = -to.y;
@@ -1223,7 +1327,22 @@ export class Game {
         const sp = def.speed * (u.fear > 0 ? 1.3 : 1);
         const nx = u.x + (mx / ml) * sp * dt * Math.min(1, ml);
         const ny = u.y + (my / ml) * sp * dt * Math.min(1, ml);
-        if (u.flying || (!isWater(nx, ny) && !(u.tier >= 3 ? false : this.blockedAt(nx, ny, u.r * 0.5)))) {
+        // Mechs trample anything up to house size; everything else walks around buildings.
+        const minTier = u.type === 'mech' ? 4 : 0;
+        if (u.type === 'mech') {
+          for (const o of this.objectsNear(nx, ny, u.r * 0.8)) {
+            if (o.structure && !o.walkable && !o.landmark && o.tier < 4) this.destroyObject(o, norm(o.x - u.x, o.y - u.y), 'boss');
+          }
+        }
+        const pad = u.r * 0.6;
+        const free = (x, y) => !isWater(x, y) && !this.blockedAt(x, y, pad, minTier);
+        if (u.flying || free(nx, ny)) {
+          u.x = nx;
+          u.y = ny;
+        } else if (free(nx, u.y)) u.x = nx;
+        else if (free(u.x, ny)) u.y = ny;
+        else if (!free(u.x, u.y)) {
+          // Already stuck inside something (e.g. knocked back): let it walk out.
           u.x = nx;
           u.y = ny;
         }
