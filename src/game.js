@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP,
+  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -11,7 +11,7 @@ import { PERSON_VARIANTS } from './models.js';
 
 // Aim time before a projectile leaves the barrel (seconds); shells, artillery and lasers
 // already telegraph with ground markers.
-const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6 };
+const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6, net: 0.8, volley: 1 };
 const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
 
 export { distToRect, distToSegment };
@@ -49,7 +49,10 @@ export class Game {
       biomass: 0, facing: { x: -1, y: 0 }, vx: 0, vy: 0, moving: false, stillTime: 0,
       attackCd: 0.5, attackCount: 0, shield: 0, hitFlash: 0, invuln: 0, trailT: 0, stompT: 0,
       walkPhase: 0, lastAttack: null, inWater: false, contactT: 0, hopT: 0, hopMax: 0.5, hopH: 0, z: 0,
+      healRecent: 0, sedated: 0, netted: 0,
     };
+    this.threat = 0; // 0-100, see THREAT
+    this.threatIdle = 0;
     this.input = { x: 0, y: 0 };
     this.held = new Map();
     this.units = [];
@@ -83,7 +86,7 @@ export class Game {
     this.rerolls = 3; // per run, Vampire Survivors style
     this.reviveAvailable = true;
     this.adRerollAvailable = true;
-    this.director = { spawnT: ESCALATION[1].firstDelay, jetT: 4, crowdT: 0 };
+    this.director = { spawnT: ESCALATION[1].firstDelay, jetT: 4, crowdT: 0, waveT: Infinity, eliteT: Infinity };
     this.events = [];
     this.results = null;
     this.stats = {
@@ -357,6 +360,7 @@ export class Game {
     if (this.pendingPicks > 0) this.openPick();
     if (this.state !== 'playing') return;
     if (this.has('regen')) this.heal(0.004 * this.level('regen') * dt);
+    this.updateThreat(dt);
     this.updateKaiju(dt);
     this.updateAugments(dt);
     this.updateDirector(dt);
@@ -438,6 +442,7 @@ export class Game {
     const mag = Math.hypot(this.input.x, this.input.y);
     k.moving = mag > 0.05;
     let speed = this.stage.speed * this.def.speedMult * (1 + 0.08 * this.level('longLegs'));
+    if (k.netted > 0) speed *= 0.45;
     k.inWater = isWater(k.x, k.y) && !this.onDeck(k);
     if (k.inWater) speed *= 0.6;
     k.vx = this.input.x * speed;
@@ -667,9 +672,36 @@ export class Game {
     if (hitsBoss && b && !b.dead && b.state !== 'enter' && Math.hypot(b.x - x, b.y - y) < radius + b.r) this.damageBoss(amount);
   }
 
+  // Healing falls off the more you have healed lately, and sedative rounds stop it outright.
   heal(fraction) {
     const k = this.kaiju;
-    k.hp = Math.min(k.maxHp, k.hp + k.maxHp * fraction);
+    if (k.sedated > 0 || k.hp >= k.maxHp) return;
+    const f = fraction / (1 + k.healRecent * HEALING.falloff);
+    k.healRecent += f;
+    k.hp = Math.min(k.maxHp, k.hp + k.maxHp * f);
+  }
+
+  // ---------------------------------------------------------------- pressure
+  addThreat(n) {
+    this.threat = Math.min(100, this.threat + n);
+    this.threatIdle = 0;
+  }
+
+  updateThreat(dt) {
+    const k = this.kaiju;
+    this.threatIdle += dt;
+    const drain = THREAT.drain + this.threat * 0.03 + (this.threatIdle > THREAT.idle ? THREAT.decay : 0);
+    this.threat = Math.max(0, this.threat - drain * dt);
+    k.healRecent = Math.max(0, k.healRecent - HEALING.recover * dt);
+    k.sedated = Math.max(0, k.sedated - dt);
+    k.netted = Math.max(0, k.netted - dt);
+  }
+
+  // How tough the military is right now: every level-up hardens new units.
+  enemyScale() {
+    // The very first session ramps up half as fast, so a new player gets to see the boss.
+    const l = (this.kaiju.level - 1) * (this.firstRun ? 0.5 : 1);
+    return { hp: 1 + ENEMY_SCALING.hpPerLevel * l, dmg: 1 + ENEMY_SCALING.dmgPerLevel * l };
   }
 
   addShield(fraction) {
@@ -746,6 +778,8 @@ export class Game {
     k.shield = Math.min(k.shield * 2, k.maxHp * 0.3);
     this.stats.stageTimes[k.stage] = this.time;
     this.director.spawnT = 2;
+    if (THREAT.waveEvery[k.stage]) this.director.waveT = THREAT.firstWave;
+    if (ELITES[k.stage]) this.director.eliteT = ELITE.first;
     this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: s.radius * 2.5, life: 0.8, max: 0.8, color: 0x9cff7a, width: s.radius * 0.25 });
     this.shake = Math.max(this.shake, 0.5);
     this.emit('grow', { stage: k.stage, name: s.name, size: s.size });
@@ -872,6 +906,7 @@ export class Game {
 
     // Every kill thumps the camera a little; the bigger it is next to you, the harder.
     const rel = o.tier - k.stage;
+    if (cause !== 'boss') this.addThreat(o.landmark ? 40 : o.structure ? (rel >= 0 ? 4 : rel === -1 ? 1.5 : 0.3) : rel >= 0 ? 0.8 : 0.1);
     const thump = o.landmark ? 1 : o.structure ? (rel >= -1 ? 0.32 + (rel + 1) * 0.16 : 0.2) : rel >= 0 ? 0.16 : 0.1;
     this.shake = Math.max(this.shake, Math.min(1, thump));
     if (o.landmark) this.impact(0.2, 1);
@@ -1057,6 +1092,7 @@ export class Game {
     p.y0 = p.y;
     p.chomped = false;
     this.stats.people++;
+    this.addThreat(0.4);
     const loot = lootFor(1, k.stage, 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
@@ -1147,6 +1183,7 @@ export class Game {
     if (!c.silent) this.shake = Math.max(this.shake, k.stage <= 2 ? 0.2 : 0.1);
     if (k.stage <= 2) this.impact(0.04, 0.2);
     this.bumpCombo();
+    this.addThreat(k.stage <= 2 ? 1 : 0.3);
     const loot = lootFor(2, k.stage, 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
@@ -1244,30 +1281,100 @@ export class Game {
     const k = this.kaiju;
     const esc = ESCALATION[k.stage];
     const dir = this.director;
-    dir.spawnT -= dt;
+    const th = this.threat / 100;
+    // Threat speeds up reinforcements and lets more of them on the field at once.
+    dir.spawnT -= dt * (1 + th * 1.2);
     const alive = this.units.filter((u) => !u.dead && u.type !== 'jet').length;
     if (dir.spawnT <= 0) {
       dir.spawnT = esc.interval * this.rng.range(0.7, 1.3);
-      if (alive < esc.maxAlive) {
-        const type = this.rng.weighted(esc.weights);
-        const count = type === 'infantry' ? 2 : type === 'cop' ? 2 : 1;
-        const pos = this.spawnPoint(type);
-        const r = ENEMIES[type].r;
-        for (let i = 0; i < count; i++) {
-          const x = pos.x + i * r * 2.5;
-          const y = pos.y + (i % 2) * r * 2.5;
-          const ok = !isWater(x, y) && !this.blockedAt(x, y, r);
-          this.spawnUnit(type, ok ? x : pos.x, ok ? y : pos.y);
-        }
-      }
+      if (alive < Math.round(esc.maxAlive * (1 + th * 0.8))) this.spawnGroup(this.rng.weighted(esc.weights));
     }
     if (esc.jetEvery) {
-      dir.jetT -= dt;
+      dir.jetT -= dt * (1 + th);
       if (dir.jetT <= 0) {
         dir.jetT = esc.jetEvery * this.rng.range(0.8, 1.2);
         this.spawnJet();
       }
     }
+    // Strike waves: announced, then a coordinated push from several sides.
+    if (THREAT.waveEvery[k.stage] && !this.boss) {
+      dir.waveT -= dt * (1 + th * 1.5);
+      if (dir.waveT <= 0) {
+        dir.waveT = THREAT.waveEvery[k.stage] * this.rng.range(0.85, 1.15);
+        this.emit('wave', { stage: k.stage });
+        this.schedule(2.5, () => this.spawnWave());
+      }
+    }
+    if (ELITES[k.stage] && !this.boss) {
+      dir.eliteT -= dt;
+      if (dir.eliteT <= 0 && !this.units.some((u) => u.elite && !u.dead)) {
+        dir.eliteT = ELITE.every;
+        this.spawnElite();
+      }
+    }
+  }
+
+  spawnGroup(type, pos = this.spawnPoint(type)) {
+    const count = type === 'infantry' ? 2 : type === 'cop' ? 2 : 1;
+    const r = ENEMIES[type].r;
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const x = pos.x + i * r * 2.5;
+      const y = pos.y + (i % 2) * r * 2.5;
+      const ok = !isWater(x, y) && !this.blockedAt(x, y, r);
+      out.push(this.spawnUnit(type, ok ? x : pos.x, ok ? y : pos.y));
+    }
+    return out;
+  }
+
+  // A strike wave: units close in from three sides, with an artillery barrage onto the path
+  // ahead once the kaiju is big and air strikes at the top sizes.
+  spawnWave() {
+    if (this.state !== 'playing' && this.state !== 'picking') return;
+    const k = this.kaiju;
+    const esc = ESCALATION[k.stage];
+    const th = this.threat / 100;
+    const n = 2 + k.stage + Math.round(th * 4);
+    const span = this.viewSpan();
+    const a0 = this.rng.range(0, Math.PI * 2);
+    for (let i = 0; i < n; i++) {
+      const type = this.rng.weighted(esc.weights);
+      const a = a0 + (i % 3) * 2.1 + this.rng.range(-0.3, 0.3);
+      const d = Math.max(span * 0.6, ENEMIES[type].standoff + k.r * 3);
+      let pos = { x: k.x + Math.cos(a) * d, y: k.y + Math.sin(a) * d };
+      if (!ENEMIES[type].flying && (isWater(pos.x, pos.y) || this.blockedAt(pos.x, pos.y, ENEMIES[type].r))) {
+        const nr = this.nearestRoad(pos.x, pos.y);
+        if (nr) pos = { x: nr.road.x0 + (nr.road.x1 - nr.road.x0) * nr.t, y: nr.road.y0 + (nr.road.y1 - nr.road.y0) * nr.t };
+      }
+      this.spawnGroup(type, pos);
+    }
+    if (k.stage >= 4) {
+      const lead = k.moving ? 1.4 : 0.4;
+      const dmg = (k.stage >= 5 ? 90 : 36) * this.enemyScale().dmg;
+      for (let i = 0; i < 4 + k.stage; i++) {
+        const t = i / (3 + k.stage);
+        this.hazards.push({
+          kind: 'circle', x: k.x + k.vx * lead * t + this.rng.range(-1, 1) * k.r * 2.5, y: k.y + k.vy * lead * t + this.rng.range(-1, 1) * k.r * 2.5,
+          r: k.r * 1.1, t: 0, delay: 1.4 + t * 1.6, dmg, type: 'shell',
+        });
+      }
+    }
+    if (k.stage >= 5) for (let i = 0; i < 2; i++) this.schedule(0.6 + i * 1.2, () => this.spawnJet());
+  }
+
+  spawnElite() {
+    const k = this.kaiju;
+    const e = ELITES[k.stage];
+    const u = this.spawnGroup(e.type)[0];
+    u.elite = true;
+    u.name = e.name;
+    u.hp *= ELITE.hp;
+    u.maxHp = u.hp;
+    u.dmgMul *= ELITE.dmg;
+    u.r *= ELITE.size;
+    u.tier = Math.max(u.tier, k.stage);
+    this.emit('elite', { name: e.name });
+    return u;
   }
 
   spawnPoint(type) {
@@ -1293,7 +1400,7 @@ export class Game {
     const def = ENEMIES[type];
     const u = {
       isUnit: true, type, def, x, y, r: def.r, tier: def.tier,
-      hp: def.hp * this.diff.enemyHp, maxHp: def.hp * this.diff.enemyHp,
+      hp: def.hp * this.diff.enemyHp * this.enemyScale().hp, maxHp: def.hp * this.diff.enemyHp * this.enemyScale().hp, dmgMul: this.enemyScale().dmg,
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
       heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
       stress: 0, windup: 0, windupMax: 0,
@@ -1424,7 +1531,7 @@ export class Game {
       u.cd -= dt;
       if (def.attack === 'melee') {
         if (u.cd <= 0 && dist < k.r + u.r + k.r * 0.3) {
-          this.takeDamage(def.dmg, 'bullet');
+          this.takeDamage(def.dmg * u.dmgMul, 'bullet');
           u.cd = def.cd;
         }
       } else if (u.windup > 0) {
@@ -1457,7 +1564,7 @@ export class Game {
       u.struck = true;
       const perp = Math.abs((k.x - u.x) * -u.dir.y + (k.y - u.y) * u.dir.x);
       if (perp < u.width / 2 + k.r) {
-        this.takeDamage(u.def.dmg, 'bullet');
+        this.takeDamage(u.def.dmg * u.dmgMul, 'bullet');
         this.spawnExplosion(k.x - u.dir.y * k.r * 0.3, k.y + u.dir.x * k.r * 0.3, k.r * 0.6);
       }
     }
@@ -1473,17 +1580,19 @@ export class Game {
     const tx = k.x + k.vx * lead * 0.5;
     const ty = k.y + k.vy * lead * 0.5;
     const aim = norm(tx - u.x, ty - u.y);
-    const shoot = (angleOff, kind, type) => {
+    const dmg = def.dmg * u.dmgMul;
+    const shoot = (angleOff, kind, type, extra = {}) => {
       const c = Math.cos(angleOff);
       const s = Math.sin(angleOff);
       const vx = aim.x * c - aim.y * s;
       const vy = aim.x * s + aim.y * c;
       // Never faster than the kaiju can sidestep, and drawn big enough to read at any zoom.
-      const sp = Math.min(def.proj, this.kaijuSpeed() * 2.2);
-      const r = Math.max(0.4, u.r * 0.1);
+      const sp = Math.min(def.proj, this.kaijuSpeed() * (kind === 'net' ? 1.5 : 2.2));
+      const r = kind === 'net' ? Math.max(1.5, k.r * 0.35) : Math.max(0.4, u.r * 0.1);
       this.projectiles.push({
         kind, x: u.x, y: u.y, vx: vx * sp, vy: vy * sp, r, size: Math.max(r, k.r * (kind === 'bullet' ? 0.2 : 0.26)),
-        dmg: def.dmg, type, life: (def.range + k.r * 3) / sp + 0.4, age: 0, homing: kind === 'missile', h: u.flying ? u.r * 3 : u.r * 0.6,
+        dmg, type, life: (def.range + k.r * 3) / sp + 0.4, age: 0, homing: kind === 'missile', h: u.flying ? u.r * 3 : u.r * 0.6,
+        sedate: def.sedate || 0, ...extra,
       });
     };
     switch (def.attack) {
@@ -1500,19 +1609,39 @@ export class Game {
         shoot(-0.25, 'missile', 'explosive');
         shoot(0.25, 'missile', 'explosive');
         break;
+      case 'net':
+        shoot(0, 'net', 'bullet', { net: 2.6 });
+        break;
+      case 'volley':
+        for (let i = 0; i < 6; i++) shoot(-0.5 + i * 0.2, 'missile', 'explosive');
+        break;
       case 'shell':
-        this.hazards.push({ kind: 'circle', x: tx + this.rng.range(-1, 1) * def.aoe * 0.4, y: ty + this.rng.range(-1, 1) * def.aoe * 0.4, r: def.aoe, t: 0, delay: 1.1, dmg: def.dmg, type: 'shell', from: { x: u.x, y: u.y } });
+        this.hazards.push({ kind: 'circle', x: tx + this.rng.range(-1, 1) * def.aoe * 0.4, y: ty + this.rng.range(-1, 1) * def.aoe * 0.4, r: def.aoe, t: 0, delay: 1.1, dmg, type: 'shell', from: { x: u.x, y: u.y } });
         break;
       case 'artillery':
-        this.hazards.push({ kind: 'circle', x: k.x + this.rng.range(-k.r, k.r) * 0.4, y: k.y + this.rng.range(-k.r, k.r) * 0.4, r: def.aoe, t: 0, delay: 1.6, dmg: def.dmg, type: 'shell' });
+        this.hazards.push({ kind: 'circle', x: k.x + this.rng.range(-k.r, k.r) * 0.4, y: k.y + this.rng.range(-k.r, k.r) * 0.4, r: def.aoe, t: 0, delay: 1.6, dmg, type: 'shell' });
         break;
       case 'laser': {
         const len = dist + k.r * 2;
-        this.hazards.push({ kind: 'line', x1: u.x, y1: u.y, x2: u.x + aim.x * len, y2: u.y + aim.y * len, w: def.aoe, t: 0, delay: 0.7, dmg: def.dmg, type: 'laser', beam: 0xff5577 });
+        this.hazards.push({ kind: 'line', x1: u.x, y1: u.y, x2: u.x + aim.x * len, y2: u.y + aim.y * len, w: def.aoe, t: 0, delay: 0.7, dmg, type: 'laser', beam: 0xff5577 });
         break;
       }
       default:
         break;
+    }
+  }
+
+  // Counter-weapons: nets slow the kaiju down, sedative rounds stop it healing for a moment.
+  statusHit(p) {
+    const k = this.kaiju;
+    if (p.net) {
+      if (k.netted <= 0) this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'NETTED!', color: '#cfe3ff', life: 1.2, max: 1.2 });
+      k.netted = Math.max(k.netted, p.net);
+      this.emit('netted');
+    }
+    if (p.sedate) {
+      if (k.sedated <= 0) this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.2, text: 'SEDATED', color: '#9dffb0', life: 1.1, max: 1.1 });
+      k.sedated = Math.max(k.sedated, p.sedate);
     }
   }
 
@@ -1536,6 +1665,16 @@ export class Game {
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
     this.stats.units++;
+    this.addThreat(u.tier >= k.stage ? 2.5 : 1);
+    if (u.elite) {
+      // Elites pay out: a guaranteed level-up and a pile of scrap.
+      k.xp = Math.max(k.xp, xpToNext(k.level));
+      this.addBiomass(0);
+      this.stats.scrap += loot.scrap * 6 * this.diff.loot;
+      this.emit('eliteDown', { name: u.name });
+      this.impact(0.12, 0.8);
+      this.shake = Math.max(this.shake, 0.7);
+    }
     this.heal(UNIT_HEAL);
     if (u.def.vehicle && this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
     if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
@@ -1585,7 +1724,7 @@ export class Game {
       b.chargeLeft -= step;
       if (!b.chargeHit && Math.hypot(k.x - b.x, k.y - b.y) < b.r + k.r) {
         b.chargeHit = true;
-        this.takeDamage(BOSS.chargeDmg, 'melee');
+        this.takeDamage(BOSS.chargeDmg * b.dmgMul, 'melee');
         this.shake = Math.max(this.shake, 0.9);
       }
       this.bossTrample(b);
@@ -1603,7 +1742,7 @@ export class Game {
       b.y += (dy / dist) * BOSS.speed * dt;
       this.bossTrample(b);
     }
-    if (dist < b.r + k.r + 10) this.takeDamage(BOSS.contactDmg * dt, 'melee');
+    if (dist < b.r + k.r + 10) this.takeDamage(BOSS.contactDmg * b.dmgMul * dt, 'melee');
     if (b.phase === 1 && b.hp < b.maxHp * 0.5) {
       b.phase = 2;
       this.emit('banner', { text: `${BOSS.name} is enraged!` });
@@ -1631,7 +1770,7 @@ export class Game {
       isBoss: true, name: BOSS.name, x, y, r: BOSS.r, hp: BOSS.hp, maxHp: BOSS.hp,
       state: 'enter', targetX: Math.max(BOSS.r, k.x - span * 0.45), targetY: y,
       phase: 1, next: 2, patterns: ['barrage', 'laser', 'charge'], patternIndex: 0,
-      aim: 0, flash: 0, walk: 0, dead: false, start: this.time,
+      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: this.enemyScale().dmg,
     };
     this.shake = 1;
     this.emit('bossSpawn', { name: BOSS.name });
@@ -1652,14 +1791,14 @@ export class Game {
       for (let i = 0; i < n; i++) {
         const a = this.rng.range(0, Math.PI * 2);
         const d = i === 0 ? 0 : this.rng.range(k.r * 1.2, k.r * 3);
-        this.hazards.push({ kind: 'circle', x: k.x + Math.cos(a) * d, y: k.y + Math.sin(a) * d, r: BOSS.barrageR, t: 0, delay: 1.3 + i * 0.07, dmg: BOSS.barrageDmg, type: 'explosive', from: { x: b.x, y: b.y } });
+        this.hazards.push({ kind: 'circle', x: k.x + Math.cos(a) * d, y: k.y + Math.sin(a) * d, r: BOSS.barrageR, t: 0, delay: 1.3 + i * 0.07, dmg: BOSS.barrageDmg * b.dmgMul, type: 'explosive', from: { x: b.x, y: b.y } });
       }
     } else if (pattern === 'laser') {
       const d = norm(k.x - b.x, k.y - b.y);
       const len = k.r * 11;
       const line = { x1: b.x + d.x * b.r * 0.5, y1: b.y + d.y * b.r * 0.5, x2: b.x + d.x * len, y2: b.y + d.y * len };
       this.hazards.push({
-        kind: 'line', ...line, w: BOSS.laserW, t: 0, delay: 1.0, dmg: BOSS.laserDmg, type: 'laser', beam: 0xff3b3b,
+        kind: 'line', ...line, w: BOSS.laserW, t: 0, delay: 1.0, dmg: BOSS.laserDmg * b.dmgMul, type: 'laser', beam: 0xff3b3b,
         onHit: () => {
           for (const o of this.grid.query(Math.min(line.x1, line.x2) - 100, Math.min(line.y1, line.y2) - 100, Math.max(line.x1, line.x2) + 100, Math.max(line.y1, line.y2) + 100)) {
             if (o.state === 'intact' && !o.landmark && distToSegment(o.x, o.y, line.x1, line.y1, line.x2, line.y2) < BOSS.laserW / 2 + Math.min(o.w, o.h) / 2) this.destroyObject(o, d, 'boss');
@@ -1743,6 +1882,7 @@ export class Game {
         }
         if (Math.hypot(k.x - p.x, k.y - p.y) < k.r * 0.8 + p.r) {
           this.takeDamage(p.dmg, p.type);
+          if (k.invuln <= 0) this.statusHit(p);
           if (p.kind !== 'bullet') this.spawnExplosion(p.x, p.y, k.r * 0.5);
           else this.fxEvent({ t: 'sparks', x: p.x, y: p.y, h: k.r, color: 0xffe16b });
           p.life = 0;

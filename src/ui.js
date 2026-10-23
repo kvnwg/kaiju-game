@@ -30,6 +30,9 @@ export class UI {
     this.growthFill = $('#growth .fill');
     this.growthText = $('#growth span');
     this.growthPct = $('#growth em');
+    this.threatEl = $('#threat');
+    this.threatPips = [...document.querySelectorAll('#threat i')];
+    this.threatNote = $('#threat em');
     this.stageNum = $('#stageBadge b');
     this.hpBar = $('#hp');
     this.scrapEl = $('#scrap');
@@ -102,6 +105,13 @@ export class UI {
     }
     this.lastCombo = c.n;
     this.timerEl.textContent = fmtTime(game.time);
+    this.threatPips.forEach((el, i) => el.classList.toggle('on', game.threat > i * 20 + 2));
+    this.threatEl.classList.toggle('hot', game.threat >= 80);
+    const note = k.netted > 0 ? 'Netted' : k.sedated > 0 ? 'No healing' : '';
+    if (this.threatNote.textContent !== note) {
+      this.threatNote.textContent = note;
+      this.threatNote.classList.toggle('net', k.netted > 0);
+    }
 
     const b = game.boss;
     const bossOn = Boolean(b && !b.dead);

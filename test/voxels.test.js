@@ -39,7 +39,7 @@ test('props and characters build', () => {
     assert.ok(m.parts.length >= 6, `${id} is a rig`);
     for (const p of m.parts) assert.ok(p.grid.count() > 0, `${id}.${p.name}`);
   }
-  for (const id of Object.keys(ENEMIES)) assert.ok(UNIT_MODELS[id]().grid.count() > 0, id);
+  for (const [id, def] of Object.entries(ENEMIES)) assert.ok(UNIT_MODELS[def.model || id]().grid.count() > 0, id);
   assert.ok(bossModel().parts.length >= 4);
   assert.equal(personModel(0).grid.ny, 6);
 });

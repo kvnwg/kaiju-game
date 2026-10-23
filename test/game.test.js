@@ -241,20 +241,30 @@ test('military vehicles and soldiers never drive or walk through intact building
 
 test('autopiloted runs grow through all six stages, fight the boss and mostly win', () => {
   const runs = [1, 2, 3].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true }), { maxTime: 1500 }));
+  checkRuns(runs, 2);
+});
+
+test('later runs push back: the military can win, but a decent run still beats the boss', () => {
+  const runs = [1, 2, 3, 4, 5, 6].map((seed) => simulate(new Game({ seed, kaijuId: 'rex' }), { maxTime: 1500 }));
+  checkRuns(runs, 3);
+  assert.ok(runs.some((g) => g.state === 'lost' || g.reviveAvailable === false), 'somebody got knocked down');
+});
+
+function checkRuns(runs, minWins) {
   for (const g of runs) {
     assert.ok(g.state === 'won' || g.state === 'lost', `run ended (state ${g.state})`);
     assert.ok(g.results.buildings > 30);
     assert.ok(g.stats.people > 10, 'ate people early on');
   }
   const wins = runs.filter((g) => g.state === 'won');
-  assert.ok(wins.length >= 2, `won ${wins.length}/3`);
+  assert.ok(wins.length >= minWins, `won ${wins.length}/${runs.length}`);
   for (const g of wins) {
     assert.equal(g.kaiju.stage, MAX_STAGE);
     assert.ok(g.stats.bossDefeated);
     // Pacing guard: the boss arrives inside the 10 to 15 minute session budget.
     assert.ok(g.stats.stageTimes[MAX_STAGE] < 15 * 60);
   }
-});
+}
 
 test('chained kills build a combo that pays a scrap bonus when it lapses', () => {
   const g = wide(new Game({ seed: 5 }));

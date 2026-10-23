@@ -16,9 +16,9 @@ export const STAGES = [
   null,
   { n: 1, name: 'Hatchling', size: 'Human', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 45 },
   { n: 2, name: 'Prowler', size: 'Backyard', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 1100 },
-  { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 7000 },
-  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 30000 },
-  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 60000 },
+  { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 6500 },
+  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 25000 },
+  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 48000 },
   { n: 6, name: 'Apex', size: 'Skyline', radius: 135, maxHp: 3200, damage: 5120, speed: 520, biomassToNext: Infinity },
 ];
 export const MAX_STAGE = 6;
@@ -114,9 +114,11 @@ export const ENEMIES = {
   police: { name: 'Police car', tier: 2, r: 6, hp: 32, speed: 60, standoff: 45, range: 120, cd: 1.5, attack: 'bullet', dmg: 2, proj: 160, vehicle: true, skittish: true },
   dog: { name: 'K9 unit', tier: 2, r: 2, hp: 15, speed: 70, standoff: 0, range: 0, cd: 0.9, attack: 'melee', dmg: 3, soft: true },
   swat: { name: 'SWAT van', tier: 3, r: 9, hp: 200, speed: 75, standoff: 90, range: 230, cd: 1.8, attack: 'burst', dmg: 3, proj: 240, vehicle: true, soft: true },
+  netter: { name: 'Net launcher', tier: 3, r: 9, hp: 260, speed: 70, standoff: 130, range: 280, cd: 5.5, attack: 'net', dmg: 2, proj: 150, vehicle: true, soft: true, model: 'swat' },
   roadblock: { name: 'Roadblock', tier: 3, r: 11, hp: 320, speed: 0, standoff: 0, range: 250, cd: 1.8, attack: 'bullet', dmg: 6, proj: 260, soft: true },
   tank: { name: 'Tank', tier: 4, r: 15, hp: 1600, speed: 45, standoff: 220, range: 480, cd: 3.2, attack: 'shell', dmg: 40, aoe: 26, vehicle: true },
-  infantry: { name: 'Rocket team', tier: 4, r: 4, hp: 240, speed: 50, standoff: 180, range: 360, cd: 2.8, attack: 'rocket', dmg: 10, proj: 220, soft: true },
+  infantry: { name: 'Rocket team', tier: 4, r: 4, hp: 240, speed: 50, standoff: 180, range: 360, cd: 2.8, attack: 'rocket', dmg: 10, proj: 220, soft: true, sedate: 2 },
+  battery: { name: 'Missile battery', tier: 5, r: 18, hp: 5000, speed: 0, standoff: 0, range: 1100, cd: 6.5, attack: 'volley', dmg: 34, proj: 260, vehicle: true, model: 'artillery' },
   heli: { name: 'Gunship drone', tier: 4, r: 14, hp: 1200, speed: 140, standoff: 260, range: 450, cd: 3.2, attack: 'missile', dmg: 8, proj: 260, flying: true, vehicle: true },
   jet: { name: 'Jet', tier: 5, r: 18, hp: 2000, speed: 1500, standoff: 0, range: 0, cd: 0, attack: 'strafe', dmg: 95, aoe: 52, flying: true, vehicle: true },
   artillery: { name: 'Artillery', tier: 5, r: 18, hp: 3600, speed: 20, standoff: 900, range: 1300, cd: 4.2, attack: 'artillery', dmg: 110, aoe: 80, vehicle: true },
@@ -128,11 +130,38 @@ export const ESCALATION = [
   null,
   { weights: { cop: 1 }, maxAlive: 3, interval: 6, firstDelay: 12 },
   { weights: { police: 3, dog: 2, cop: 1 }, maxAlive: 5, interval: 4 },
-  { weights: { swat: 3, roadblock: 1, police: 1 }, maxAlive: 6, interval: 4 },
-  { weights: { tank: 3, infantry: 2, heli: 2, swat: 1 }, maxAlive: 7, interval: 3.8 },
-  { weights: { tank: 1, mech: 3, artillery: 2, heli: 1 }, maxAlive: 9, interval: 4, jetEvery: 7 },
-  { weights: { mech: 2, artillery: 1, tank: 1 }, maxAlive: 6, interval: 5, jetEvery: 10 },
+  { weights: { swat: 3, roadblock: 1, police: 1, netter: 1 }, maxAlive: 6, interval: 4 },
+  { weights: { tank: 3, infantry: 2, heli: 2, swat: 1, netter: 1 }, maxAlive: 7, interval: 3.8 },
+  { weights: { tank: 1, mech: 3, artillery: 2, heli: 1, battery: 0.6 }, maxAlive: 9, interval: 4, jetEvery: 7 },
+  { weights: { mech: 2, artillery: 1, tank: 1, battery: 0.6, netter: 0.5 }, maxAlive: 10, interval: 3.5, jetEvery: 7 },
 ];
+
+// Pressure. Destruction fills a threat meter (0-100) that drains a few seconds after you stop;
+// threat speeds up and swells the military's response. Every so often a telegraphed strike
+// wave arrives from several sides at once, sooner the higher the threat.
+export const THREAT = {
+  drain: 3, // per second, always, plus 3% of the current threat
+  decay: 8, // extra per second once idle
+  idle: 3, // seconds without new threat before the extra drain starts
+  waveEvery: [0, 0, 55, 50, 45, 42, 40],
+  firstWave: 35, // seconds into a size before its first wave
+};
+// The military keeps pace with your build: every level-up makes new units tougher and
+// harder-hitting.
+export const ENEMY_SCALING = { hpPerLevel: 0.05, dmgPerLevel: 0.036 };
+// One named elite per size, with a big reward.
+export const ELITES = [
+  null,
+  null,
+  { type: 'police', name: 'Interceptor' },
+  { type: 'swat', name: 'Riot Command' },
+  { type: 'tank', name: 'Mammoth Tank' },
+  { type: 'mech', name: 'War Mech' },
+  { type: 'mech', name: 'Titan Mech' },
+];
+export const ELITE = { hp: 9, dmg: 1.8, size: 1.5, first: 40, every: 95 };
+// Healing gets weaker the more you have healed recently; sedative rounds pause it.
+export const HEALING = { falloff: 6, recover: 0.035 };
 
 export const BOSS = {
   name: 'Coast Guard Mech',

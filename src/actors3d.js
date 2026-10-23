@@ -339,7 +339,7 @@ export class Actors {
       live.add(u);
       let m = this.unitMeshes.get(u);
       if (!m) {
-        const ug = this.unitGeometry(u.type);
+        const ug = this.unitGeometry(u.def.model || u.type);
         m = new THREE.Mesh(ug.geo, this.mat);
         m.castShadow = true;
         m.userData.siren = ug.siren;
@@ -360,7 +360,7 @@ export class Actors {
       m.rotation.order = 'YXZ';
       m.rotation.z = u.type === 'heli' ? Math.sin(t * 3 + u.age) * 0.08 : u.type === 'cop' ? -st * 0.35 : 0;
       m.material = u.flash > 0 ? this.flashMat : this.mat;
-      m.scale.setScalar(u.flash > 0 ? 1.15 : 1);
+      m.scale.setScalar((u.elite ? 1.5 : 1) * (u.flash > 0 ? 1.15 : 1));
     }
     for (const [u, m] of this.unitMeshes) {
       if (live.has(u)) continue;

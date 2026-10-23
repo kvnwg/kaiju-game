@@ -707,6 +707,12 @@ export class FX {
       }
       else if (p.kind === 'rock') put(p.x, game.kaiju.r, p.y, p.r * 1.5, 0x8a7a66, rot, 1);
       else if (p.kind === 'car') continue; // drawn as a tumbling car by the actors
+      else if (p.kind === 'net') {
+        // A spinning white net with weighted corners.
+        const spin = this.t * 9;
+        put(p.x, p.h ?? 2, p.y, p.r * 1.8, 0xe8eef6, rot + spin, 1, 0.08);
+        for (let c = 0; c < 4; c++) put(p.x + Math.cos(spin + c * 1.57) * p.r, p.h ?? 2, p.y + Math.sin(spin + c * 1.57) * p.r, p.r * 0.3, 0x5a6270, 0, 1);
+      }
       else if (p.kind === 'spine') {
         const y = arcHeight(p);
         put(p.x, y, p.y, p.size, 0xffffff, rot, 2.6);

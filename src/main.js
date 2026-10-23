@@ -93,6 +93,15 @@ function handleEvents(events) {
       case 'synergy':
         ui.banner(`Synergy: ${e.set.name}`, e.set.bonus, 'synergy');
         break;
+      case 'wave':
+        ui.banner('Strike incoming!', 'The military is closing in from all sides', 'warning');
+        break;
+      case 'elite':
+        ui.banner(`Elite: ${e.name}`, 'Take it down for a free level-up', 'warning');
+        break;
+      case 'eliteDown':
+        ui.banner(`${e.name} destroyed`, '+1 level and a pile of scrap', 'synergy');
+        break;
       case 'bossWarning':
         ui.banner('Warning', `${e.name} approaching from the harbor`, 'warning');
         break;
