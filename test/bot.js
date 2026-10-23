@@ -14,6 +14,28 @@ export function botStep(game) {
     if (!game.revive()) game.giveUp();
     return;
   }
+  // Charge out of trouble: through an incoming round, or out of a blast that is about to land.
+  if (k.dashCd <= 0) {
+    for (const p of game.projectiles) {
+      if (p.friendly) continue;
+      const dx = k.x - p.x;
+      const dy = k.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d < k.r * 2.5 + p.r && dx * p.vx + dy * p.vy > 0) {
+        game.setInput(-p.vy, p.vx);
+        game.tryDash();
+        break;
+      }
+    }
+    for (const h of game.hazards) {
+      if (h.friendly || h.visualOnly || h.delay - h.t > 0.35) continue;
+      if (h.kind === 'circle' && Math.hypot(k.x - h.x, k.y - h.y) < h.r + k.r) {
+        game.setInput(k.x - h.x || 1, k.y - h.y);
+        game.tryDash();
+        break;
+      }
+    }
+  }
   for (const h of game.hazards) {
     if (h.friendly) continue;
     if (h.kind === 'circle' && Math.hypot(k.x - h.x, k.y - h.y) < h.r + k.r) {

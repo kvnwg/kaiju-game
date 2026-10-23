@@ -1,4 +1,5 @@
 // One-thumb controls: drag anywhere for a floating virtual stick; WASD / arrows on desktop.
+// Charge: Space or Shift, or the on-screen button.
 export class Input {
   constructor(surface, stickEl) {
     this.surface = surface;
@@ -14,9 +15,14 @@ export class Input {
     window.addEventListener('pointermove', (e) => this.onMove(e));
     window.addEventListener('pointerup', (e) => this.onUp(e));
     window.addEventListener('pointercancel', (e) => this.onUp(e));
+    this.dashQueued = false;
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       this.keys.add(e.key.toLowerCase());
+      if (e.key === ' ' || e.key === 'Shift') {
+        this.dashQueued = true;
+        e.preventDefault();
+      }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
     window.addEventListener('blur', () => {
@@ -58,6 +64,13 @@ export class Input {
     this.pointer = null;
     this.vec = { x: 0, y: 0 };
     this.stickEl.classList.remove('active');
+  }
+
+  // True once per press of the charge button.
+  takeDash() {
+    const d = this.dashQueued;
+    this.dashQueued = false;
+    return d;
   }
 
   get() {

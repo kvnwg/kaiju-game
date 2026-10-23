@@ -310,5 +310,20 @@ export class Sfx {
     else if (e.type === 'slam') this.slam();
     else if (e.type === 'hop') this.hop();
     else if (e.type === 'comboTier') this.comboTier(e.tier);
+    else if (e.type === 'dash') this.dash();
+    else if (e.type === 'perfect') this.perfect();
+    else if (e.type === 'multikill') this.comboTier(Math.min(3, e.tier));
+  }
+
+  // Charge: a whoosh. Perfect dodge: a bright rising chime.
+  dash() {
+    if (!this.ok('dash', 0.1)) return;
+    this.noise({ dur: 0.22, vol: 0.28, f0: 3000, f1: 600, q: 1.2, type: 'bandpass' });
+  }
+
+  perfect() {
+    if (!this.ok('perfect', 0.15)) return;
+    this.tone({ type: 'triangle', f0: 880, f1: 1760, dur: 0.18, vol: 0.22 });
+    this.tone({ type: 'sine', f0: 1320, f1: 2640, dur: 0.22, vol: 0.16, delay: 0.06 });
   }
 }

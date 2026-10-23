@@ -77,6 +77,38 @@ html, body {
   box-shadow: inset var(--p) var(--p) 0 rgba(255, 255, 255, 0.12), inset calc(-1 * var(--p)) calc(-1 * var(--p)) 0 rgba(0, 0, 0, 0.35);
 }
 
+/* ---------- charge button ---------- */
+#app .dash-btn {
+  position: absolute;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(110px + env(safe-area-inset-bottom));
+  z-index: 6;
+  width: 76px;
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  background: #1c2a4a;
+  border: var(--p) solid var(--ink);
+  clip-path: var(--notch);
+  box-shadow: inset 0 var(--p) 0 #5fa8ff, inset 0 calc(-1 * var(--p)) 0 #0d1630;
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+}
+#app .dash-btn.hidden { display: none; }
+#app .dash-btn i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(95, 168, 255, 0.45); }
+#app .dash-btn b { position: relative; font-family: var(--display); font-size: 8px; line-height: 1; font-weight: 400; text-shadow: var(--outline); }
+#app .dash-btn small { position: relative; font-family: var(--display); font-size: 6px; line-height: 1; color: #9fc4ff; text-shadow: var(--outline); }
+#app .dash-btn.ready { background: #2c5fb0; }
+#app .dash-btn.ready i { height: 0 !important; }
+#app .dash-btn.flash { animation: ding 0.4s steps(3); }
+@media (pointer: coarse) { #app .dash-btn small { display: none; } }
+
 /* ---------- virtual stick ---------- */
 #stick {
   position: absolute;

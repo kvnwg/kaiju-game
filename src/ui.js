@@ -30,6 +30,8 @@ export class UI {
     this.growthFill = $('#growth .fill');
     this.growthText = $('#growth span');
     this.growthPct = $('#growth em');
+    this.dashBtn = $('#dashBtn');
+    this.dashFill = $('#dashBtn i');
     this.threatEl = $('#threat');
     this.threatPips = [...document.querySelectorAll('#threat i')];
     this.threatNote = $('#threat em');
@@ -66,6 +68,7 @@ export class UI {
   show(name, on = true) {
     const el = name === 'hud' ? this.hud : this.modals[name];
     el.classList.toggle('hidden', !on);
+    if (name === 'hud' && !on) this.dashBtn.classList.add('hidden');
   }
 
   hideModals() {
@@ -105,6 +108,12 @@ export class UI {
     }
     this.lastCombo = c.n;
     this.timerEl.textContent = fmtTime(game.time);
+    this.dashBtn.classList.remove('hidden');
+    const ready = k.dashCd <= 0;
+    if (ready && !this.dashReady) this.retrigger(this.dashBtn, 'flash');
+    this.dashReady = ready;
+    this.dashBtn.classList.toggle('ready', ready);
+    this.dashFill.style.height = `${Math.min(100, (100 * k.dashCd) / 2.8)}%`;
     this.threatPips.forEach((el, i) => el.classList.toggle('on', game.threat > i * 20 + 2));
     this.threatEl.classList.toggle('hot', game.threat >= 80);
     const note = k.netted > 0 ? 'Netted' : k.sedated > 0 ? 'No healing' : '';

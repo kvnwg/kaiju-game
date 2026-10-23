@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM,
+  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -49,8 +49,9 @@ export class Game {
       biomass: 0, facing: { x: -1, y: 0 }, vx: 0, vy: 0, moving: false, stillTime: 0,
       attackCd: 0.5, attackCount: 0, shield: 0, hitFlash: 0, invuln: 0, trailT: 0, stompT: 0,
       walkPhase: 0, lastAttack: null, inWater: false, contactT: 0, hopT: 0, hopMax: 0.5, hopH: 0, z: 0,
-      healRecent: 0, sedated: 0, netted: 0,
+      healRecent: 0, sedated: 0, netted: 0, dashT: 0, dashCd: 0, dashDir: null, dodging: 0, perfect: false,
     };
+    this.multi = { n: 0, last: -9, tier: 0 };
     this.threat = 0; // 0-100, see THREAT
     this.threatIdle = 0;
     this.input = { x: 0, y: 0 };
@@ -269,13 +270,28 @@ export class Game {
     return this.city.nearestRoad(x, y);
   }
 
-  placeOnRoad(u) {
+  // Keep right: the lane offset slides across when a unit turns around, and the position
+  // eases through corners, so road units never teleport.
+  placeOnRoad(u, dt = 0) {
     const r = u.road;
-    const n = norm((r.x1 - r.x0) * u.dir, (r.y1 - r.y0) * u.dir);
-    const lane = u.type === 'roadblock' ? 0 : Math.min(12 * (u.scale || 1), 26);
-    u.x = r.x0 + (r.x1 - r.x0) * u.t - n.y * lane;
-    u.y = r.y0 + (r.y1 - r.y0) * u.t + n.x * lane;
-    u.heading = u.type === 'roadblock' ? Math.atan2(n.x, -n.y) : Math.atan2(n.y, n.x);
+    const n0 = norm(r.x1 - r.x0, r.y1 - r.y0);
+    const lane = u.type === 'roadblock' ? 0 : Math.min(12 * (u.scale || 1), 26) * u.dir;
+    u.lane = dt && u.lane !== undefined ? u.lane + (lane - u.lane) * Math.min(1, dt * 3) : lane;
+    const tx = r.x0 + (r.x1 - r.x0) * u.t - n0.y * u.lane;
+    const ty = r.y0 + (r.y1 - r.y0) * u.t + n0.x * u.lane;
+    const heading = u.type === 'roadblock' ? Math.atan2(n0.x, -n0.y) : Math.atan2(n0.y * u.dir, n0.x * u.dir);
+    if (!dt) {
+      u.x = tx;
+      u.y = ty;
+      u.heading = heading;
+      return;
+    }
+    const f = Math.min(1, dt * 10);
+    u.x += (tx - u.x) * f;
+    u.y += (ty - u.y) * f;
+    let dh = heading - u.heading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    u.heading += dh * Math.min(1, dt * 8);
   }
 
   // Drive along the road network: toward the kaiju until in firing distance, away when scared.
@@ -294,7 +310,11 @@ export class Game {
       if (Math.abs(tp - u.t) * len > 4) move = Math.sign(tp - u.t);
       else if (tp < 0.01 || tp > 0.99) move = tp < 0.5 ? -1 : 1;
     }
+    // Commit to a direction for a moment before reversing (unless bolting in fear).
+    u.dirHold = Math.max(0, (u.dirHold || 0) - dt);
+    if (move && move !== u.dir && u.dirHold > 0 && !flee && !(u.fear > 0)) move = 0;
     if (move) {
+      if (move !== u.dir) u.dirHold = 0.9;
       u.dir = move;
       u.t += (move * u.def.speed * (u.fear > 0 ? 1.3 : 1) * speedMul * dt) / len;
       if (u.t > 1 || u.t < 0) {
@@ -322,7 +342,7 @@ export class Game {
         }
       }
     }
-    this.placeOnRoad(u);
+    this.placeOnRoad(u, dt);
   }
 
   // The nearest thing worth eating at this size: guides the player when the area is cleared.
@@ -359,7 +379,7 @@ export class Game {
     this.streamWorld();
     if (this.pendingPicks > 0) this.openPick();
     if (this.state !== 'playing') return;
-    if (this.has('regen')) this.heal(0.004 * this.level('regen') * dt);
+    if (this.has('regen')) this.heal(0.003 * this.level('regen') * dt);
     this.updateThreat(dt);
     this.updateKaiju(dt);
     this.updateAugments(dt);
@@ -447,8 +467,28 @@ export class Game {
     if (k.inWater) speed *= 0.6;
     k.vx = this.input.x * speed;
     k.vy = this.input.y * speed;
+    k.dashCd = Math.max(0, k.dashCd - dt);
+    k.dodging = Math.max(0, k.dodging - dt);
+    if (k.dashT > 0) {
+      k.dashT -= dt;
+      const sp = this.stage.speed * this.def.speedMult * DASH.speed;
+      k.vx = k.dashDir.x * sp;
+      k.vy = k.dashDir.y * sp;
+      k.moving = true;
+      // Trample: units in the way take a heavy hit and get thrown aside.
+      for (const u of this.units) {
+        if (u.dead || u.flying || k.dashHits.has(u) || Math.hypot(u.x - k.x, u.y - k.y) > k.r * 1.3 + u.r) continue;
+        k.dashHits.add(u);
+        const away = norm(u.x - k.x, u.y - k.y);
+        if (!u.road) {
+          u.x += away.x * k.r * 1.2;
+          u.y += away.y * k.r * 1.2;
+        }
+        this.damageUnit(u, this.baseDamage() * DASH.dmg);
+      }
+    }
     if (k.moving) {
-      k.facing = norm(this.input.x, this.input.y);
+      k.facing = k.dashT > 0 ? { ...k.dashDir } : norm(this.input.x, this.input.y);
       k.stillTime = 0;
       const before = Math.floor(k.walkPhase / Math.PI);
       k.walkPhase += (dt * speed) / Math.max(1, k.r) * 1.6;
@@ -681,6 +721,43 @@ export class Game {
     k.hp = Math.min(k.maxHp, k.hp + k.maxHp * f);
   }
 
+  // ---------------------------------------------------------------- skill: charge and perfect dodges
+  tryDash() {
+    const k = this.kaiju;
+    if (this.state !== 'playing' || k.dashCd > 0) return false;
+    k.dashDir = k.moving ? norm(this.input.x, this.input.y) : { ...k.facing };
+    k.facing = { ...k.dashDir };
+    k.dashT = DASH.time;
+    k.dashCd = DASH.cd;
+    k.dodging = DASH.iframes;
+    k.invuln = Math.max(k.invuln, DASH.iframes);
+    k.perfect = false;
+    k.dashHits = new Set();
+    if (k.netted > 0) {
+      k.netted = 0;
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'Tore free!', color: '#cfe3ff', life: 1, max: 1 });
+    }
+    this.fxEvent({ t: 'dash', x: k.x, y: k.y, dir: k.dashDir, r: k.r });
+    this.emit('dash');
+    return true;
+  }
+
+  // A hit that lands during the dash's i-frames.
+  perfectDodge(x, y) {
+    const k = this.kaiju;
+    if (k.dodging <= 0 || k.perfect) return;
+    k.perfect = true;
+    k.dashCd *= 1 - DASH.refund;
+    this.bumpCombo();
+    this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.8, text: 'PERFECT DODGE', color: '#7ff0ff', life: 1.2, max: 1.2 });
+    this.fxEvent({ t: 'perfect', x: x ?? k.x, y: y ?? k.y, r: k.r });
+    this.emit('perfect');
+    if (this.time >= this.slowmoReadyAt) {
+      this.slowmo = Math.max(this.slowmo, 0.3);
+      this.slowmoReadyAt = this.time + 3;
+    }
+  }
+
   // ---------------------------------------------------------------- pressure
   addThreat(n) {
     this.threat = Math.min(100, this.threat + n);
@@ -899,9 +976,9 @@ export class Game {
       if (o.structure && o.tier >= k.stage) {
         this.fx.floaters.push({ x: o.x, y: o.y, h: o.height * 0.8, text: `+${Math.round(scrap)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
       }
-      if (o.vehicle && this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
+      if (o.vehicle && this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
       if (this.has('magneticHide') && (o.vehicle || o.structure)) this.addShield((o.vehicle ? 0.02 : 0.03) * (0.5 + 0.5 * this.level('magneticHide')));
-      if (o.structure && this.has('buildingEater')) this.heal(0.02 + 0.01 * this.level('buildingEater'));
+      if (o.structure && o.tier >= k.stage && this.has('buildingEater')) this.heal(0.01 + 0.005 * this.level('buildingEater'));
     }
 
     // Every kill thumps the camera a little; the bigger it is next to you, the harder.
@@ -1188,7 +1265,7 @@ export class Game {
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
     this.stats.destroyed++;
-    if (this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
+    if (this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
     if (this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'carDie', car: c, dir: norm(c.x - k.x, c.y - k.y) });
     this.spawnOrbs(c.x, c.y, 3, true);
@@ -1609,7 +1686,7 @@ export class Game {
       const vx = aim.x * c - aim.y * s;
       const vy = aim.x * s + aim.y * c;
       // Never faster than the kaiju can sidestep, and drawn big enough to read at any zoom.
-      const sp = Math.min(def.proj, this.kaijuSpeed() * (kind === 'net' ? 1.5 : 2.2));
+      const sp = Math.min(def.proj, this.kaijuSpeed() * (kind === 'net' ? 1.4 : 1.9));
       const r = kind === 'net' ? Math.max(1.5, k.r * 0.35) : Math.max(0.4, u.r * 0.1);
       this.projectiles.push({
         kind, x: u.x, y: u.y, vx: vx * sp, vy: vy * sp, r, size: Math.max(r, k.r * (kind === 'bullet' ? 0.2 : 0.26)),
@@ -1653,6 +1730,27 @@ export class Game {
     }
   }
 
+  // Horde management pays: kills in quick succession build a multi-kill with a bonus.
+  countMulti() {
+    const m = this.multi;
+    const k = this.kaiju;
+    if (this.time - m.last > MULTI.window) {
+      m.n = 0;
+      m.tier = 0;
+    }
+    m.n++;
+    m.last = this.time;
+    const tier = MULTI.tiers.filter((n) => m.n >= n).length;
+    if (tier > m.tier) {
+      m.tier = tier;
+      const bonus = Math.round(m.n * 4 * k.stage * this.diff.loot);
+      this.stats.scrap += bonus;
+      this.addBiomass(lootFor(k.stage, k.stage).biomass * 0.15 * tier);
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 3, text: `MULTI-KILL x${m.n}  +${bonus}`, color: '#ff8af0', life: 1.4, max: 1.4 });
+      this.emit('multikill', { n: m.n, tier });
+    }
+  }
+
   // Counter-weapons: nets slow the kaiju down, sedative rounds stop it healing for a moment.
   statusHit(p) {
     const k = this.kaiju;
@@ -1687,6 +1785,7 @@ export class Game {
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
     this.stats.units++;
+    this.countMulti();
     this.addThreat(u.tier >= k.stage ? 2.5 : u.def.lift ? 0.3 : 1);
     if (u.elite) {
       // Elites pay out: a guaranteed level-up and a pile of scrap.
@@ -1697,8 +1796,8 @@ export class Game {
       this.impact(0.12, 0.8);
       this.shake = Math.max(this.shake, 0.7);
     }
-    this.heal(u.def.lift ? UNIT_HEAL * 0.4 : UNIT_HEAL);
-    if (u.def.vehicle && this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
+    if (!u.def.lift) this.heal(UNIT_HEAL);
+    if (u.def.vehicle && this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
     if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'unitDie', u, dir: norm(u.x - k.x, u.y - k.y) });
     if (!u.def.human) this.spawnExplosion(u.x, u.y, u.r * 2.2);
@@ -1903,6 +2002,7 @@ export class Game {
           p.vy += (d.y * sp - p.vy) * Math.min(1, dt * 0.6);
         }
         if (Math.hypot(k.x - p.x, k.y - p.y) < k.r * 0.8 + p.r) {
+          if (k.dodging > 0) this.perfectDodge(p.x, p.y);
           this.takeDamage(p.dmg, p.type);
           if (k.invuln <= 0) this.statusHit(p);
           if (p.kind !== 'bullet') this.spawnExplosion(p.x, p.y, k.r * 0.5);
@@ -1932,6 +2032,7 @@ export class Game {
         hit = distToSegment(k.x, k.y, h.x1, h.y1, h.x2, h.y2) < h.w / 2 + k.r * 0.8;
         this.fx.beams.push({ x1: h.x1, y1: h.y1, x2: h.x2, y2: h.y2, width: h.w, life: 0.3, max: 0.3, color: h.beam || 0xff5555, h: h.w * 0.6 });
       }
+      if (hit && k.dodging > 0) this.perfectDodge(h.x, h.y);
       if (hit) this.takeDamage(h.dmg, h.type);
     }
     this.hazards = this.hazards.filter((h) => !h.done);

@@ -173,8 +173,13 @@ export const ELITES = [
   { type: 'mech', name: 'Titan Mech' },
 ];
 export const ELITE = { hp: 9, dmg: 1.8, size: 1.5, first: 40, every: 95 };
+// Charge: a short dash with i-frames that tramples units in the way and tears nets off.
+// Dashing through a hit as it lands is a perfect dodge: most of the cooldown comes back.
+export const DASH = { cd: 2.8, time: 0.24, speed: 3.4, iframes: 0.32, refund: 0.7, dmg: 1.5 };
+// Killing a pack of units in quick succession pays a bonus.
+export const MULTI = { window: 0.7, tiers: [5, 10, 20] };
 // Healing gets weaker the more you have healed recently; sedative rounds pause it.
-export const HEALING = { falloff: 6, recover: 0.035 };
+export const HEALING = { falloff: 10, recover: 0.03 };
 
 export const BOSS = {
   name: 'Coast Guard Mech',
@@ -196,7 +201,7 @@ export const LIMITS = {
   vfx: 600,
 };
 
-export const UNIT_HEAL = 0.02; // eating an enemy heals 2% max health
+export const UNIT_HEAL = 0.006; // killing a full-strength enemy heals 0.6% max health (swarm units heal nothing)
 export const LOSS_SCRAP_KEEP = 0.5;
 
 // Ambient life: civilians and traffic near the kaiju.

@@ -93,6 +93,9 @@ function handleEvents(events) {
       case 'synergy':
         ui.banner(`Synergy: ${e.set.name}`, e.set.bonus, 'synergy');
         break;
+      case 'multikill':
+        if (e.tier >= 2) ui.callout(`Multi-kill x${e.n}!`, Math.min(5, e.tier + 1));
+        break;
       case 'wave':
         ui.banner('Strike incoming!', 'The military is closing in from all sides', 'warning');
         break;
@@ -184,6 +187,13 @@ function togglePause(force) {
 }
 
 document.getElementById('pauseBtn').addEventListener('click', () => togglePause());
+// The charge button must not start a stick drag on the canvas underneath.
+const dashBtn = document.getElementById('dashBtn');
+dashBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  e.preventDefault();
+  input.dashQueued = true;
+});
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' || e.key === 'p') togglePause();
   if (!debug || !game) return;
@@ -207,6 +217,7 @@ function frame(now) {
       const v = input.get();
       const w = renderer.worldDir(v.x, v.y);
       game.setInput(w.x, w.y);
+      if (input.takeDash()) game.tryDash();
       if (v.x || v.y) movedFor += dt;
       game.update(dt);
       handleEvents(game.drainEvents());

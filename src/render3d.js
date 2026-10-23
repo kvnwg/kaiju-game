@@ -1036,6 +1036,16 @@ export class Renderer3D {
           }
           break;
         }
+        case 'dash': {
+          // Charge: a burst of dust behind and a ring kicked out at the feet.
+          this.fx.dustCloud(e.x - e.dir.x * e.r, 0, e.y - e.dir.y * e.r, e.r * 0.9, 6);
+          game.fx.rings.push({ x: e.x, y: e.y, r0: e.r * 0.5, r1: e.r * 2.2, life: 0.35, max: 0.35, color: 0xbfe0ff, width: e.r * 0.2 });
+          break;
+        }
+        case 'perfect':
+          this.fx.sparks(e.x, e.r, e.y, 0x7ff0ff, Math.max(0.5, e.r * 0.2), 10);
+          game.fx.rings.push({ x: game.kaiju.x, y: game.kaiju.y, r0: e.r, r1: e.r * 4, life: 0.5, max: 0.5, color: 0x7ff0ff, width: e.r * 0.25 });
+          break;
         case 'poof':
           this.fx.dustCloud(e.x, 1, e.y, 1.2, 3, 0xf2efe6);
           break;
@@ -1234,6 +1244,8 @@ export class Renderer3D {
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
     this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
+    // Charge trail
+    if (k.dashT > 0 && Math.random() < 0.7) this.fx.dustCloud(k.x - k.facing.x * k.r, 0, k.y - k.facing.y * k.r, k.r * 0.5, 2, 0xdfe6ee);
     // Footsteps and wading
     if (k.moving && k.r >= 6) {
       const step = Math.floor(k.walkPhase / Math.PI);

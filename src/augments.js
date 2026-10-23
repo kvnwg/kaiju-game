@@ -42,7 +42,7 @@ export const AUGMENTS = [
   { id: 'adrenaline', kind: 'passive', name: 'Adrenaline', tier: 'silver', max: 5, text: '-8% move cooldowns', stat: true },
   { id: 'longLegs', kind: 'passive', name: 'Long Legs', tier: 'silver', max: 5, text: '+8% move speed', stat: true },
   { id: 'toughness', kind: 'passive', name: 'Toughness', tier: 'silver', max: 5, text: '+15% max health', stat: true },
-  { id: 'regen', kind: 'passive', name: 'Regeneration', tier: 'silver', max: 5, text: 'Heal 0.4% health/s', stat: true },
+  { id: 'regen', kind: 'passive', name: 'Regeneration', tier: 'silver', max: 5, text: 'Heal 0.3% health/s', stat: true },
   { id: 'appetite', kind: 'passive', name: 'Appetite', tier: 'silver', max: 5, text: '+10% XP', stat: true },
   { id: 'scavenger', kind: 'passive', name: 'Scavenger', tier: 'silver', max: 5, text: '+20% scrap', stat: true },
   { id: 'thickHide', kind: 'passive', name: 'Thick Hide', tier: 'silver', max: 5, text: '-8% bullet & shell damage', stat: true },
@@ -50,9 +50,9 @@ export const AUGMENTS = [
   // ---- perk passives
   { id: 'dominoEffect', kind: 'passive', name: 'Domino Effect', tier: 'gold', max: 3, text: 'Collapses crush neighbours', levelText: 'Heavier collapses' },
   { id: 'gasMain', kind: 'passive', name: 'Gas Main', tier: 'gold', max: 3, text: '20% of buildings explode', levelText: '+10% explode chance' },
-  { id: 'buildingEater', kind: 'passive', name: 'Building Eater', tier: 'gold', max: 3, text: 'Buildings heal 3%', levelText: '+1% heal per building' },
+  { id: 'buildingEater', kind: 'passive', name: 'Building Eater', tier: 'gold', max: 3, text: 'Big buildings heal 1.5%', levelText: '+0.5% heal per building' },
   { id: 'magneticHide', kind: 'passive', name: 'Magnetic Hide', tier: 'gold', max: 3, text: 'Wreckage becomes a shield', levelText: '+50% shield gain' },
-  { id: 'snackAttack', kind: 'passive', name: 'Snack Attack', tier: 'silver', max: 3, text: 'Vehicles heal 2%', levelText: '+1% heal per vehicle' },
+  { id: 'snackAttack', kind: 'passive', name: 'Snack Attack', tier: 'silver', max: 3, text: 'Vehicles heal 1%', levelText: '+0.5% heal per vehicle' },
   { id: 'rageMode', kind: 'passive', name: 'Rage Mode', tier: 'gold', max: 3, text: 'Up to +40% damage when hurt', levelText: '+20% max rage' },
   { id: 'echo', kind: 'passive', name: 'Echo', tier: 'prismatic', max: 3, text: '30% of moves repeat', levelText: '+30% repeat chance' },
 ];
