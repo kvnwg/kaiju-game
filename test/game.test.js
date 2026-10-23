@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect } from '../src/game.js';
 import { STAGES, MAX_STAGE } from '../src/config.js';
+import { AUGMENTS, AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 
 test('a human-sized kaiju starts among people and grows by eating them', () => {
@@ -26,11 +27,57 @@ test('growing opens an augment pick', () => {
   assert.equal(g.state, 'playing');
 });
 
-test('first run guarantees Domino Effect on the first pick', () => {
+test('first run guarantees Laser Eyes on the first pick, and the first offer is all moves', () => {
   const g = new Game({ seed: 8, firstRun: true });
   g.debugGrow();
   g.update(1 / 60);
-  assert.ok(g.pick.options.includes('dominoEffect'));
+  assert.ok(g.pick.options.includes('laserEyes'));
+  assert.ok(g.pick.options.every((id) => AUGMENT_BY_ID[id].kind === 'move'));
+});
+
+test('every move fires, hits things and shows its effect', () => {
+  for (const m of MOVES) {
+    const g = new Game({ seed: 5 });
+    g.kaiju.invuln = 999;
+    g.held.set(m.id, 1);
+    for (const a of AUGMENTS) if (a.kind === 'mod' && a.requires === m.id) g.held.set(a.id, 1);
+    // Stand in the suburbs at house size so there is plenty in reach.
+    g.kaiju.stage = 3;
+    g.kaiju.r = 14;
+    const hp0 = g.objects.filter((o) => o.state === 'intact').length;
+    for (let i = 0; i < 30 * 12; i++) {
+      g.update(1 / 30);
+      g.drainEvents();
+      g.drainVfx();
+    }
+    assert.ok(g.stats.moves > 0, `${m.id} fired`);
+    assert.ok(g.objects.filter((o) => o.state === 'intact').length < hp0 || g.stats.people > 0, `${m.id} did damage`);
+  }
+});
+
+test('mods change their move: Double Strike slashes twice, Barrage fires 8 spines', () => {
+  const count = (id, mods) => {
+    const g = new Game({ seed: 5 });
+    g.kaiju.stage = 3;
+    g.kaiju.r = 14;
+    g.held.set(id, 1);
+    for (const m of mods) g.held.set(m, 1);
+    let slashes = 0;
+    let spines = 0;
+    for (let i = 0; i < 30 * 3; i++) {
+      g.update(1 / 30);
+      slashes += g.fx.slashes.filter((s) => !s._c && (s._c = true)).length;
+      spines += g.projectiles.filter((p) => p.kind === 'spine' && !p._c && (p._c = true)).length;
+    }
+    return { slashes, spines, moves: g.stats.moves };
+  };
+  const one = count('clawStrike', []);
+  const two = count('clawStrike', ['doubleStrike']);
+  assert.equal(two.slashes / two.moves, 2 * (one.slashes / one.moves));
+  const s4 = count('spineMissiles', []);
+  const s8 = count('spineMissiles', ['barrage']);
+  assert.equal(s4.spines / s4.moves, 4);
+  assert.equal(s8.spines / s8.moves, 8);
 });
 
 test('one free reroll per pick, then one ad reroll per run', () => {
@@ -85,7 +132,7 @@ function neighbourPair(g, tier) {
 }
 
 test('Domino Effect topples neighbours in the fall direction', () => {
-  const g = new Game({ seed: 6, freshCity: true });
+  const g = new Game({ seed: 6 });
   g.kaiju.stage = 4;
   const pair = neighbourPair(g, 4);
   assert.ok(pair, 'found neighbouring buildings');
@@ -94,7 +141,7 @@ test('Domino Effect topples neighbours in the fall direction', () => {
   for (let i = 0; i < 30; i++) g.update(1 / 30);
   assert.equal(n.hp, n.maxHp, 'no damage without the augment');
 
-  const g2 = new Game({ seed: 6, freshCity: true });
+  const g2 = new Game({ seed: 6 });
   g2.kaiju.stage = 4;
   const [a2, n2] = neighbourPair(g2, 4);
   g2.held.set('dominoEffect', 1);
@@ -104,13 +151,13 @@ test('Domino Effect topples neighbours in the fall direction', () => {
 });
 
 test('chain collapses drop biomass only with the Demolition Crew set', () => {
-  const g = new Game({ seed: 7, freshCity: true });
+  const g = new Game({ seed: 7 });
   g.kaiju.stage = 4;
   const [a, b] = g.objects.filter((o) => o.kind === 'building' && o.tier === 4);
   const bio0 = g.stats.biomass;
   g.destroyObject(a, { x: 1, y: 0 }, 'chain');
   assert.equal(g.stats.biomass, bio0);
-  for (const id of ['dominoEffect', 'gasMain', 'debrisToss']) g.held.set(id, 1);
+  for (const id of ['dominoEffect', 'gasMain', 'seismicSlam']) g.held.set(id, 1);
   g.destroyObject(b, { x: 1, y: 0 }, 'chain');
   assert.ok(g.stats.biomass > bio0);
 });
@@ -137,7 +184,7 @@ test('military vehicles and soldiers never drive or walk through intact building
 });
 
 test('autopiloted runs grow through all six stages, fight the boss and mostly win', () => {
-  const runs = [1, 2, 3].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true, freshCity: true }), { maxTime: 1500 }));
+  const runs = [1, 2, 3].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true }), { maxTime: 1500 }));
   for (const g of runs) {
     assert.ok(g.state === 'won' || g.state === 'lost', `run ended (state ${g.state})`);
     assert.ok(g.results.buildings > 30);

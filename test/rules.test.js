@@ -85,3 +85,15 @@ test('the city has the things a city has: civic landmarks, parks, plazas, a metr
   assert.ok(city.metro.segments.length > 100 && city.metro.stations.length >= 5);
   assert.ok(city.powerLines.length > 20);
 });
+
+test('every seed makes a different map, and the run always starts in the suburbs', () => {
+  const zoneAt = (c, x, y) => c.cells.find((z) => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.w);
+  const lakes = new Set();
+  for (const seed of [2, 9, 31]) {
+    const c = generateCity(seed);
+    lakes.add(`${Math.round(c.lake.cx)},${Math.round(c.lake.cy)}`);
+    assert.equal(zoneAt(c, c.spawn.x, c.spawn.y).style, 'suburb', `seed ${seed}`);
+    assert.equal(c.bridges.length, 1);
+  }
+  assert.equal(lakes.size, 3, 'the lake moves between seeds');
+});

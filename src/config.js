@@ -15,11 +15,11 @@ WORLD.height = WORLD.rows * WORLD.cell;
 // pickOdds is the augment tier roll used when the kaiju grows INTO that stage.
 export const STAGES = [
   null,
-  { n: 1, name: 'Hatchling', size: 'Human', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 15, pickOdds: null },
-  { n: 2, name: 'Prowler', size: 'Backyard', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 220, pickOdds: { silver: 1 } },
-  { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 1300, pickOdds: { silver: 1 } },
-  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 6500, pickOdds: { silver: 0.5, gold: 0.5 } },
-  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 26000, pickOdds: { gold: 1 } },
+  { n: 1, name: 'Hatchling', size: 'Human', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 24, pickOdds: null },
+  { n: 2, name: 'Prowler', size: 'Backyard', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 420, pickOdds: { silver: 1 } },
+  { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 2500, pickOdds: { silver: 1 } },
+  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 12500, pickOdds: { silver: 0.5, gold: 0.5 } },
+  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 50000, pickOdds: { gold: 1 } },
   { n: 6, name: 'Apex', size: 'Skyline', radius: 135, maxHp: 3200, damage: 5120, speed: 520, biomassToNext: Infinity, pickOdds: { gold: 0.7, prismatic: 0.3 } },
 ];
 export const MAX_STAGE = 6;
@@ -137,7 +137,7 @@ export const ESCALATION = [
 
 export const BOSS = {
   name: 'Coast Guard Mech',
-  hp: 680000,
+  hp: 900000,
   r: 150,
   speed: 150,
   contactDmg: 30,

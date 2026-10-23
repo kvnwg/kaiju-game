@@ -4,6 +4,29 @@
 // projectiles and loot orbs. Purely visual; the game simulation never reads this.
 
 const DEBRIS_CAP = 4000;
+
+// Claw slash: three curved ribbons; a bright head sweeps along the arc leaving a fading trail.
+const SLASH_VS = `
+attribute vec2 uv2;
+varying vec2 vUv;
+void main() {
+  vUv = uv2;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const SLASH_FS = `
+uniform float uP;
+uniform vec3 uColor;
+varying vec2 vUv;
+void main() {
+  float head = uP * 1.35;
+  float trail = smoothstep(head - 0.75, head, vUv.x) * step(vUv.x, head);
+  float taper = sin(vUv.x * 3.14159);
+  float edge = 1.0 - abs(vUv.y - 0.5) * 2.0;
+  float a = trail * taper * smoothstep(0.0, 0.35, edge) * (1.0 - smoothstep(0.75, 1.0, uP));
+  if (a < 0.02) discard;
+  vec3 c = mix(uColor, vec3(1.0), smoothstep(0.6, 1.0, edge) * 0.8);
+  gl_FragColor = vec4(c * 1.4, a);
+}`;
 const PARTICLE_CAP = 2500;
 
 const PARTICLE_VS = `
@@ -103,6 +126,15 @@ function norm2(x, y) {
   return { x: x / l, y: y / l };
 }
 
+// Height of a lobbed projectile (spines, thrown cars): rises from the launch height and
+// arcs down onto the target.
+export function arcHeight(p) {
+  const done = Math.hypot(p.x - p.x0, p.y - p.y0);
+  const left = Math.hypot((p.tx ?? p.x) - p.x, (p.ty ?? p.y) - p.y);
+  const f = done / Math.max(1, done + left);
+  return (p.h0 || 2) * (1 - f) + Math.sin(f * Math.PI) * (p.arc || 0) + 0.5;
+}
+
 function rgb(c) {
   return { r: ((c >> 16) & 255) / 255, g: ((c >> 8) & 255) / 255, b: (c & 255) / 255 };
 }
@@ -145,6 +177,9 @@ export class FX {
     this.aimLines.frustumCulled = false;
     scene.add(this.aimLines);
 
+    this.slashMeshes = new Map();
+    this.crackMeshes = new Map();
+    this.beamCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     this.ringPool = [];
     this.beamPool = [];
     this.hazardMeshes = new Map();
@@ -275,6 +310,9 @@ export class FX {
       this.syncRings(game);
       this.syncHazards(game);
       this.syncBeams(game);
+      this.syncSlashes(game);
+      this.syncSwirls(game);
+      this.syncCracks(game);
       this.syncBolts(game);
       this.syncGlowThings(game, dt);
     }
@@ -422,31 +460,191 @@ export class FX {
     }
   }
 
+  // Beams run from (x1, h) to (x2, h2): eye lasers and breath angle down to the ground.
   syncBeams(game) {
     for (const m of this.beamPool) m.visible = false;
     let i = 0;
-    for (const b of game.fx.beams) {
+    const getMesh = (core) => {
       let m = this.beamPool[i];
       if (!m) {
-        m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+        const own = new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+        m = new THREE.Mesh(this.beamGeo || (this.beamGeo = new THREE.BoxGeometry(1, 1, 1)), own);
+        m.userData.ownMat = own;
         m.renderOrder = 8;
         this.scene.add(m);
         this.beamPool.push(m);
       }
       i++;
-      const len = Math.hypot(b.x2 - b.x1, b.y2 - b.y1);
-      const a = b.life / b.max;
       m.visible = true;
-      m.material.color.setHex(b.color);
-      m.material.opacity = a;
-      const h = b.h ?? b.width * 0.5;
-      m.position.set((b.x1 + b.x2) / 2, h, (b.y1 + b.y2) / 2);
-      m.rotation.set(0, -Math.atan2(b.y2 - b.y1, b.x2 - b.x1), 0);
-      m.scale.set(len, b.width * 0.35 * (0.6 + a * 0.4), b.width * 0.35 * (0.6 + a * 0.4));
-      if (!b._lit) {
-        b._lit = true;
-        this.flash((b.x1 + b.x2) / 2, h, (b.y1 + b.y2) / 2, b.color, 1.4, Math.min(len * 0.5, 600), b.max);
+      m.material = core ? this.beamCoreMat : m.userData.ownMat;
+      return m;
+    };
+    const dir = this._v;
+    const from = new THREE.Vector3();
+    const xAxis = new THREE.Vector3(1, 0, 0);
+    for (const b of game.fx.beams) {
+      const a = b.life / b.max;
+      const h1 = b.h ?? b.width * 0.5;
+      const h2 = b.h2 ?? h1;
+      from.set(b.x1, h1, b.y1);
+      dir.set(b.x2 - b.x1, h2 - h1, b.y2 - b.y1);
+      const len = dir.length() || 1;
+      dir.divideScalar(len);
+      const place = (m, thick) => {
+        m.position.set(b.x1 + (b.x2 - b.x1) / 2, (h1 + h2) / 2, b.y1 + (b.y2 - b.y1) / 2);
+        m.quaternion.setFromUnitVectors(xAxis, dir);
+        m.scale.set(len, thick, thick);
+      };
+      const glow = getMesh(false);
+      glow.material.color.setHex(b.color);
+      glow.material.opacity = b.core ? 0.55 : b.noFlash ? 0.75 : a;
+      place(glow, b.core ? b.width * 0.7 : b.width * 0.35 * (0.6 + a * 0.4));
+      if (b.core) place(getMesh(true), b.width * 0.16);
+      if (b.spark && Math.random() < 0.7) {
+        const c = rgb(b.color);
+        this.glow.add({ x: b.x2, y: h2 + 0.5, z: b.y2, vx: (Math.random() - 0.5) * b.width * 6, vy: b.width * (2 + Math.random() * 4), vz: (Math.random() - 0.5) * b.width * 6, size: b.width * (0.8 + Math.random()), grow: -1, life: 0.3, max: 0.3, a: 0.9, ...c });
+        if (Math.random() < 0.3) this.dust.add({ x: b.x2, y: h2 + 0.5, z: b.y2, vx: 0, vy: b.width * 2, vz: 0, size: b.width * 2.5, grow: 1.5, life: 0.7, max: 0.7, a: 0.35, drag: 2, ...rgb(0x3a3a3a) });
       }
+      if (!b._lit && !b.noFlash) {
+        b._lit = true;
+        this.flash((b.x1 + b.x2) / 2, h1, (b.y1 + b.y2) / 2, b.color, 1.4, Math.min(len * 0.5, 600), b.max);
+      }
+    }
+    // One light that rides along sustained beams.
+    const live = game.fx.beams.find((b) => b.noFlash && b.core);
+    if (live && Math.random() < 0.5) this.flash(live.x2, (live.h2 ?? 1) + 2, live.y2, live.color, 1.1, live.width * 8, 0.08);
+  }
+
+  syncSlashes(game) {
+    const live = new Set();
+    for (const sl of game.fx.slashes) {
+      live.add(sl);
+      let m = this.slashMeshes.get(sl);
+      if (!m) {
+        const geo = new THREE.BufferGeometry();
+        const pos = [];
+        const uv = [];
+        const idx = [];
+        const N = 28;
+        let base = 0;
+        for (let band = 0; band < 3; band++) {
+          const r = sl.r * (0.62 + band * 0.17);
+          const w = sl.r * 0.075;
+          for (let j = 0; j <= N; j++) {
+            const u = j / N;
+            const ang = -sl.arc / 2 + u * sl.arc;
+            const a = sl.side > 0 ? ang : -ang;
+            const lift = Math.sin(u * Math.PI) * sl.r * 0.12 * (band - 1);
+            for (const side of [0, 1]) {
+              const rr = r + (side ? w : -w);
+              pos.push(Math.cos(a) * rr, lift, Math.sin(a) * rr);
+              uv.push(u, side);
+            }
+            if (j < N) {
+              const v = base + j * 2;
+              idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
+            }
+          }
+          base += (N + 1) * 2;
+        }
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute('uv2', new THREE.Float32BufferAttribute(uv, 2));
+        geo.setIndex(idx);
+        const mat = new THREE.ShaderMaterial({
+          vertexShader: SLASH_VS, fragmentShader: SLASH_FS, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending, uniforms: { uP: { value: 0 }, uColor: { value: new THREE.Color(sl.color) } },
+        });
+        m = new THREE.Mesh(geo, mat);
+        m.renderOrder = 9;
+        m.position.set(sl.x, sl.h, sl.y);
+        // Face the strike direction, tilted like a diagonal swipe.
+        m.rotation.order = 'YXZ';
+        m.rotation.y = -sl.ang;
+        m.rotation.x = sl.side * 0.38;
+        this.scene.add(m);
+        this.slashMeshes.set(sl, m);
+        this.flash(sl.x + Math.cos(sl.ang) * sl.r * 0.7, sl.h, sl.y + Math.sin(sl.ang) * sl.r * 0.7, sl.color, 1.2, sl.r * 3, 0.15);
+      }
+      m.material.uniforms.uP.value = 1 - sl.life / sl.max;
+    }
+    for (const [sl, m] of this.slashMeshes) {
+      if (live.has(sl)) continue;
+      this.scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+      this.slashMeshes.delete(sl);
+    }
+  }
+
+  // Cyclone: a funnel of dust and grit whipping around the kaiju.
+  syncSwirls(game) {
+    const k = game.kaiju;
+    for (const sw of game.fx.swirls) {
+      const cx = sw.follow ? k.x : sw.x;
+      const cy = sw.follow ? k.y : sw.y;
+      const c = rgb(sw.color);
+      for (let i = 0; i < 7; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = sw.r * (0.35 + Math.random() * 0.65);
+        const h = Math.random() * k.r * 2.4;
+        const sp = r * 4.5;
+        this.dust.add({ x: cx + Math.cos(a) * r, y: h, z: cy + Math.sin(a) * r, vx: -Math.sin(a) * sp - Math.cos(a) * r, vy: k.r * 1.5, vz: Math.cos(a) * sp - Math.sin(a) * r, size: k.r * (0.5 + Math.random() * 0.6), grow: 0.8, life: 0.35, max: 0.35, a: 0.55, drag: 0.6, ...c });
+      }
+    }
+  }
+
+  // Slam cracks: jagged rays burned into the ground, glowing at first, fading to scorch.
+  syncCracks(game) {
+    const live = new Set();
+    for (const cr of game.fx.cracks) {
+      live.add(cr);
+      let entry = this.crackMeshes.get(cr);
+      if (!entry) {
+        const group = new THREE.Group();
+        const dark = new THREE.MeshBasicMaterial({ color: 0x1a1410, transparent: true, opacity: 0.85, depthWrite: false });
+        const hot = new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+        let seed = cr.seed;
+        const rnd = () => {
+          seed = (seed * 9301 + 49297) % 233280;
+          return seed / 233280;
+        };
+        const rays = 9;
+        for (let i = 0; i < rays; i++) {
+          let a = (i / rays) * Math.PI * 2 + rnd() * 0.5;
+          let x = 0;
+          let y = 0;
+          const segs = 3 + Math.floor(rnd() * 2);
+          for (let j = 0; j < segs; j++) {
+            const len = (cr.r / segs) * (0.7 + rnd() * 0.6);
+            const w = cr.r * 0.05 * (1 - j / segs) + 0.3;
+            for (const [mat, ww, yy] of [[dark, w, 0.15], [hot, w * 0.45, 0.2]]) {
+              const m = new THREE.Mesh(this.planeGeo, mat);
+              m.position.set(x, yy, y);
+              m.rotation.y = -a;
+              m.scale.set(len, 1, ww);
+              m.renderOrder = 3;
+              group.add(m);
+            }
+            x += Math.cos(a) * len;
+            y += Math.sin(a) * len;
+            a += (rnd() - 0.5) * 0.9;
+          }
+        }
+        group.position.set(cr.x, 0.3, cr.y);
+        this.scene.add(group);
+        entry = { group, dark, hot };
+        this.crackMeshes.set(cr, entry);
+      }
+      const f = cr.life / cr.max;
+      entry.hot.opacity = Math.max(0, f * 1.6 - 0.6);
+      entry.dark.opacity = Math.min(0.85, f * 2);
+    }
+    for (const [cr, entry] of this.crackMeshes) {
+      if (live.has(cr)) continue;
+      this.scene.remove(entry.group);
+      entry.dark.dispose();
+      entry.hot.dispose();
+      this.crackMeshes.delete(cr);
     }
   }
 
@@ -508,6 +706,13 @@ export class FX {
         if (Math.random() < 0.5) this.glow.add({ x: p.x, y: p.h ?? 1, z: p.y, vx: 0, vy: 0, vz: 0, size: sz * 3.2, grow: -0.5, life: 0.18, max: 0.18, a: 0.75, ...rgb(0xffb347) });
       }
       else if (p.kind === 'rock') put(p.x, game.kaiju.r, p.y, p.r * 1.5, 0x8a7a66, rot, 1);
+      else if (p.kind === 'car') continue; // drawn as a tumbling car by the actors
+      else if (p.kind === 'spine') {
+        const y = arcHeight(p);
+        put(p.x, y, p.y, p.size, 0xffffff, rot, 2.6);
+        put(p.x, y, p.y, p.size * 1.5, p.color, rot, 1.6);
+        if (Math.random() < 0.8) this.glow.add({ x: p.x, y, z: p.y, vx: 0, vy: 0, vz: 0, size: p.size * 3.5, grow: -1, life: 0.3, max: 0.3, a: 0.8, ...rgb(p.color) });
+      }
       else {
         put(p.x, p.h ?? 2, p.y, p.size || Math.max(0.5, p.r * 1.5), 0xeeeeee, rot, 2.5);
         put(p.x, p.h ?? 2, p.y, (p.size || p.r) * 0.6, 0xff4a2a, rot + Math.PI / 2, 1);
@@ -560,6 +765,18 @@ export class FX {
         if (Math.random() < u.stress * 0.25) {
           this.bits.add({ x: u.x, y: head, z: u.y, vx: (Math.random() - 0.5) * s * 6, vy: s * 5, vz: (Math.random() - 0.5) * s * 6, lift: -s * 18, drag: 0.5, size: s * 0.45, grow: 0, life: 0.45, max: 0.45, a: 0.9, ...rgb(0x9fdcff) });
         }
+      }
+    }
+    // Atomic Breath charging: blue motes rush into the kaiju's mouth.
+    const an = k0.anim;
+    if (an && an.kind === 'breath' && an.max - an.t < an.charge) {
+      const mx = k0.x + k0.facing.x * k0.r * 1.1;
+      const mz = k0.y + k0.facing.y * k0.r * 1.1;
+      for (let i = 0; i < 4; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = k0.r * (1.2 + Math.random() * 1.5);
+        const life = 0.3;
+        this.glow.add({ x: mx + Math.cos(ang) * r, y: k0.r * 1.3 + (Math.random() - 0.3) * r, z: mz + Math.sin(ang) * r, vx: (-Math.cos(ang) * r) / life, vy: 0, vz: (-Math.sin(ang) * r) / life, drag: 0, size: k0.r * 0.35, grow: -0.8, life, max: life, a: 0.9, ...rgb(0x7df9ff) });
       }
     }
     this.aimPos.fill(0, a * 6);

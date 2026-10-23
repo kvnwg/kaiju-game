@@ -46,19 +46,47 @@ export class SpatialGrid {
 // ---------------------------------------------------------------- layout
 const { cell, road, cols, rows, seaWidth } = WORLD;
 
-// District centres in cell coordinates.
-const DISTRICTS = [
-  { style: 'neon', cx: 4.5, cy: 8.5, r: 6.5, peak: 1.15 },
-  { style: 'brick', cx: 4.5, cy: 2, r: 5.2, peak: 0.95 },
-  { style: 'pastel', cx: 1.8, cy: 14, r: 4.6, peak: 0.7 },
-  { style: 'garden', cx: 14.5, cy: 8.5, r: 5.6, peak: 0.85 },
-  { style: 'neon', cx: 14.5, cy: 1.5, r: 4.6, peak: 0.95, name: 'Neon Heights' },
-  { style: 'suburb', cx: 19, cy: 10.5, r: 6, peak: 0.5 },
-  { style: 'suburb', cx: 19.5, cy: 3.5, r: 4.5, peak: 0.45 },
-  { style: 'pastel', cx: 12.5, cy: 14.5, r: 4, peak: 0.65 },
-];
+// The map layout is procedural: every seed moves the districts, the lake, the river, the
+// forest belts and the highway, while keeping the shape of Harbor Town (sea and docks to the
+// west, downtown beside it, the lake in the middle, quiet suburbs in the east where every run
+// starts).
+function makeLayout(seed) {
+  const rng = createRng(seed * 7919 + 13);
+  const r = (a, b) => rng.range(a, b);
+  const pick = (arr) => arr[rng.int(0, arr.length - 1)];
+  const lake = { cx: seaWidth + r(8.8, 12) * cell, cy: r(6.2, 10.2) * cell, rx: r(1050, 1350), ry: r(1250, 1650) };
+  const lakeC = (lake.cx - seaWidth) / cell;
+  const lakeR = lake.cy / cell;
+  // Old town, east-of-lake and the south get a shuffle so every style shows up somewhere.
+  const trio = rng.shuffle(['brick', 'garden', pick(['brick', 'garden', 'pastel'])]);
+  const districts = [
+    { style: 'neon', cx: r(3.6, 5.8), cy: lakeR + r(-1.5, 1.5), r: r(6, 7), peak: 1.15 },
+    { style: trio[0], cx: r(3, 6), cy: r(1.2, 3), r: r(4.6, 5.6), peak: 0.95 },
+    { style: 'pastel', cx: r(1.5, 3.2), cy: r(12.8, 15), r: r(4.2, 5), peak: 0.7 },
+    { style: trio[1], cx: lakeC + r(2.8, 4.5), cy: lakeR + r(-1.5, 1.5), r: r(5, 6), peak: 0.85 },
+    { style: pick(['neon', 'neon', 'brick']), cx: r(12.5, 16), cy: r(0.8, 2.5), r: r(4.2, 5.2), peak: 0.95 },
+    // Home: the neighbourhood the hatchling crawls out of.
+    { style: 'suburb', cx: r(18.6, 20.4), cy: r(8.5, 12.5), r: r(5.6, 6.6), peak: 0.5, home: true },
+    { style: 'suburb', cx: r(18.8, 21), cy: r(2, 5), r: r(4, 5), peak: 0.45 },
+    { style: trio[2], cx: r(10.5, 14), cy: r(13.6, 15.4), r: r(3.6, 4.4), peak: 0.65 },
+  ];
+  if (rng.chance(0.5)) districts.push({ style: pick(['garden', 'pastel', 'brick']), cx: r(7, 9), cy: r(12, 15), r: r(2.8, 3.6), peak: 0.6 });
+  return {
+    seed,
+    noise: rng.int(0, 999),
+    lake,
+    districts,
+    river: { amp: r(150, 320), freq: r(700, 1100), phase: r(0, 6.28), drift: r(0.2, 0.45) * (rng.chance(0.5) ? 1 : -1) },
+    belt: { row: r(3.4, 5.4), east: r(21.2, 22.6) },
+    highwayRow: Math.round(lake.cy / cell),
+  };
+}
 
-const LAKE = { cx: seaWidth + 10.2 * cell, cy: 8.3 * cell, rx: 1250, ry: 1500 };
+let L = makeLayout(1);
+
+export function currentLayout() {
+  return L;
+}
 
 function noise2(x, y, seed) {
   const s = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
@@ -81,13 +109,15 @@ function smoothNoise(x, y, seed) {
 
 export function isWater(x, y) {
   if (x < seaWidth - 40 + smoothNoise(0, y / 300, 3) * 80) return true;
-  const lx = (x - LAKE.cx) / LAKE.rx;
-  const ly = (y - LAKE.cy) / LAKE.ry;
-  const wob = smoothNoise(x / 400, y / 400, 5) * 0.25;
+  const lake = L.lake;
+  const lx = (x - lake.cx) / lake.rx;
+  const ly = (y - lake.cy) / lake.ry;
+  const wob = smoothNoise(x / 400, y / 400, 5 + L.noise) * 0.25;
   if (lx * lx + ly * ly < 1 - wob) return true;
   // River feeding the lake from the north and draining south.
-  const rx = LAKE.cx + Math.sin(y / 900) * 260 - (y > LAKE.cy ? (y - LAKE.cy) * 0.35 : 0);
-  const width = 70 + smoothNoise(0, y / 500, 9) * 40;
+  const rv = L.river;
+  const rx = lake.cx + Math.sin(y / rv.freq + rv.phase) * rv.amp - (y > lake.cy ? (y - lake.cy) * rv.drift : 0);
+  const width = 70 + smoothNoise(0, y / 500, 9 + L.noise) * 40;
   return Math.abs(x - rx) < width;
 }
 
@@ -100,25 +130,29 @@ function zoneFor(c, r) {
   const p = cellCenter(c, r);
   if (isWater(p.x, p.y)) return { style: 'water', density: 0 };
   let best = { style: 'forest', density: 0 };
-  let bestScore = 0.12 + smoothNoise(c / 3, r / 3, 11) * 0.12;
-  for (const d of DISTRICTS) {
+  const n = L.noise;
+  let bestScore = 0.12 + smoothNoise(c / 3, r / 3, 11 + n) * 0.12;
+  for (const d of L.districts) {
     const dist = Math.hypot(c + 0.5 - d.cx, r + 0.5 - d.cy) / d.r;
-    const score = (1 - dist) * d.peak + smoothNoise(c / 2, r / 2, d.cx) * 0.12;
+    const score = (1 - dist) * d.peak + smoothNoise(c / 2, r / 2, d.cx + n) * 0.12;
     if (score > bestScore) {
       bestScore = score;
       best = { style: d.style, density: Math.max(0, Math.min(1, score)), district: d };
     }
   }
   // Forest belts: between the southern city and Neon Heights, and the eastern outskirts.
-  const belt = (r >= 3.2 + smoothNoise(c / 2, 0, 21) * 1.2 && r <= 5.2 + smoothNoise(c / 2, 1, 22) && c >= 9) || c >= 22 - smoothNoise(0, r / 2, 23) * 1.5;
+  const b = L.belt;
+  const belt = (r >= b.row - 1 + smoothNoise(c / 2, 0, 21 + n) * 1.2 && r <= b.row + 1 + smoothNoise(c / 2, 1, 22 + n) && c >= 9) || c >= b.east - smoothNoise(0, r / 2, 23 + n) * 1.5;
   if (belt && best.style !== 'neon') best = { style: 'forest', density: 0 };
   if (c === 0 && best.style !== 'forest') best = { style: 'docks', density: 0.4 };
   // Parks: occasional green cells inside cities.
-  if (best.style !== 'forest' && best.style !== 'suburb' && noise2(c, r, 77) < 0.07) best = { style: 'park', density: 0.2 };
+  if (best.style !== 'forest' && best.style !== 'suburb' && noise2(c, r, 77 + n) < 0.07) best = { style: 'park', density: 0.2 };
   return best;
 }
 
 export function generateCity(seed = 1) {
+  L = makeLayout(seed);
+  const LAKE = L.lake;
   const rng = createRng(seed);
   const objects = [];
   const lights = [];
@@ -194,7 +228,7 @@ export function generateCity(seed = 1) {
   const urban = (zc) => Boolean(zc) && zc.style !== 'forest' && zc.style !== 'water';
 
   // Roads run along cell borders wherever a neighbouring cell is urban, plus two highways.
-  const HIGHWAY_ROW = 8;
+  const HIGHWAY_ROW = L.highwayRow;
   const HIGHWAY_COL = 20;
   const roadH = (c, r) => r === HIGHWAY_ROW || urban(zoneAt(c, r)) || urban(zoneAt(c, r - 1));
   const roadV = (c, r) => c === HIGHWAY_COL || urban(zoneAt(c, r)) || urban(zoneAt(c - 1, r));
@@ -599,8 +633,10 @@ export function generateCity(seed = 1) {
   // ---- elevated metro: down the brick/neon avenue, then east across the lake
   const metro = { points: [], segments: [], stations: [] };
   {
-    const ax = seaWidth + 5 * cell;
-    const route = [[ax, cell], [ax, 11 * cell], [seaWidth + 18 * cell, 11 * cell]];
+    const downtown = L.districts[0];
+    const ax = seaWidth + Math.round(Math.max(3, Math.min(6, downtown.cx))) * cell;
+    const metroRow = Math.min(rows - 2, HIGHWAY_ROW + 3);
+    const route = [[ax, cell], [ax, metroRow * cell], [seaWidth + 18 * cell, metroRow * cell]];
     const tr = buildingDims('metro_track', 0);
     let dist = 0;
     for (let i = 0; i < route.length - 1; i++) {
@@ -642,12 +678,13 @@ export function generateCity(seed = 1) {
     if (isWater(bx, by)) addProp('boat', bx, by, rng.int(0, 3));
   }
 
-  // ---- spawn: a backyard in the eastern suburbs
+  // ---- spawn: a backyard in the home neighbourhood
+  const home = L.districts.find((d) => d.home);
   let spawn = null;
   let bestD = Infinity;
   for (const zc of cells) {
     if (zc.style !== 'suburb') continue;
-    const d = Math.hypot(zc.c - 20, zc.r - 10);
+    const d = Math.hypot(zc.c + 0.5 - home.cx, zc.r + 0.5 - home.cy);
     if (d < bestD) {
       bestD = d;
       spawn = { x: zc.x + zc.w / 2, y: zc.y + zc.w / 2 };
@@ -667,7 +704,14 @@ export function generateCity(seed = 1) {
   const grid = new SpatialGrid(WORLD.width, WORLD.height);
   for (const o of live) grid.insert(o);
   const lines = powerLines.map((chain) => chain.filter((o) => o.state !== 'removed')).filter((c) => c.length > 1);
-  return { objects: live, cells, roads, lights: liveLights, bridges, spawn, grid, landmark, pier, lake: LAKE, highwayRow: HIGHWAY_ROW, decals, powerLines: lines, metro };
+  return { seed, layout: L, objects: live, cells, roads, lights: liveLights, bridges, spawn, grid, landmark, pier, lake: LAKE, highwayRow: HIGHWAY_ROW, decals, powerLines: lines, metro };
 }
 
-export const WORLD_LAYOUT = { DISTRICTS, LAKE };
+// Make a previously generated city's layout current again (isWater etc. read it).
+export function useCity(city) {
+  L = city.layout;
+}
+
+export function worldLayout() {
+  return L;
+}

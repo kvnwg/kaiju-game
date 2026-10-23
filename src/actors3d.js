@@ -3,6 +3,7 @@
 import { meshGrid } from './mesher.js';
 import { KAIJU_MODELS, UNIT_MODELS, bossModel, personModel, PERSON_VARIANTS } from './models.js';
 import { buildProp } from './props.js';
+import { arcHeight } from './fx3d.js';
 
 export function toGeometry(m) {
   const g = new THREE.BufferGeometry();
@@ -87,6 +88,7 @@ export class Actors {
     const kmat = this.makeMat(0.3);
     const rig = partsGroup(KAIJU_MODELS[id](), kmat);
     rig.mat = kmat;
+    rig.yaw = null;
     this.kaiju = rig;
     this.scene.add(rig.root);
   }
@@ -113,15 +115,111 @@ export class Actors {
     const rig = this.kaiju;
     const s = k.r / rig.model.radius;
     rig.root.scale.setScalar(s);
-    rig.root.position.set(k.x, k.inWater ? -k.r * 0.35 : elev, k.y);
+    rig.root.position.set(k.x, (k.inWater ? -k.r * 0.35 : elev) + (k.z || 0), k.y);
+    // Mid-hop: tuck forward on the way up, level out for the landing.
+    const hop = k.hopT > 0 ? Math.sin((1 - k.hopT / k.hopMax) * Math.PI * 2) * 0.35 : 0;
+    rig.root.rotation.order = 'YZX';
+    rig.root.rotation.z = -hop;
     const target = -Math.atan2(k.facing.y, k.facing.x);
-    let d = target - rig.root.rotation.y;
+    rig.yaw = rig.yaw ?? target;
+    let d = target - rig.yaw;
     d = Math.atan2(Math.sin(d), Math.cos(d));
-    rig.root.rotation.y += d * 0.25;
+    rig.yaw += d * (k.anim && k.anim.kind === 'laser' ? 0.6 : 0.25);
+    rig.root.rotation.y = rig.yaw;
     animateRig(rig, k.walkPhase, k.moving, t, Boolean(k.lastAttack));
+    const glow = this.movePose(rig, k, t);
     const fl = k.hitFlash > 0 ? 0.6 : k.invuln > 0 && Math.floor(t * 12) % 2 ? 0.35 : 0;
-    rig.mat.emissive.setRGB(fl, fl * 0.3, fl * 0.3);
-    if (k.shield > 0) rig.mat.emissive.setRGB(fl + 0.05, fl + 0.05, fl + 0.08);
+    rig.mat.emissive.setRGB(fl + glow[0], fl * 0.3 + glow[1], fl * 0.3 + glow[2]);
+    if (k.shield > 0) rig.mat.emissive.setRGB(fl + 0.05 + glow[0], fl + 0.05 + glow[1], fl + 0.08 + glow[2]);
+  }
+
+  // Poses for augment moves layered over the walk cycle. Returns an emissive glow (rgb).
+  movePose(rig, k, t) {
+    const a = k.anim;
+    if (!a) return [0, 0, 0];
+    const f = 1 - a.t / a.max; // 0 -> 1 through the move
+    const n = rig.nodes;
+    const each = (fn) => {
+      for (const g of Object.values(n)) fn(g, g.userData.part);
+    };
+    switch (a.kind) {
+      case 'claw': {
+        // Wind up, then rake: the striking arm sweeps through, the body twists into it.
+        const swing = Math.sin(f * Math.PI);
+        each((g, p) => {
+          if (p.arm && Math.sign(p.arm) === (a.side || 1)) g.rotation.z = -2.2 * swing;
+          else if (p.arm) g.rotation.z = 0.5 * swing;
+          if (p.name === 'jaw') g.rotation.z = -0.5 * swing;
+        });
+        rig.root.rotation.y += (a.side || 1) * 0.6 * (f < 0.4 ? -f : f - 0.8);
+        return [0.25 * swing, 0.2 * swing, 0.1 * swing];
+      }
+      case 'spin': {
+        // Whole body whirls; the tail streams out.
+        const turns = a.turns || 1;
+        const ease = f < 0.5 ? 2 * f * f : 1 - 2 * (1 - f) * (1 - f);
+        rig.root.rotation.y += ease * turns * Math.PI * 2;
+        each((g, p) => {
+          if (p.tail !== undefined) g.rotation.y = -0.3;
+          if (p.arm) g.rotation.z = -0.8;
+        });
+        return [0, 0, 0];
+      }
+      case 'slam': {
+        // Tuck on the way up, stamp down hard.
+        each((g, p) => {
+          if (p.swing) g.rotation.z = f < 0.6 ? -0.9 : 0.4;
+          if (p.arm) g.rotation.z = f < 0.6 ? -2.4 : -0.4;
+          if (p.name === 'jaw') g.rotation.z = -0.5;
+        });
+        rig.root.rotation.z = f < 0.6 ? -0.25 : 0.2;
+        return [0.2, 0.12, 0];
+      }
+      case 'laser': {
+        const pulse = 0.5 + 0.5 * Math.sin(t * 40);
+        each((g, p) => {
+          if (p.name === 'head') g.rotation.z = -0.2;
+        });
+        return [0.18 + 0.12 * pulse, 0, 0.06];
+      }
+      case 'breath': {
+        const charging = a.max - a.t < a.charge;
+        const c = charging ? (a.max - a.t) / a.charge : 1;
+        each((g, p) => {
+          if (p.name === 'head') g.rotation.z = charging ? 0.35 * c : -0.1;
+          if (p.name === 'jaw') g.rotation.z = charging ? -0.15 : -0.9;
+          if (p.name === 'body') g.rotation.z += charging ? -0.15 * c : 0.1;
+        });
+        const flick = 0.85 + 0.15 * Math.sin(t * 50);
+        return [0.02 * c, 0.2 * c * flick, 0.26 * c * flick];
+      }
+      case 'roar': {
+        const r = Math.sin(Math.min(1, f * 2.5) * Math.PI * 0.5);
+        each((g, p) => {
+          if (p.name === 'head') g.rotation.z = 0.45 * r;
+          if (p.name === 'jaw') g.rotation.z = -1.0 * r;
+          if (p.arm) g.rotation.z = 0.8 * r;
+        });
+        return [0.15 * r, 0.12 * r, 0];
+      }
+      case 'throw': {
+        const s = Math.sin(f * Math.PI);
+        each((g, p) => {
+          if (p.arm) g.rotation.z = f < 0.35 ? 1.2 : -2.2 * s;
+        });
+        return [0, 0, 0];
+      }
+      case 'spines': {
+        const s = Math.sin(f * Math.PI);
+        each((g, p) => {
+          if (p.name === 'body') g.rotation.z += 0.25 * s;
+          if (p.name === 'head') g.rotation.z = -0.3 * s;
+        });
+        return [0.05 * s, 0.4 * s, 0.25 * s];
+      }
+      default:
+        return [0, 0, 0];
+    }
   }
 
   updateBoss(game, t) {
@@ -250,6 +348,20 @@ export class Actors {
       this._e.set(0, -c.heading, 0);
       this._q.setFromEuler(this._e);
       this._s.setScalar(c.flash > 0 ? 1.15 : 1);
+      this._m.compose(this._v, this._q, this._s);
+      im.setMatrixAt(i, this._m);
+    }
+    // Cars hurled by Car Toss: oversized and tumbling end over end.
+    for (const p of game.projectiles) {
+      if (p.kind !== 'car') continue;
+      const im = this.trafficMesh(p.model, p.variant);
+      const i = counts.get(im) || 0;
+      if (i >= 40) continue;
+      counts.set(im, i + 1);
+      this._v.set(p.x, arcHeight(p), p.y);
+      this._e.set(p.age * p.spin, -Math.atan2(p.vy, p.vx), p.age * p.spin * 0.6);
+      this._q.setFromEuler(this._e);
+      this._s.setScalar(p.scale);
       this._m.compose(this._v, this._q, this._s);
       im.setMatrixAt(i, this._m);
     }

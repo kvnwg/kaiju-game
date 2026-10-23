@@ -9,6 +9,22 @@ function fmtTime(t) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function iconFor(a) {
+  if (a.kind === 'move') return a.id;
+  if (a.kind === 'mod') return a.requires === 'any' ? 'any' : a.requires;
+  return 'passive';
+}
+
+function kindLabel(a) {
+  if (a.kind === 'move') return 'Move';
+  if (a.kind === 'mod') return a.requires === 'any' ? 'Boosts all moves' : `Boosts ${AUGMENT_BY_ID[a.requires].name}`;
+  return 'Passive';
+}
+
+function icon(a) {
+  return `<i class="aug-ico ico-${iconFor(a)}">${a.kind === 'mod' ? '<b>+</b>' : ''}</i>`;
+}
+
 function fmtNum(n) {
   return Math.round(n).toLocaleString('en-US');
 }
@@ -68,12 +84,28 @@ export class UI {
     const sig = [...game.held.entries()].map(([id, l]) => `${id}${l}`).join(',');
     if (sig !== this.augSig) {
       this.augSig = sig;
+      // Moves first (with a cooldown meter), then their upgrades and passives.
+      const order = { move: 0, mod: 1, passive: 2 };
       this.augbar.innerHTML = [...game.held.entries()]
+        .sort((x, y) => order[AUGMENT_BY_ID[x[0]].kind] - order[AUGMENT_BY_ID[y[0]].kind])
         .map(([id, level]) => {
           const a = AUGMENT_BY_ID[id];
-          return `<div class="chip tier-${a.tier}" title="${a.text}">${a.name}${level > 1 ? ` <b>${level}</b>` : ''}</div>`;
+          return `<div class="tile tier-${a.tier} kind-${a.kind}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${a.name}: ${a.text}">
+            ${icon(a)}${a.kind === 'move' ? '<span class="cd"></span>' : ''}${level > 1 ? `<b class="lvl">${level}</b>` : ''}</div>`;
         })
         .join('');
+      this.moveTiles = [...this.augbar.querySelectorAll('[data-move]')].map((el) => ({ el, id: el.dataset.move, cd: el.querySelector('.cd'), last: 1 }));
+    }
+    for (const t of this.moveTiles || []) {
+      const r = game.moves.readiness(t.id);
+      t.cd.style.height = `${Math.round((1 - r) * 100)}%`;
+      t.el.classList.toggle('ready', r >= 1);
+      if (r < t.last - 0.5) {
+        t.el.classList.remove('fired');
+        void t.el.offsetWidth;
+        t.el.classList.add('fired');
+      }
+      t.last = r;
     }
   }
 
@@ -104,7 +136,7 @@ export class UI {
     const el = this.modals.pick;
     const tierName = { silver: 'Silver', gold: 'Gold', prismatic: 'Prismatic' }[p.tier];
     const cards = p.options
-      .map((id) => {
+      .map((id, i) => {
         const a = AUGMENT_BY_ID[id];
         const level = game.level(id);
         const sets = setsFor(id)
@@ -113,9 +145,9 @@ export class UI {
             return `<span class="set" title="${s.bonus}">${s.name} ${have}/3</span>`;
           })
           .join('');
-        return `<button class="card tier-${a.tier}" data-id="${id}">
-          <div class="card-top"><span class="tier">${a.tier}</span><span class="cat">${a.category}</span></div>
-          <div class="name">${a.name}${a.upgradable ? ' +' : ''}</div>
+        return `<button class="card tier-${a.tier} kind-${a.kind}" data-id="${id}" style="--i:${i}">
+          <div class="card-top"><span class="tier">${a.tier}</span><span class="cat">${kindLabel(a)}</span></div>
+          <div class="card-main">${icon(a)}<div class="name">${a.name}${a.upgradable ? ' +' : ''}</div></div>
           ${level ? `<div class="lvl">Level ${level} → ${level + 1}: ${a.levelText}</div>` : ''}
           <div class="text">${a.text}</div>
           <div class="sets">${sets}</div>
@@ -154,7 +186,7 @@ export class UI {
     this.show('revive');
   }
 
-  showPause({ quality, onQuality, onResume, onQuit }) {
+  showPause({ quality, pixelArt, onQuality, onPixelArt, onResume, onQuit }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
     el.innerHTML = `<div class="panel small">
@@ -163,15 +195,21 @@ export class UI {
           <button class="btn primary" id="resume">Resume</button>
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
+        <h3>Look</h3>
+        <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Pixel</button><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Smooth</button></div>
         <h3>Graphics</h3>
-        <div class="segs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
-        <p class="tiny">Low turns off shadows, bloom and tilt-shift for older phones.</p>
+        <div class="segs" id="qualSegs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
+        <p class="tiny">Low turns off shadows and bloom for older phones.</p>
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);
-    el.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
+    el.querySelectorAll('#qualSegs .seg').forEach((b) => b.addEventListener('click', () => {
       onQuality(b.dataset.q);
-      el.querySelectorAll('.seg').forEach((x) => x.classList.toggle('on', x === b));
+      el.querySelectorAll('#qualSegs .seg').forEach((x) => x.classList.toggle('on', x === b));
+    }));
+    el.querySelectorAll('#lookSegs .seg').forEach((b) => b.addEventListener('click', () => {
+      onPixelArt(b.dataset.px === '1');
+      el.querySelectorAll('#lookSegs .seg').forEach((x) => x.classList.toggle('on', x === b));
     }));
     this.show('pause');
   }

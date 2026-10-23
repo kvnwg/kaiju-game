@@ -6,6 +6,7 @@ import { trainCarModel, birdModel, blimpModel } from './models.js';
 import { buildProp } from './props.js';
 import { toGeometry } from './actors3d.js';
 import { isWater } from './world.js';
+import { WORLD } from './config.js';
 
 const BIRDS_PER_FLOCK = 16;
 const MAX_FLOCKS = 6;
@@ -61,6 +62,8 @@ export class Ambient {
     this.blimp = new THREE.Mesh(toGeometry(meshGrid(blm.grid, { v: blm.v, ox: blm.origin.x, oz: blm.origin.z, oy: 5 })), this.mat);
     this.blimp.castShadow = true;
     this.scene.add(this.blimp);
+    const dt = city.layout ? city.layout.districts[0] : { cx: 5, cy: 8.3 };
+    this.blimpAt = { x: WORLD.seaWidth + dt.cx * WORLD.cell, y: dt.cy * WORLD.cell };
   }
 
   reset() {
@@ -118,7 +121,7 @@ export class Ambient {
     this.updateBoats(dt, t, game);
     // Blimp: a slow loop over downtown, high above the towers.
     const a = t * 0.012;
-    this.blimp.position.set(2900 + Math.cos(a) * 900, 380 + Math.sin(t * 0.3) * 6, 3500 + Math.sin(a) * 700);
+    this.blimp.position.set(this.blimpAt.x + Math.cos(a) * 900, 380 + Math.sin(t * 0.3) * 6, this.blimpAt.y + Math.sin(a) * 700);
     this.blimp.rotation.y = -(a + Math.PI / 2);
   }
 

@@ -134,7 +134,13 @@ function togglePause(force) {
     input.release();
     ui.showPause({
       quality: renderer.qualityName,
+      pixelArt: renderer.pixelArt,
       onQuality: (q) => setQuality(q),
+      onPixelArt: (on) => {
+        renderer.setPixelArt(on);
+        profile.pixelArt = on;
+        saveProfile(profile);
+      },
       onResume: () => togglePause(false),
       onQuit: () => {
         paused = false;
@@ -207,7 +213,7 @@ function updatePreyArrow() {
 function boot() {
   try {
     if (!window.THREE) throw new Error('three.js did not load');
-    renderer = new Renderer3D(canvas, { quality: defaultQuality(), floaterLayer: document.getElementById('floaters') });
+    renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: profile.pixelArt !== false && params.get('look') !== 'smooth', floaterLayer: document.getElementById('floaters') });
     renderer.onQualityChange = (q) => {
       profile.quality = q;
       saveProfile(profile);

@@ -3,52 +3,37 @@ import {
   UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, rollTier, completedSets } from './augments.js';
-import { generateCity, isWater } from './world.js';
+import { generateCity, isWater, useCity } from './world.js';
 import { createRng } from './rng.js';
+import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
+import { MoveSystem } from './moves.js';
 import { PERSON_VARIANTS } from './models.js';
 
-const CITY_SEED = 1337;
 // Aim time before a projectile leaves the barrel (seconds); shells, artillery and lasers
 // already telegraph with ground markers.
 const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6 };
-let cachedCity = null;
+const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'gone']);
+const cityCache = new Map(); // seed -> generated city (small; generation takes ~0.5 s)
 
-export function distToRect(px, py, o) {
-  const dx = Math.max(Math.abs(px - o.x) - o.w / 2, 0);
-  const dy = Math.max(Math.abs(py - o.y) - o.h / 2, 0);
-  return Math.hypot(dx, dy);
-}
-
-export function distToSegment(px, py, x1, y1, x2, y2) {
-  const vx = x2 - x1;
-  const vy = y2 - y1;
-  const len2 = vx * vx + vy * vy || 1;
-  const t = Math.max(0, Math.min(1, ((px - x1) * vx + (py - y1) * vy) / len2));
-  return Math.hypot(px - (x1 + vx * t), py - (y1 + vy * t));
-}
-
-function norm(x, y) {
-  const l = Math.hypot(x, y);
-  return l > 1e-6 ? { x: x / l, y: y / l } : { x: 0, y: 0 };
-}
-
-function closestPoint(px, py, o) {
-  return {
-    x: Math.max(o.x - o.w / 2, Math.min(px, o.x + o.w / 2)),
-    y: Math.max(o.y - o.h / 2, Math.min(py, o.y + o.h / 2)),
-  };
-}
+export { distToRect, distToSegment };
 
 export class Game {
-  constructor({ kaijuId = 'rex', cityId = 'harbor', difficulty = 'normal', seed = Date.now(), firstRun = false, freshCity = false } = {}) {
+  constructor({ kaijuId = 'rex', cityId = 'harbor', difficulty = 'normal', seed = Date.now(), citySeed = seed, firstRun = false } = {}) {
     this.def = KAIJU[kaijuId];
     this.cityDef = CITIES[cityId];
     this.diff = DIFFICULTIES[difficulty];
     this.rng = createRng(seed);
     this.firstRun = firstRun;
-    // The city layout is fixed per city; each run gets a fresh copy of its mutable state.
-    if (freshCity || !cachedCity) cachedCity = generateCity(CITY_SEED);
-    this.city = cachedCity;
+    // Every run gets a freshly generated map (districts, lake, river and forest move around);
+    // the hatchling always starts in the home neighbourhood.
+    let city = cityCache.get(citySeed);
+    if (!city) {
+      city = generateCity(citySeed);
+      cityCache.set(citySeed, city);
+      if (cityCache.size > 2) cityCache.delete(cityCache.keys().next().value);
+    }
+    useCity(city);
+    this.city = city;
     for (const o of this.city.objects) {
       o.hp = o.maxHp;
       o.state = 'intact';
@@ -64,11 +49,10 @@ export class Game {
       maxHp: s1.maxHp * this.def.hpMult, hp: s1.maxHp * this.def.hpMult,
       biomass: 0, facing: { x: -1, y: 0 }, vx: 0, vy: 0, moving: false, stillTime: 0,
       attackCd: 0.5, attackCount: 0, shield: 0, hitFlash: 0, invuln: 0, trailT: 0, stompT: 0,
-      walkPhase: 0, lastAttack: null, inWater: false, contactT: 0,
+      walkPhase: 0, lastAttack: null, inWater: false, contactT: 0, hopT: 0, hopMax: 0.5, hopH: 0, z: 0,
     };
     this.input = { x: 0, y: 0 };
     this.held = new Map();
-    this.timers = { debrisToss: 2, roar: 3, atomicBreath: 3, meteorCall: 6 };
     this.units = [];
     this.people = [];
     this.traffic = [];
@@ -77,7 +61,8 @@ export class Game {
     this.hazards = [];
     this.scheduled = [];
     this.fires = [];
-    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [] };
+    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [], slashes: [], swirls: [], cracks: [] };
+    this.moves = new MoveSystem(this);
     this.vfx = [];
     this.boss = null;
     this.bossTimer = null;
@@ -414,8 +399,18 @@ export class Game {
     } else {
       k.stillTime += dt;
     }
-    k.x += k.vx * dt;
-    k.y += k.vy * dt;
+    // Hop: a small kaiju vaults low obstacles (fences, hedges, parked cars) it can't break yet.
+    if (k.hopT > 0) {
+      k.hopT = Math.max(0, k.hopT - dt);
+      const f = 1 - k.hopT / k.hopMax;
+      k.z = Math.sin(f * Math.PI) * k.hopH;
+      if (k.hopT === 0) {
+        k.z = 0;
+        this.fxEvent({ t: 'dust', x: k.x, y: k.y, r: k.r * 0.9 });
+      }
+    }
+    k.x += k.vx * dt * (k.hopT > 0 ? 1.15 : 1);
+    k.y += k.vy * dt * (k.hopT > 0 ? 1.15 : 1);
 
     // Crush what is smaller, bump into what is your size or bigger.
     let bumped = null;
@@ -423,8 +418,14 @@ export class Game {
       if (o.state !== 'intact') continue;
       if (distToRect(k.x, k.y, o) >= k.r) continue;
       const crushable = !o.landmark && (isSnack(o.tier, k.stage) || (!o.structure && o.tier <= k.stage));
+      const low = !o.structure && !o.landmark && !o.walkable && (o.height || 0) <= k.r * 2.2;
+      if (low && k.hopT > 0) continue; // sailing over it
       if (crushable) this.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'crush');
-      else if (!o.walkable) {
+      else if (low && k.moving && (o.x - k.x) * k.facing.x + (o.y - k.y) * k.facing.y > -k.r * 0.2) {
+        k.hopT = k.hopMax;
+        k.hopH = Math.max((o.height || 3) * 1.5, k.r * 1.4);
+        this.emit('hop');
+      } else if (!o.walkable) {
         this.pushOut(k, o);
         bumped = o;
       }
@@ -570,14 +571,6 @@ export class Game {
       }
       this.fx.bolts.push({ points: [{ x: k.x, y: k.y }, ...chain.map((c) => ({ x: c.x, y: c.y }))], life: 0.22, max: 0.22, width: Math.max(0.4, k.r * 0.12) });
     }
-    if (this.has('tailShockwave') && k.attackCount % 5 === 0) {
-      const radius = k.r * 3.5 * (1 + 0.3 * (this.level('tailShockwave') - 1));
-      for (const o of this.objectsNear(k.x, k.y, radius)) {
-        if (isSnack(o.tier, k.stage) && !o.landmark) this.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'hit');
-      }
-      for (const u of this.units) if (!u.dead && !u.flying && Math.hypot(u.x - k.x, u.y - k.y) < radius) this.damageUnit(u, this.baseDamage() * 0.5);
-      this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: radius, life: 0.45, max: 0.45, color: 0xb8f0ff, width: k.r * 0.2 });
-    }
   }
 
   nearestChainTarget(from, exclude, reach) {
@@ -705,9 +698,9 @@ export class Game {
     let tier;
     let guarantee = null;
     if (this.firstRun && this.picksMade === 0) {
-      // First session: Domino Effect is guaranteed on the first pick so the player sees a chain collapse.
+      // First session: Laser Eyes is guaranteed on the first pick so the player sees a big move early.
       tier = 'gold';
-      guarantee = 'dominoEffect';
+      guarantee = 'laserEyes';
     } else tier = rollTier(this.stage.pickOdds, this.rng);
     const options = offerAugments({ held: this.held, tier, rng: this.rng, guarantee });
     this.pick = { tier, options, freeRerolls: 1 };
@@ -1054,56 +1047,7 @@ export class Game {
   // ---------------------------------------------------------------- augments
   updateAugments(dt) {
     const k = this.kaiju;
-    const t = this.timers;
-    if (this.has('debrisToss')) {
-      t.debrisToss -= dt;
-      if (t.debrisToss <= 0) {
-        const target = this.nearestEnemy(k.r * 10);
-        if (target) {
-          const d = norm(target.x - k.x, target.y - k.y);
-          const sp = this.stage.speed * 3;
-          this.projectiles.push({ friendly: true, kind: 'rock', x: k.x, y: k.y, vx: d.x * sp, vy: d.y * sp, speed: sp, r: k.r * 0.25, dmg: this.baseDamage() * 2, life: 2.5, target });
-          t.debrisToss = 4;
-        } else t.debrisToss = 0.5;
-      }
-    }
-    if (this.has('roar')) {
-      t.roar -= dt;
-      if (t.roar <= 0) {
-        const radius = k.r * 8;
-        const scared = this.units.filter((u) => !u.dead && u.def.soft && Math.hypot(u.x - k.x, u.y - k.y) < radius);
-        if (scared.length) {
-          for (const u of scared) u.fear = 3;
-          this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: radius, life: 0.6, max: 0.6, color: 0xffe08a, width: k.r * 0.3 });
-          this.emit('roar');
-          t.roar = 10;
-        } else t.roar = 0.5;
-      }
-    }
-    if (this.has('atomicBreath')) {
-      t.atomicBreath -= dt;
-      if (t.atomicBreath <= 0) {
-        this.fireBeam();
-        t.atomicBreath = 8;
-      }
-    }
-    if (this.has('meteorCall')) {
-      t.meteorCall -= dt;
-      if (t.meteorCall <= 0) {
-        this.callMeteor();
-        t.meteorCall = 30;
-      }
-    }
-    if (this.has('heavyStomp') && k.moving) {
-      k.stompT -= dt;
-      if (k.stompT <= 0) {
-        k.stompT = 0.7;
-        const radius = k.r * 2.2;
-        const dmg = this.baseDamage() * 0.35 * (1 + 0.5 * (this.level('heavyStomp') - 1));
-        for (const u of this.units) if (!u.dead && !u.flying && Math.hypot(u.x - k.x, u.y - k.y) < radius + u.r) this.damageUnit(u, dmg);
-        this.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.8, r1: radius, life: 0.3, max: 0.3, color: 0x7a5a3c, width: k.r * 0.12 });
-      }
-    }
+    this.moves.update(dt);
     // Unkillable set bonus: the debris shield regenerates while standing still.
     if (k.stillTime > 0.5 && completedSets(this.held).some((s) => s.id === 'unkillable')) this.addShield(0.04 * dt);
   }
@@ -1125,28 +1069,20 @@ export class Game {
     return best;
   }
 
-  fireBeam() {
-    const k = this.kaiju;
-    const len = k.r * 14;
-    const width = k.r * 0.9;
-    const x1 = k.x + k.facing.x * k.r * 0.6;
-    const y1 = k.y + k.facing.y * k.r * 0.6;
-    const x2 = x1 + k.facing.x * len;
-    const y2 = y1 + k.facing.y * len;
-    const dmg = this.baseDamage() * 5;
+  // Damage everything along a segment (beams, lasers, fault lines).
+  lineDamage(x1, y1, x2, y2, width, dmg) {
     const pad = width + 200;
+    const dir = norm(x2 - x1, y2 - y1);
     for (const o of this.grid.query(Math.min(x1, x2) - pad, Math.min(y1, y2) - pad, Math.max(x1, x2) + pad, Math.max(y1, y2) + pad)) {
       if (o.state !== 'intact') continue;
       if (distToSegment(o.x, o.y, x1, y1, x2, y2) > width / 2 + Math.min(o.w, o.h) / 2) continue;
-      this.damageObject(o, dmg, k.facing, 'hit', closestPoint(x1, y1, o));
+      this.damageObject(o, dmg, dir, 'hit', closestPoint(x1, y1, o));
     }
     for (const u of this.units) if (!u.dead && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, dmg);
     for (const p of this.people) if (p.state !== 'flung' && distToSegment(p.x, p.y, x1, y1, x2, y2) < width / 2) this.flingPerson(p, false);
     for (const c of this.traffic) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + 4) this.damageCar(c, dmg);
     const b = this.boss;
     if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(dmg);
-    this.fx.beams.push({ x1, y1, x2, y2, width, life: 0.45, max: 0.45, color: 0x7df9ff, h: k.r * 1.1 });
-    this.shake = Math.max(this.shake, 0.35);
   }
 
   callMeteor() {
@@ -1159,10 +1095,7 @@ export class Game {
     }
     const b = this.boss;
     const pos = target ? { x: target.x, y: target.y } : b && !b.dead ? { x: b.x, y: b.y } : null;
-    if (!pos) {
-      this.timers.meteorCall = 3;
-      return;
-    }
+    if (!pos) return false;
     const radius = target ? Math.max(target.w, target.h) * 0.9 : b.r * 1.2;
     this.hazards.push({
       friendly: true, kind: 'circle', x: pos.x, y: pos.y, r: radius, t: 0, delay: 1.3, meteor: true,
@@ -1173,6 +1106,7 @@ export class Game {
         this.shake = Math.max(this.shake, 0.8);
       },
     });
+    return true;
   }
 
   updateFires(dt) {
@@ -1663,13 +1597,24 @@ export class Game {
       p.life -= dt;
       if (p.friendly) {
         const t = p.target;
-        if (t && !t.dead) {
-          const d = norm(t.x - p.x, t.y - p.y);
-          p.vx = d.x * p.speed;
-          p.vy = d.y * p.speed;
-          if (Math.hypot(t.x - p.x, t.y - p.y) < (t.r || 2) + p.r) {
-            this.damageTarget(t, p.dmg, d);
-            this.fxEvent({ t: 'dust', x: p.x, y: p.y, r: p.r * 3 });
+        const alive = t && !t.dead && !GONE.has(t.state);
+        if (alive) {
+          p.tx = t.x;
+          p.ty = t.y;
+        }
+        if (p.tx !== undefined) {
+          // Home in (spines and cars curve in from their launch spread), and land on the
+          // target's last known spot if it is already gone.
+          p.age = (p.age || 0) + dt;
+          const d = norm(p.tx - p.x, p.ty - p.y);
+          const turn = p.onHit ? Math.min(1, dt * (3 + p.age * 8)) : 1;
+          p.vx += (d.x * p.speed - p.vx) * turn;
+          p.vy += (d.y * p.speed - p.vy) * turn;
+          const reach = (alive ? t.r || Math.min(t.w || 4, t.h || 4) / 2 || 2 : 2) + p.r;
+          if (Math.hypot(p.tx - p.x, p.ty - p.y) < reach) {
+            if (alive) this.damageTarget(t, p.dmg, d);
+            if (p.onHit) p.onHit(p);
+            else this.fxEvent({ t: 'dust', x: p.x, y: p.y, r: p.r * 3 });
             p.life = 0;
           }
         } else p.life = Math.min(p.life, 0.3);
@@ -1764,6 +1709,14 @@ export class Game {
     for (const r of rings) r.life -= dt;
     for (const b of beams) b.life -= dt;
     for (const b of bolts) b.life -= dt;
+    for (const list of [this.fx.slashes, this.fx.swirls, this.fx.cracks]) for (const e of list) e.life -= dt;
+    this.fx.slashes = this.fx.slashes.filter((e) => e.life > 0);
+    this.fx.swirls = this.fx.swirls.filter((e) => e.life > 0);
+    this.fx.cracks = this.fx.cracks.filter((e) => e.life > 0);
+    if (k.anim) {
+      k.anim.t -= dt;
+      if (k.anim.t <= 0) k.anim = null;
+    }
     if (k.lastAttack) {
       k.lastAttack.t -= dt;
       if (k.lastAttack.t <= 0) k.lastAttack = null;

@@ -42,6 +42,31 @@ function lerpKey(t) {
   return out;
 }
 
+// Pixel-art grade for the low-resolution render: 1px dark outlines where a pixel sits next to
+// something brighter (silhouettes, windows, roof edges), a little extra saturation, and a
+// limited palette with an ordered dither so gradients band like hand-made pixel art.
+const PIXEL_GRADE = {
+  uniforms: { tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(1, 1) }, levels: { value: 22 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform vec2 resolution; uniform float levels;
+    varying vec2 vUv;
+    float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+    void main() {
+      vec2 px = 1.0 / resolution;
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float l = lum(c);
+      float n = max(max(lum(texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb), lum(texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb)),
+                    max(lum(texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb), lum(texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb)));
+      c *= 1.0 - smoothstep(0.1, 0.3, n - l) * 0.5;
+      c = mix(vec3(lum(c)), c, 1.15);
+      vec2 f = mod(floor(gl_FragCoord.xy), 2.0);
+      float bayer = (f.x * 2.0 + f.y * 3.0 - f.x * f.y * 4.0) / 4.0 - 0.375;
+      c = floor(c * levels + 0.5 + bayer * 0.9) / levels;
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+};
+
 // Miniature look: blur away from a horizontal focus band (golden-angle disc), soft vignette.
 const TILT_SHIFT = {
   uniforms: { tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(1, 1) }, focus: { value: 0.52 }, amount: { value: 5 } },
@@ -99,9 +124,10 @@ export function makeVoxelMaterial(uniforms, selfLit = 0) {
 }
 
 export class Renderer3D {
-  constructor(canvas, { quality = 'high', floaterLayer = null } = {}) {
+  constructor(canvas, { quality = 'high', floaterLayer = null, pixelArt = true } = {}) {
     this.canvas = canvas;
     this.floaterLayer = floaterLayer;
+    this.pixelArt = pixelArt;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
@@ -164,16 +190,29 @@ export class Renderer3D {
       }
     }
     this.composer = null;
-    if (this.quality.bloom && THREE.EffectComposer && THREE.UnrealBloomPass) {
+    this.bloom = null;
+    this.tilt = null;
+    this.grade = null;
+    if ((this.quality.bloom || this.pixelArt) && THREE.EffectComposer) {
       const c = new THREE.EffectComposer(this.renderer);
       c.addPass(new THREE.RenderPass(this.scene, this.camera));
-      this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 0.93);
-      c.addPass(this.bloom);
-      this.tilt = this.quality.tilt ? new THREE.ShaderPass(TILT_SHIFT) : null;
+      if (this.quality.bloom && THREE.UnrealBloomPass) {
+        this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 0.93);
+        c.addPass(this.bloom);
+      }
+      // Tilt-shift blur would smear the pixels, so the pixel look skips it.
+      this.tilt = this.quality.tilt && !this.pixelArt ? new THREE.ShaderPass(TILT_SHIFT) : null;
       if (this.tilt) c.addPass(this.tilt);
+      this.grade = this.pixelArt ? new THREE.ShaderPass(PIXEL_GRADE) : null;
+      if (this.grade) c.addPass(this.grade);
       this.composer = c;
     }
     this.resize(true);
+  }
+
+  setPixelArt(on) {
+    this.pixelArt = on;
+    this.setQuality(this.qualityName);
   }
 
   resize(force = false) {
@@ -182,8 +221,11 @@ export class Renderer3D {
     if (!force && w === this.w && h === this.h) return;
     this.w = w;
     this.h = h;
-    const pr = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio);
+    // Pixel look: render a small frame (about 260 px on the short side) and let the browser
+    // blow it up with nearest-neighbour sampling.
+    const pr = this.pixelArt ? 1 / Math.max(2, Math.round(Math.min(w, h) / 260)) : Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio);
     this.pr = pr;
+    this.canvas.style.imageRendering = this.pixelArt ? 'pixelated' : '';
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
@@ -191,7 +233,8 @@ export class Renderer3D {
     if (this.composer) {
       this.composer.setPixelRatio(pr);
       this.composer.setSize(w, h);
-      this.bloom.resolution.set(w * pr * 0.5, h * pr * 0.5);
+      if (this.bloom) this.bloom.resolution.set(w * pr * (this.pixelArt ? 1 : 0.5), h * pr * (this.pixelArt ? 1 : 0.5));
+      if (this.grade) this.grade.uniforms.resolution.value.set(Math.round(w * pr), Math.round(h * pr));
       if (this.tilt) {
         this.tilt.uniforms.resolution.value.set(w * pr, h * pr);
         this.tilt.uniforms.amount.value = 5.5 * pr;
@@ -209,20 +252,53 @@ export class Renderer3D {
 
   buildCity(city) {
     if (this.cityBuilt === city) return;
+    this.clearCity();
     this.cityBuilt = city;
     this.city = city;
+    const before = new Set(this.scene.children);
+    this.variantCounts.clear();
     this.paintGround(city);
     this.buildWater(city);
     this.buildProps(city);
     this.buildBridge(city);
     this.ambient.build(city);
     for (const o of city.objects) if (o.kind === 'building') this.variantCounts.set(`${o.type}:${o.variant}`, (this.variantCounts.get(`${o.type}:${o.variant}`) || 0) + 1);
+    this.cityMeshes = this.scene.children.filter((o) => !before.has(o));
     this.lightGrid = new SpatialGrid(WORLD.width, WORLD.height, 256);
     for (const l of city.lights) {
       l.w = 0;
       l.h2 = l.h;
       this.lightGrid.insert({ ...l, w: 0, h: 0, ref: l });
     }
+  }
+
+  // A new run brings a new map: drop everything the previous city added to the scene.
+  clearCity() {
+    if (!this.cityMeshes) return;
+    const shared = new Set([...this.propCache.values()].map((e) => e.geo));
+    for (const o of this.cityMeshes) {
+      this.scene.remove(o);
+      o.traverse((m) => {
+        if (m.isInstancedMesh) m.dispose();
+        if (m.geometry && !shared.has(m.geometry)) m.geometry.dispose();
+        const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+        for (const mat of mats) {
+          if (mat === this.voxelMat) continue;
+          for (const key of ['map', 'emissiveMap', 'normalMap', 'alphaMap']) if (mat[key]) mat[key].dispose();
+          mat.dispose();
+        }
+      });
+    }
+    for (const e of this.propCache.values()) e.im = null;
+    for (const map of [this.bInst, this.rInst]) {
+      for (const e of map.values()) {
+        this.scene.remove(e.im);
+        e.im.dispose();
+      }
+      map.clear();
+    }
+    this.cityMeshes = null;
+    this.lastPropAt = null;
   }
 
   startRun(game) {
