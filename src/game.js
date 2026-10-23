@@ -3,7 +3,7 @@ import {
   UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
-import { generateCity, isWater, useCity } from './world.js';
+import { World, isWater, useCity, METRO } from './world.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
@@ -13,7 +13,6 @@ import { PERSON_VARIANTS } from './models.js';
 // already telegraph with ground markers.
 const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6 };
 const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
-const cityCache = new Map(); // seed -> generated city (small; generation takes ~0.5 s)
 
 export { distToRect, distToSegment };
 
@@ -24,24 +23,24 @@ export class Game {
     this.diff = DIFFICULTIES[difficulty];
     this.rng = createRng(seed);
     this.firstRun = firstRun;
-    // Every run gets a freshly generated map (districts, lake, river and forest move around);
-    // the hatchling always starts in the home neighbourhood.
-    let city = cityCache.get(citySeed);
-    if (!city) {
-      city = generateCity(citySeed);
-      cityCache.set(citySeed, city);
-      if (cityCache.size > 2) cityCache.delete(cityCache.keys().next().value);
-    }
-    useCity(city);
-    this.city = city;
-    for (const o of this.city.objects) {
-      o.hp = o.maxHp;
-      o.state = 'intact';
-      o.flash = 0;
-    }
-    this.objects = this.city.objects;
+    // Every run gets its own endless world, generated cell by cell around the kaiju; the
+    // hatchling always starts in the home neighbourhood.
+    this.city = new World(citySeed);
+    useCity(this.city);
     this.grid = this.city.grid;
-    this.buildRoadGraph();
+    // Cells dropped behind the kaiju take their in-flight collapses with them.
+    this.city.listeners.add({
+      unload: (chunk) => {
+        for (const o of chunk.objects) {
+          if (!this.active.has(o)) continue;
+          if (o.state === 'collapsing') {
+            o.state = 'rubble';
+            this.collapsing--;
+          }
+          this.active.delete(o);
+        }
+      },
+    });
 
     const s1 = STAGES[1];
     this.kaiju = {
@@ -91,72 +90,70 @@ export class Game {
       scrap: 0, biomass: 0, buildings: 0, destroyed: 0, units: 0, people: 0,
       landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 },
     };
+    this.trainRespawn = 0;
+    this.streamWorld(true);
     this.populate(true);
-    const metro = this.city.metro;
-    if (metro && metro.segments.length) {
-      this.trains.push(this.newTrain(metro.length * 0.25, 1), this.newTrain(metro.length * 0.7, -1));
-      this.trainRespawn = 0;
-    }
+  }
+
+  get objects() {
+    return this.city.objects;
+  }
+
+  // Generate the world around the kaiju: everything near it now, the rest of the view a few
+  // cells per frame, and forget what is far behind.
+  streamWorld(initial = false) {
+    const k = this.kaiju;
+    const span = this.viewSpan();
+    this.city.detail = k.stage >= 5 ? 1 : 0;
+    this.city.update(k.x, k.y, span * 1.3 + 520, initial ? Infinity : 4, span * 0.6 + 150);
   }
 
   // ---------------------------------------------------------------- elevated metro
-  newTrain(s, dir) {
-    return { s, dir, speed: 55, stop: 0, lastStation: -1, dead: false, cars: 3, x: 0, y: 0, heading: 0, isTrain: true };
+  // Metro lines run east-west along every ninth row; trains run on the line nearest the kaiju.
+  newTrain(row, s, dir) {
+    return { row, s, dir, speed: 55, stop: 0, lastStation: null, dead: false, cars: 3, x: s, y: row * WORLD.cell, heading: dir < 0 ? Math.PI : 0, isTrain: true };
   }
 
-  // Position and heading along the metro route at distance s.
-  metroAt(s) {
-    const pts = this.city.metro.points;
-    let left = Math.max(0, Math.min(this.city.metro.length - 0.01, s));
-    for (let i = 0; i < pts.length - 1; i++) {
-      const [x0, y0] = pts[i];
-      const [x1, y1] = pts[i + 1];
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      if (left <= len) return { x: x0 + ((x1 - x0) / len) * left, y: y0 + ((y1 - y0) / len) * left, heading: Math.atan2(y1 - y0, x1 - x0) };
-      left -= len;
-    }
-    const [x, y] = pts[pts.length - 1];
-    return { x, y, heading: 0 };
+  // Position and heading along metro line `row` at distance s.
+  metroAt(s, row) {
+    return { x: s, y: row * WORLD.cell, heading: 0 };
   }
 
   updateTrains(dt) {
-    const metro = this.city.metro;
-    if (!metro) return;
     const k = this.kaiju;
+    const world = this.city;
+    const span = this.viewSpan();
+    const seg = METRO.segLen;
     for (const t of this.trains) {
       if (t.dead) continue;
       if (t.stop > 0) t.stop -= dt;
       else {
         t.s += t.dir * t.speed * dt;
-        if (t.s < 0 || t.s > metro.length) {
-          t.dir *= -1;
-          t.s = Math.max(0, Math.min(metro.length, t.s));
-        }
-        for (let i = 0; i < metro.stations.length; i++) {
-          if (i !== t.lastStation && Math.abs(t.s - metro.stations[i]) < 3) {
-            t.lastStation = i;
-            t.stop = 3;
-          }
+        const i = Math.floor(t.s / seg);
+        if ((((i % METRO.stationEvery) + METRO.stationEvery) % METRO.stationEvery) === METRO.stationOffset && t.lastStation !== i && Math.abs(t.s - (i + 0.5) * seg) < 3) {
+          t.lastStation = i;
+          t.stop = 3;
         }
       }
-      const p = this.metroAt(t.s);
-      t.x = p.x;
-      t.y = p.y;
-      t.heading = p.heading + (t.dir < 0 ? Math.PI : 0);
-      // A broken span ahead derails the train.
-      const ahead = Math.floor((t.s + t.dir * metro.segLen * 0.6) / metro.segLen);
-      const seg = metro.segments[Math.max(0, Math.min(metro.segments.length - 1, ahead))];
-      if (seg && seg.state !== 'intact') this.killTrain(t, true);
+      t.x = t.s;
+      t.y = t.row * WORLD.cell;
+      t.heading = t.dir < 0 ? Math.PI : 0;
+      // A broken span ahead derails the train; past the generated world it just leaves.
+      const ahead = world.metroSeg(t.row, t.s + t.dir * seg * 0.6);
+      if (!ahead) t.dead = true;
+      else if (ahead.state !== 'intact') this.killTrain(t, true);
       else if (k.stage >= 4 && Math.hypot(t.x - k.x, t.y - k.y) < k.r + 20) this.killTrain(t, false);
     }
     this.trains = this.trains.filter((t) => !t.dead);
-    if (this.trains.length < 2) {
-      this.trainRespawn -= dt;
-      if (this.trainRespawn <= 0) {
-        this.trainRespawn = 25;
-        const s = this.rng.chance(0.5) ? 0 : metro.length;
-        const startSeg = metro.segments[s ? metro.segments.length - 1 : 0];
-        if (startSeg && startSeg.state === 'intact') this.trains.push(this.newTrain(s, s ? -1 : 1));
+    this.trainRespawn -= dt;
+    if (this.trains.length < 2 && this.trainRespawn <= 0) {
+      this.trainRespawn = 10;
+      const row = world.metroRowNear(k.y);
+      if (row !== null && Math.abs(row * WORLD.cell - k.y) < span * 1.2 + 300) {
+        const dir = this.rng.chance(0.5) ? 1 : -1;
+        const s = k.x - dir * this.rng.range(span * 0.6, span * 1.1 + 150);
+        const at = world.metroSeg(row, s);
+        if (at && at.state === 'intact') this.trains.push(this.newTrain(row, s, dir));
       }
     }
   }
@@ -254,10 +251,7 @@ export class Game {
   }
 
   cellAt(x, y) {
-    const c = Math.floor((x - WORLD.seaWidth) / WORLD.cell);
-    const r = Math.floor(y / WORLD.cell);
-    if (c < 0 || r < 0 || c >= WORLD.cols || r >= WORLD.rows) return null;
-    return this.city.cells[r * WORLD.cols + c];
+    return this.city.cellAt(x, y);
   }
 
   blockedAt(x, y, pad = 0, minTier = 0) {
@@ -269,23 +263,7 @@ export class Game {
 
   // ---------------------------------------------------------------- road driving for military vehicles
   nearestRoad(x, y) {
-    let best = null;
-    let bestD = Infinity;
-    let bestT = 0;
-    for (const r of this.city.roads) {
-      const vx = r.x1 - r.x0;
-      const vy = r.y1 - r.y0;
-      const t = Math.max(0, Math.min(1, ((x - r.x0) * vx + (y - r.y0) * vy) / (vx * vx + vy * vy || 1)));
-      const px = r.x0 + vx * t;
-      const py = r.y0 + vy * t;
-      const d = Math.hypot(x - px, y - py);
-      if (d < bestD && !isWater(px, py)) {
-        bestD = d;
-        best = r;
-        bestT = t;
-      }
-    }
-    return best ? { road: best, t: bestT } : null;
+    return this.city.nearestRoad(x, y);
   }
 
   placeOnRoad(u) {
@@ -375,6 +353,7 @@ export class Game {
     this.time += dt;
 
     this.checkGrowth();
+    this.streamWorld();
     if (this.pendingPicks > 0) this.openPick();
     if (this.state !== 'playing') return;
     if (this.has('regen')) this.heal(0.004 * this.level('regen') * dt);
@@ -541,8 +520,6 @@ export class Game {
         k.y = b.y + ((k.y - b.y) / d) * min;
       }
     }
-    k.x = Math.max(k.r, Math.min(WORLD.width - k.r, k.x));
-    k.y = Math.max(k.r, Math.min(WORLD.height - k.r, k.y));
 
     k.attackCd -= dt;
     if (k.attackCd <= 0) {
@@ -838,7 +815,7 @@ export class Game {
 
   // ---------------------------------------------------------------- destruction
   damageObject(o, amount, dir, cause = 'hit', at = null) {
-    if (o.state !== 'intact') return false;
+    if (o.state !== 'intact' || !o.chunk.loaded) return false;
     const stage = this.kaiju.stage;
     if (!canDamage(o.tier, stage, o.landmark)) return false;
     if (isSnack(o.tier, stage) && !o.landmark) amount = o.hp;
@@ -854,7 +831,7 @@ export class Game {
   }
 
   destroyObject(o, dir, cause = 'hit') {
-    if (o.state !== 'intact') return;
+    if (o.state !== 'intact' || !o.chunk.loaded) return;
     const k = this.kaiju;
     o.hp = 0;
     o.fallDir = dir && (dir.x || dir.y) ? dir : norm(o.x - k.x, o.y - k.y);
@@ -953,20 +930,6 @@ export class Game {
   }
 
   // ---------------------------------------------------------------- ambient life
-  buildRoadGraph() {
-    if (this.city.roadGraph) return;
-    const key = (x, y) => `${Math.round(x)},${Math.round(y)}`;
-    const graph = new Map();
-    for (const r of this.city.roads) {
-      for (const [x, y] of [[r.x0, r.y0], [r.x1, r.y1]]) {
-        const kk = key(x, y);
-        if (!graph.has(kk)) graph.set(kk, []);
-        graph.get(kk).push(r);
-      }
-    }
-    this.city.roadGraph = { graph, key };
-  }
-
   populate(initial = false) {
     const k = this.kaiju;
     const span = this.viewSpan();
@@ -979,7 +942,7 @@ export class Game {
       const d = this.rng.range(minR, maxR);
       const x = k.x + Math.cos(a) * d;
       const y = k.y + Math.sin(a) * d;
-      if (x < 0 || y < 0 || x > WORLD.width || y > WORLD.height || isWater(x, y)) continue;
+      if (isWater(x, y)) continue;
       const zc = this.cellAt(x, y);
       if (zc && zc.style === 'forest' && !this.rng.chance(0.15)) continue;
       if (this.blockedAt(x, y, 1)) continue;
@@ -1314,10 +1277,10 @@ export class Game {
       const a = this.rng.range(0, Math.PI * 2);
       const x = k.x + Math.cos(a) * dist;
       const y = k.y + Math.sin(a) * dist;
-      if (x > 20 && x < WORLD.width - 20 && y > 20 && y < WORLD.height - 20 && (def.flying || (!isWater(x, y) && !this.blockedAt(x, y, def.r)))) return { x, y };
+      if (def.flying || (!isWater(x, y) && !this.blockedAt(x, y, def.r))) return { x, y };
     }
-    const x = Math.max(WORLD.seaWidth + 20, Math.min(WORLD.width - 20, k.x + dist));
-    const y = Math.max(20, Math.min(WORLD.height - 20, k.y));
+    const x = k.x + dist;
+    const y = k.y;
     if (def.flying) return { x, y };
     // Fall back to the nearest street so ground units never appear inside a building.
     const nr = this.nearestRoad(x, y);
@@ -1455,8 +1418,6 @@ export class Game {
         }
         u.heading = Math.atan2(my, mx);
       }
-      u.x = Math.max(10, Math.min(WORLD.width - 10, u.x));
-      u.y = Math.max(10, Math.min(WORLD.height - 10, u.y));
       if (u.fear > 0) continue;
       u.cd -= dt;
       if (def.attack === 'melee') {

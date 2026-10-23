@@ -1,6 +1,6 @@
 # Kaiju Rampage
 
-A playable browser prototype of the **Kaiju Rampage** core run loop, built from the game design doc. It is rendered as a procedurally generated voxel city. Every run generates a new map, and you always start human-sized in a suburban backyard, eating people your own size (and hopping over the garden fences). You grow through backyards, houses, apartment blocks and towers until you are skyline-sized. The run ends in a boss fight against the Coast Guard Mech. The light goes from golden hour at the start of a run to neon night by the boss.
+A playable browser prototype of the **Kaiju Rampage** core run loop, built from the game design doc. It is rendered as an endless, procedurally generated voxel city that is built around you as you move. Every run gets a new world, and you always start human-sized in a suburban backyard, eating people your own size (and hopping over the garden fences). You grow through backyards, houses, apartment blocks and towers until you are skyline-sized. The run ends in a boss fight against the Coast Guard Mech. The light goes from golden hour at the start of a run to neon night by the boss.
 
 It is plain ES modules with no build step. three.js r147 (with bloom) loads from jsDelivr, so the page needs an internet connection.
 
@@ -13,16 +13,17 @@ npm test             # unit tests + headless autopilot runs (Node 20+)
 
 - **Move:** drag anywhere for a floating virtual stick, or use WASD / arrow keys. Movement is relative to the tilted camera. Attacks fire automatically at the nearest target.
 - **Pause:** the II button, Esc or P. The pause menu has a graphics setting (High, Medium or Low). The game also steps down on its own if frames run slow.
-- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed (and with it the map), `?q=low` sets quality, `?look=pixel` turns on the optional retro pixel filter. `?debug=1` enables G (grow a stage), B (summon the boss early at Apex), K (kill the boss) and H (heal).
+- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed (and with it the world), `?q=low` sets quality, `?look=pixel` turns on the optional retro pixel filter. `?debug=1` enables G (grow a stage), B (summon the boss early at Apex), K (kill the boss) and H (heal).
 
 ## What's in it
 
 | Area | Built here |
 | --- | --- |
 | Growth | 6 stages, roughly doubling in size each time: Human, Backyard, House, Apartment block, Office tower, Apex. Each stage opens a new class of things to break and a new military response |
-| World | A new procedural map every run (the districts, lake, river, forest belts, highway bridge and metro all move with the seed), with seven district styles: suburbs with fenced backyards, a pastel old town, a red-brick industrial district, garden midtown with green roofs, neon downtown, a second neon city (Neon Heights) beyond a forest belt, and harbor docks. A lake with a river runs through it, crossed by a long suspension bridge |
+| World | Endless and generated as you go: the world is cut into 420-unit cells that are generated from the seed and their position when the kaiju gets near, and dropped again once it has moved on (destruction is remembered, so a flattened block stays flattened). District centres are scattered one per 7x7-cell region, with seven district styles: suburbs with fenced backyards, a pastel old town, a red-brick industrial district, garden midtown with green roofs, neon downtown, harbor docks and parks, with forest in between. Lakes, the occasional sea and winding rivers come from a noise water field; highways every 8 cells cross wide water on suspension bridges, smaller roads on road bridges, and lighthouses stand on piers by the docks. A downtown is always a short walk from the home suburb |
 | Buildings | 89 procedural voxel building types in 4 variants each (85 are placed by the generator). Towers vary their composition (podium + tower, setbacks, chamfered corners, L-shapes), facade (punched windows, ribbon windows, glass curtain wall, concrete grid, stripes, tiles, fins), glass tint, window light colours and crown (spire, dome, pyramid, helipad, lit frame, water tank, roof garden, mast, slanted glass). Civic landmarks: city hall, museum, library, bank, cathedral, clock tower, train station, theater, pagoda. Everyday city: shop rows, townhouse rows, supermarket, car dealership, diner, construction sites with tower cranes. Examples: houses, sheds, playhouses, ramen bars, arcades, tenements with fire escapes, megablocks, ring towers, stepped towers, twin towers, an arcology, a TV tower, a stadium, a power plant, cabins, ranger towers and the lighthouse landmark |
-| City life | Parks with paths, ponds, playgrounds, basketball and tennis courts and gazebos; plazas with promenades, big screens, food trucks and cafe seating; an elevated metro line with stations, subway entrances and running trains; power lines between poles; painted parking bays and manholes; a beach; bird flocks that scatter; boats; a blimp over downtown |
+| City life | Parks with paths, ponds, playgrounds, basketball and tennis courts and gazebos; plazas with promenades, big screens, food trucks and cafe seating; elevated metro lines every 9 rows with stations, subway entrances and running trains; power lines between poles; painted parking bays and manholes; beaches; bird flocks that scatter; boats; a blimp that drifts after the kaiju |
+| Detail that scales with you | The ground is painted per cell at a resolution that follows the kaiju's size: about 0.4 units per texel for the hatchling (with sidewalk joints, grass tufts, lily pads and road patches), coarser and in bigger 2x2 and 4x4-cell tiles once it is huge. A world-space voxel grain in the shader keeps it crisp up close, and coastlines are drawn as smooth contours. Buildings far below your size switch to half-resolution voxel meshes, pocket-sized clutter is left out of cells generated once you are huge, and instanced meshes grow with the view |
 | Small assets | 79 voxel props: cars, taxis, buses, trucks, lampposts, neon poles, vending machines, food carts, barriers, power poles, billboards, swing sets, pools, trampolines, BBQs, gnomes, and pine, birch, blossom and autumn trees |
 | Life | Voxel crowds that walk the streets and flee from you, plus traffic driving the road network |
 | Destruction | Buildings are pre-fractured into Voronoi chunks. Hits knock off the chunks nearest the impact, shoving into a building chips it where you push, and collapses tip toward the hit direction, then break into physics debris and leave a rubble pile. Small things shatter into voxels |
@@ -42,18 +43,19 @@ src/buildings.js  69 procedural building types
 src/props.js      57 street and nature props
 src/models.js     kaiju rigs, people, military units, boss
 src/mesher.js     voxel meshing with face culling and ambient occlusion; Voronoi pre-fracture
-src/world.js      districts, roads, lake, bridge, lots, backyards, forest
+src/world.js      the endless world: water field, districts, roads, bridges, lots, streaming cells
 src/augments.js   augment catalogue, move level tables, slots and offer rules
 src/moves.js      the attack moves and how their levels change them
 src/game.js       simulation (no DOM): movement, size rules, crowds, traffic, combat, boss
-src/render3d.js   three.js scene: camera, day/night, ground, water, building streaming, chipping, collapses
+src/render3d.js   three.js scene: camera, day/night, building streaming and LOD, chipping, collapses
+src/terrain3d.js  streamed ground tiles with size-based resolution, shorelines, water
 src/actors3d.js   animated kaiju/boss rigs, units, crowd and traffic instancing
 src/fx3d.js       debris physics, dust and glow particles, rings, beams, telegraphs
 src/ui.js, input.js, storage.js, main.js
 test/             node:test suites + an autopilot bot used for balance checks
 ```
 
-The simulation and the voxel generators never touch the DOM, so tests can build every building and run full games headlessly. With the current numbers, the bot finishes a run in about 7.5 to 12.5 minutes with ~40 level-ups and wins most of them.
+The simulation and the voxel generators never touch the DOM, so tests can build every building and run full games headlessly. With the current numbers, the bot finishes a run in about 8 to 14 minutes with ~40 level-ups and wins most of them.
 
 ## Gaps in the design doc
 

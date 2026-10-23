@@ -29,6 +29,25 @@ export function botStep(game) {
       return;
     }
   }
+  // Wedged against something too big to break: sidestep for a moment.
+  const bs = game.bot || (game.bot = { x: k.x, y: k.y, t: 0, esc: 0, dir: null });
+  bs.t += 1 / 30;
+  if (bs.esc > 0) {
+    bs.esc -= 1 / 30;
+    game.setInput(bs.dir.x, bs.dir.y);
+    return;
+  }
+  if (bs.t > 1.5) {
+    const moved = Math.hypot(k.x - bs.x, k.y - bs.y);
+    if (moved < k.r * 0.5 && (game.input.x || game.input.y)) {
+      const side = Math.sin(game.time * 7.3) > 0 ? 1 : -1;
+      bs.dir = { x: -game.input.y * side - game.input.x * 0.3, y: game.input.x * side - game.input.y * 0.3 };
+      bs.esc = 1.2;
+    }
+    bs.x = k.x;
+    bs.y = k.y;
+    bs.t = 0;
+  }
   const b = game.boss;
   if (b && !b.dead && b.state !== 'enter') {
     const d = Math.hypot(b.x - k.x, b.y - k.y);

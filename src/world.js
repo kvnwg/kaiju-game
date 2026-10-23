@@ -3,35 +3,64 @@ import { createRng } from './rng.js';
 import { BUILDING_TYPES, TYPE_BY_ID, buildingDims, VARIANTS } from './buildings.js';
 import { PROP_BY_ID, propDims } from './props.js';
 
-// Uniform grid for fast area queries over thousands of static objects.
-export class SpatialGrid {
-  constructor(width, height, cellSize = 128) {
-    this.cellSize = cellSize;
-    this.cols = Math.ceil(width / cellSize);
-    this.rows = Math.ceil(height / cellSize);
-    this.cells = Array.from({ length: this.cols * this.rows }, () => []);
+// The world is endless: it is cut into square cells (one city block plus its road) that are
+// generated from (seed, column, row) the moment the kaiju gets near and dropped again once it
+// has moved on. Destruction is remembered per cell, so a flattened block stays flattened.
+
+const { cell, road } = WORLD;
+const inner = cell - road;
+const SR = 7; // cells per district region: each region gets at most one district centre
+
+// ---------------------------------------------------------------- spatial hash
+// Unbounded uniform hash for area queries; objects can be added and removed as cells stream.
+export class SpatialHash {
+  constructor(size = 128) {
+    this.size = size;
+    this.map = new Map();
     this.stamp = 0;
   }
 
-  insert(obj) {
-    const cs = this.cellSize;
-    const c0 = Math.max(0, Math.floor((obj.x - obj.w / 2) / cs));
-    const c1 = Math.min(this.cols - 1, Math.floor((obj.x + obj.w / 2) / cs));
-    const r0 = Math.max(0, Math.floor((obj.y - obj.h / 2) / cs));
-    const r1 = Math.min(this.rows - 1, Math.floor((obj.y + obj.h / 2) / cs));
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) this.cells[r * this.cols + c].push(obj);
+  each(o, fn) {
+    const s = this.size;
+    const c0 = Math.floor((o.x - o.w / 2) / s);
+    const c1 = Math.floor((o.x + o.w / 2) / s);
+    const r0 = Math.floor((o.y - o.h / 2) / s);
+    const r1 = Math.floor((o.y + o.h / 2) / s);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) fn((r + 32768) * 65536 + c + 32768);
+  }
+
+  insert(o) {
+    this.each(o, (k) => {
+      let arr = this.map.get(k);
+      if (!arr) this.map.set(k, (arr = []));
+      arr.push(o);
+    });
+  }
+
+  remove(o) {
+    this.each(o, (k) => {
+      const arr = this.map.get(k);
+      if (!arr) return;
+      const i = arr.indexOf(o);
+      if (i < 0) return;
+      arr[i] = arr[arr.length - 1];
+      arr.pop();
+      if (!arr.length) this.map.delete(k);
+    });
   }
 
   query(x0, y0, x1, y1, out = []) {
-    const cs = this.cellSize;
-    const c0 = Math.max(0, Math.floor(x0 / cs));
-    const c1 = Math.min(this.cols - 1, Math.floor(x1 / cs));
-    const r0 = Math.max(0, Math.floor(y0 / cs));
-    const r1 = Math.min(this.rows - 1, Math.floor(y1 / cs));
+    const s = this.size;
+    const c0 = Math.floor(x0 / s);
+    const c1 = Math.floor(x1 / s);
+    const r0 = Math.floor(y0 / s);
+    const r1 = Math.floor(y1 / s);
     const stamp = ++this.stamp;
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
-        for (const obj of this.cells[r * this.cols + c]) {
+        const arr = this.map.get((r + 32768) * 65536 + c + 32768);
+        if (!arr) continue;
+        for (const obj of arr) {
           if (obj._q === stamp) continue;
           obj._q = stamp;
           if (obj.x + obj.w / 2 < x0 || obj.x - obj.w / 2 > x1 || obj.y + obj.h / 2 < y0 || obj.y - obj.h / 2 > y1) continue;
@@ -43,134 +72,261 @@ export class SpatialGrid {
   }
 }
 
-// ---------------------------------------------------------------- layout
-const { cell, road, cols, rows, seaWidth } = WORLD;
-
-// The map layout is procedural: every seed moves the districts, the lake, the river, the
-// forest belts and the highway, while keeping the shape of Harbor Town (sea and docks to the
-// west, downtown beside it, the lake in the middle, quiet suburbs in the east where every run
-// starts).
-function makeLayout(seed) {
-  const rng = createRng(seed * 7919 + 13);
-  const r = (a, b) => rng.range(a, b);
-  const pick = (arr) => arr[rng.int(0, arr.length - 1)];
-  const lake = { cx: seaWidth + r(8.8, 12) * cell, cy: r(6.2, 10.2) * cell, rx: r(1050, 1350), ry: r(1250, 1650) };
-  const lakeC = (lake.cx - seaWidth) / cell;
-  const lakeR = lake.cy / cell;
-  // Old town, east-of-lake and the south get a shuffle so every style shows up somewhere.
-  const trio = rng.shuffle(['brick', 'garden', pick(['brick', 'garden', 'pastel'])]);
-  const districts = [
-    { style: 'neon', cx: r(3.6, 5.8), cy: lakeR + r(-1.5, 1.5), r: r(6, 7), peak: 1.15 },
-    { style: trio[0], cx: r(3, 6), cy: r(1.2, 3), r: r(4.6, 5.6), peak: 0.95 },
-    { style: 'pastel', cx: r(1.5, 3.2), cy: r(12.8, 15), r: r(4.2, 5), peak: 0.7 },
-    { style: trio[1], cx: lakeC + r(2.8, 4.5), cy: lakeR + r(-1.5, 1.5), r: r(5, 6), peak: 0.85 },
-    { style: pick(['neon', 'neon', 'brick']), cx: r(12.5, 16), cy: r(0.8, 2.5), r: r(4.2, 5.2), peak: 0.95 },
-    // Home: the neighbourhood the hatchling crawls out of.
-    { style: 'suburb', cx: r(18.6, 20.4), cy: r(8.5, 12.5), r: r(5.6, 6.6), peak: 0.5, home: true },
-    { style: 'suburb', cx: r(18.8, 21), cy: r(2, 5), r: r(4, 5), peak: 0.45 },
-    { style: trio[2], cx: r(10.5, 14), cy: r(13.6, 15.4), r: r(3.6, 4.4), peak: 0.65 },
-  ];
-  if (rng.chance(0.5)) districts.push({ style: pick(['garden', 'pastel', 'brick']), cx: r(7, 9), cy: r(12, 15), r: r(2.8, 3.6), peak: 0.6 });
-  return {
-    seed,
-    noise: rng.int(0, 999),
-    lake,
-    districts,
-    river: { amp: r(150, 320), freq: r(700, 1100), phase: r(0, 6.28), drift: r(0.2, 0.45) * (rng.chance(0.5) ? 1 : -1) },
-    belt: { row: r(3.4, 5.4), east: r(21.2, 22.6) },
-    highwayRow: Math.round(lake.cy / cell),
-  };
+// ---------------------------------------------------------------- noise
+export function ihash(a, b, s) {
+  let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(s | 0, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-let L = makeLayout(1);
-
-export function currentLayout() {
-  return L;
-}
-
-function noise2(x, y, seed) {
-  const s = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
-  return s - Math.floor(s);
-}
-
-function smoothNoise(x, y, seed) {
+function vnoise(x, y, s) {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
   const xf = x - xi;
   const yf = y - yi;
   const u = xf * xf * (3 - 2 * xf);
   const v = yf * yf * (3 - 2 * yf);
-  const a = noise2(xi, yi, seed);
-  const b = noise2(xi + 1, yi, seed);
-  const c = noise2(xi, yi + 1, seed);
-  const d = noise2(xi + 1, yi + 1, seed);
-  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+  const a = ihash(xi, yi, s);
+  const b = ihash(xi + 1, yi, s);
+  const c = ihash(xi, yi + 1, s);
+  const d = ihash(xi + 1, yi + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+function fbm(x, y, s, oct) {
+  let sum = 0;
+  let amp = 1;
+  let norm = 0;
+  for (let i = 0; i < oct; i++) {
+    sum += vnoise(x + i * 17.31, y - i * 9.73, s + i * 101) * amp;
+    norm += amp;
+    amp *= 0.5;
+    x *= 2.03;
+    y *= 2.03;
+  }
+  return sum / norm;
+}
+
+const mod = (a, n) => ((a % n) + n) % n;
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+// ---------------------------------------------------------------- world parameters
+const STYLE_ODDS = { neon: 0.2, brick: 0.2, garden: 0.18, pastel: 0.14, suburb: 0.2, none: 0.08 };
+const SITE = {
+  neon: { r: [5, 6.5], peak: 1.15 },
+  brick: { r: [4.2, 5.4], peak: 0.95 },
+  garden: { r: [4.2, 5.6], peak: 0.85 },
+  pastel: { r: [3.8, 5], peak: 0.72 },
+  suburb: { r: [3.8, 5.2], peak: 0.5 },
+};
+
+function makeParams(seed) {
+  const rng = createRng(seed * 7919 + 13);
+  const s = rng.int(1, 1 << 20);
+  // A downtown always sits a short walk from home, so the climb to skyscraper size never
+  // depends on luck; a brick district sits on the far side.
+  const a = rng.range(0, Math.PI * 2);
+  const d = rng.range(7.5, 9);
+  const b = a + Math.PI + rng.range(-0.8, 0.8);
+  return {
+    seed,
+    s,
+    spawn: { x: cell / 2, y: cell / 2 },
+    hwRow: rng.int(2, 5), // highways every 8 rows / columns
+    hwCol: rng.int(2, 5),
+    metroRow: rng.int(0, 8), // elevated metro lines every 9 rows
+    extra: [
+      { style: 'suburb', cx: 0.5, cy: 0.5, r: 5, peak: 0.6, home: true, nk: 0 },
+      { style: 'neon', cx: 0.5 + Math.cos(a) * d, cy: 0.5 + Math.sin(a) * d, r: 6.5, peak: 1.2, nk: 3 },
+      { style: 'brick', cx: 0.5 + Math.cos(b) * 7, cy: 0.5 + Math.sin(b) * 7, r: 4.8, peak: 0.95, nk: 7 },
+    ],
+    sites: new Map(),
+    zones: new Map(),
+    edges: new Map(),
+  };
+}
+
+let CUR = makeParams(1);
+
+// Signed distance-ish water field in world units: > 0 is water. Lakes, the occasional sea and
+// winding rivers; the land around the spawn point is always dry.
+export function waterField(x, y, p = CUR) {
+  const s = p.s;
+  const dx = x - p.spawn.x;
+  const dy = y - p.spawn.y;
+  const t = clamp01((Math.sqrt(dx * dx + dy * dy) - 1400) / 1800);
+  const near = 1 - t * t * (3 - 2 * t);
+  const lake = (fbm(x / 2400, y / 2400, s + 11, 3) - 0.7) * 1600 + (vnoise(x / 260, y / 260, s + 12) - 0.5) * 30;
+  const sea = (fbm(x / 9000, y / 9000, s + 13, 2) - 0.77) * 6000;
+  let v = lake > sea ? lake : sea;
+  const gate = clamp01((vnoise(x / 6500, y / 6500, s + 15) - 0.55) / 0.2);
+  if (gate > 0) {
+    const river = (0.016 * gate - Math.abs(fbm(x / 3200, y / 3200, s + 14, 2) - 0.5)) * 2100;
+    if (river > v) v = river;
+  }
+  return v * (1 - near) - near * 300;
 }
 
 export function isWater(x, y) {
-  if (x < seaWidth - 40 + smoothNoise(0, y / 300, 3) * 80) return true;
-  const lake = L.lake;
-  const lx = (x - lake.cx) / lake.rx;
-  const ly = (y - lake.cy) / lake.ry;
-  const wob = smoothNoise(x / 400, y / 400, 5 + L.noise) * 0.25;
-  if (lx * lx + ly * ly < 1 - wob) return true;
-  // River feeding the lake from the north and draining south.
-  const rv = L.river;
-  const rx = lake.cx + Math.sin(y / rv.freq + rv.phase) * rv.amp - (y > lake.cy ? (y - lake.cy) * rv.drift : 0);
-  const width = 70 + smoothNoise(0, y / 500, 9 + L.noise) * 40;
-  return Math.abs(x - rx) < width;
+  return waterField(x, y) > 0;
 }
 
-function cellCenter(c, r) {
-  return { x: seaWidth + (c + 0.5) * cell, y: (r + 0.5) * cell };
-}
-
-// Which district a cell belongs to and how dense it is (0..1).
-function zoneFor(c, r) {
-  const p = cellCenter(c, r);
-  if (isWater(p.x, p.y)) return { style: 'water', density: 0 };
-  let best = { style: 'forest', density: 0 };
-  const n = L.noise;
-  let bestScore = 0.12 + smoothNoise(c / 3, r / 3, 11 + n) * 0.12;
-  for (const d of L.districts) {
-    const dist = Math.hypot(c + 0.5 - d.cx, r + 0.5 - d.cy) / d.r;
-    const score = (1 - dist) * d.peak + smoothNoise(c / 2, r / 2, d.cx + n) * 0.12;
-    if (score > bestScore) {
-      bestScore = score;
-      best = { style: d.style, density: Math.max(0, Math.min(1, score)), district: d };
+function siteFor(I, J, p) {
+  const key = (I + 4096) * 8192 + J + 4096;
+  let site = p.sites.get(key);
+  if (site !== undefined) return site;
+  const h = (k) => ihash(I * 13 + k, J * 7 - k * 3, p.s + 101);
+  let roll = h(0);
+  let style = 'none';
+  for (const [st, w] of Object.entries(STYLE_ODDS)) {
+    roll -= w;
+    if (roll < 0) {
+      style = st;
+      break;
     }
   }
-  // Forest belts: between the southern city and Neon Heights, and the eastern outskirts.
-  const b = L.belt;
-  const belt = (r >= b.row - 1 + smoothNoise(c / 2, 0, 21 + n) * 1.2 && r <= b.row + 1 + smoothNoise(c / 2, 1, 22 + n) && c >= 9) || c >= b.east - smoothNoise(0, r / 2, 23 + n) * 1.5;
-  if (belt && best.style !== 'neon') best = { style: 'forest', density: 0 };
-  if (c === 0 && best.style !== 'forest') best = { style: 'docks', density: 0.4 };
-  // Parks: occasional green cells inside cities.
-  if (best.style !== 'forest' && best.style !== 'suburb' && noise2(c, r, 77 + n) < 0.07) best = { style: 'park', density: 0.2 };
-  return best;
+  site = null;
+  if (style !== 'none') {
+    const def = SITE[style];
+    site = { style, cx: (I + 0.15 + 0.7 * h(1)) * SR, cy: (J + 0.15 + 0.7 * h(2)) * SR, r: def.r[0] + (def.r[1] - def.r[0]) * h(3), peak: def.peak, nk: Math.floor(h(4) * 1000) };
+    // Leave the home neighbourhood to the suburbs.
+    if (Math.hypot(site.cx - 0.5, site.cy - 0.5) < 5.5) site = null;
+  }
+  p.sites.set(key, site);
+  return site;
 }
 
-export function generateCity(seed = 1) {
-  L = makeLayout(seed);
-  const LAKE = L.lake;
-  const rng = createRng(seed);
-  const objects = [];
-  const lights = [];
-  const cells = [];
+const urbanStyle = (st) => st !== 'forest' && st !== 'water';
+
+// Which district a cell belongs to and how dense it is (0..1). Pure: same answer every time.
+function zoneFor(c, r, p = CUR) {
+  const key = (c + 32768) * 65536 + r + 32768;
+  let z = p.zones.get(key);
+  if (z) return z;
+  if (p.zones.size > 60000) p.zones.clear();
+  const x = (c + 0.5) * cell;
+  const y = (r + 0.5) * cell;
+  const s = p.s;
+  let best = { style: 'forest', density: 0, district: null };
+  if (waterField(x, y, p) > 0) best = { style: 'water', density: 0, district: null };
+  else {
+    let bestScore = 0.12 + vnoise(c / 3, r / 3, s + 21) * 0.12;
+    const consider = (d) => {
+      if (!d) return;
+      const dist = Math.hypot(c + 0.5 - d.cx, r + 0.5 - d.cy) / d.r;
+      if (dist > 1.6) return;
+      const score = (1 - dist) * d.peak + vnoise(c / 2 + d.nk, r / 2, s + 22) * 0.12;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { style: d.style, density: clamp01(score), district: d };
+      }
+    };
+    const I0 = Math.floor(c / SR);
+    const J0 = Math.floor(r / SR);
+    for (let J = J0 - 1; J <= J0 + 1; J++) for (let I = I0 - 1; I <= I0 + 1; I++) consider(siteFor(I, J, p));
+    for (const d of p.extra) consider(d);
+    if (Math.abs(c) <= 1 && Math.abs(r) <= 1) best = { style: 'suburb', density: 0.5, district: p.extra[0] };
+    // Waterfront blocks become docks.
+    if (urbanStyle(best.style) && best.style !== 'suburb' && ihash(c, r, s + 31) < 0.6) {
+      const wet = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => waterField(x + dc * cell, y + dr * cell, p) > 0);
+      if (wet) best = { style: 'docks', density: 0.4, district: best.district };
+    }
+    // Parks: occasional green blocks inside the city.
+    if (best.style !== 'forest' && best.style !== 'suburb' && best.style !== 'docks' && ihash(c, r, s + 77) < 0.07) best = { style: 'park', density: 0.2, district: best.district };
+  }
+  z = { c, r, x: c * cell + road / 2, y: r * cell + road / 2, w: inner, h: inner, style: best.style, density: best.density, district: best.district };
+  p.zones.set(key, z);
+  return z;
+}
+
+const isHwRow = (r, p = CUR) => mod(r - p.hwRow, 8) === 0;
+const isHwCol = (c, p = CUR) => mod(c - p.hwCol, 8) === 0;
+const isMetroRow = (r, p = CUR) => mod(r - p.metroRow, 9) === 0 && !isHwRow(r, p);
+
+// The road along the top edge (horiz) or left edge of cell (c, r): null, or how it crosses
+// water: 'road' (dry), 'bridge' (short road bridge), 'deck' (highway on a suspension bridge).
+function edgeFor(c, r, horiz, p = CUR) {
+  const key = ((c + 32768) * 65536 + r + 32768) * 2 + (horiz ? 1 : 0);
+  let e = p.edges.get(key);
+  if (e !== undefined) return e;
+  if (p.edges.size > 120000) p.edges.clear();
+  const hw = horiz ? isHwRow(r, p) : isHwCol(c, p);
+  const u1 = urbanStyle(zoneFor(c, r, p).style);
+  const u2 = urbanStyle((horiz ? zoneFor(c, r - 1, p) : zoneFor(c - 1, r, p)).style);
+  e = null;
+  if (hw || u1 || u2) {
+    const wet = [];
+    for (let t = 0; t <= cell; t += 24) {
+      const x = horiz ? c * cell + t : c * cell;
+      const y = horiz ? r * cell : r * cell + t;
+      if (waterField(x, y, p) > 0) wet.push(t);
+    }
+    const kind = !wet.length ? 'road' : hw ? 'deck' : wet.length <= 14 ? 'bridge' : null;
+    if (kind) e = { kind, hw, urban: u1 || u2, wet, horiz, x0: c * cell, y0: r * cell, x1: horiz ? (c + 1) * cell : c * cell, y1: horiz ? r * cell : (r + 1) * cell };
+  }
+  p.edges.set(key, e);
+  return e;
+}
+
+// ---------------------------------------------------------------- per-cell generation
+const dimsCache = new Map();
+function dimsOf(id, variant) {
+  const key = `${id}:${variant}`;
+  let d = dimsCache.get(key);
+  if (!d) dimsCache.set(key, (d = buildingDims(id, variant)));
+  return d;
+}
+
+const poolCache = new Map();
+function weightsFor(zoneKeys, tier, fit) {
+  const key = `${zoneKeys.join()}|${tier}|${fit}`;
+  let w = poolCache.get(key);
+  if (w) return w;
+  w = {};
+  for (const t of BUILDING_TYPES) {
+    if (!(t.weight > 0) || !t.zones.some((z) => zoneKeys.includes(z))) continue;
+    const tierFit = fit
+      ? t.tier === tier ? 1 : t.tier === tier - 1 ? 0.35 : t.tier === tier + 1 ? 0.12 : 0.02
+      : t.tier === tier ? 1 : Math.abs(t.tier - tier) === 1 ? 0.25 : 0.03;
+    w[t.id] = t.weight * tierFit;
+  }
+  poolCache.set(key, w);
+  return w;
+}
+
+function generateChunk(world, c, r) {
+  const p = world.p;
+  const rng = createRng(Math.floor(ihash(c, r, p.s + 5) * 4294967296));
+  const zc = zoneFor(c, r, p);
+  const chunk = { c, r, key: world.key(c, r), zone: zc, objects: [], roads: [], lights: [], decals: [], powerLines: [], bridges: [], metro: [], loaded: true };
+  const { objects, lights, decals, powerLines } = chunk;
+  let li = 0;
+  const lean = world.detail >= 1;
+  const sp = p.spawn;
+  const nearSpawn = Math.abs(c) <= 1 && Math.abs(r) <= 1;
+  const metroLines = [isMetroRow(r, p) ? r * cell : null, isMetroRow(r + 1, p) ? (r + 1) * cell : null].filter((v) => v !== null);
   const uniquePlaced = new Set();
-  const decals = []; // painted ground: paths, ponds, courts, plazas, parking bays, manholes, beach towels
-  const powerLines = []; // chains of power poles to string cables between
+  const allowUnique = ihash(c, r, p.s + 41) < 0.12;
+  const uniqueOk = (id) => !TYPE_BY_ID[id].unique || (allowUnique && !uniquePlaced.has(id));
+
+  // Every add takes a local index, even when skipped, so saved destruction lines up on reload.
   const add = (o) => {
-    o.id = objects.length;
+    o.li = li++;
     o.state = 'intact';
     o.flash = 0;
-    objects.push(o);
+    o.chunk = chunk;
+    if (nearSpawn && o.tier >= 2 && Math.abs(o.x - sp.x) < 12 + o.w / 2 && Math.abs(o.y - sp.y) < 12 + o.h / 2) o.skip = true;
+    if (!o.skip) {
+      o.id = world.nextId++;
+      objects.push(o);
+    }
     return o;
   };
 
   const addBuilding = (typeId, x, y, rot, variant = rng.int(0, VARIANTS - 1)) => {
     const t = TYPE_BY_ID[typeId];
-    const d = buildingDims(typeId, variant);
+    const d = dimsOf(typeId, variant);
     const swap = rot % 2 === 1;
     const hp = t.landmark ? LANDMARK_HP : TIER_HP[t.tier];
     return add({
@@ -182,68 +338,65 @@ export function generateCity(seed = 1) {
   };
 
   const addProp = (id, x, y, rot = 0, variant = rng.int(0, 2)) => {
-    const p = PROP_BY_ID[id];
+    const pt = PROP_BY_ID[id];
     const d = propDims(id);
     const swap = rot % 2 === 1;
-    const o = add({
-      kind: 'prop', type: id, variant, rot, tier: p.tier, x, y,
+    const o = {
+      kind: 'prop', type: id, variant, rot, tier: pt.tier, x, y,
       w: swap ? d.h : d.w, h: swap ? d.w : d.h, height: d.height,
-      hp: TIER_HP[p.tier], maxHp: TIER_HP[p.tier], structure: false, vehicle: Boolean(p.vehicle), value: p.value,
-    });
-    if (p.light) lights.push({ x, y, h: p.light.h, color: p.light.color, obj: o, flicker: p.light.flicker });
+      hp: TIER_HP[pt.tier], maxHp: TIER_HP[pt.tier], structure: false, vehicle: Boolean(pt.vehicle), value: pt.value,
+    };
+    // Big kaiju never see pocket-sized clutter, so cells generated late leave it out; and
+    // nothing stands under the elevated metro.
+    if ((lean && pt.tier === 1) || (id !== 'metro_entrance' && metroLines.some((ly) => Math.abs(y - ly) < 14 + o.h / 2))) o.skip = true;
+    add(o);
+    if (pt.light && !o.skip) lights.push({ x, y, w: 0, h: 0, height: pt.light.h, color: pt.light.color, obj: o, flicker: pt.light.flicker });
     return o;
   };
 
-  const footprintDry = (x, y, w, h) =>
-    !isWater(x, y) && !isWater(x - w / 2, y - h / 2) && !isWater(x + w / 2, y - h / 2) && !isWater(x - w / 2, y + h / 2) && !isWater(x + w / 2, y + h / 2);
+  const water = (x, y) => waterField(x, y, p) > 0;
+  const footprintDry = (x, y, w, h) => !water(x, y) && !water(x - w / 2, y - h / 2) && !water(x + w / 2, y - h / 2) && !water(x - w / 2, y + h / 2) && !water(x + w / 2, y + h / 2);
 
-  // Pick a building type for a zone, preferring a tier, that fits in maxW x maxH.
   const pickBuilding = (zoneKeys, tier, maxW, maxH, rot) => {
-    const pool = BUILDING_TYPES.filter((t) => t.weight > 0 && t.zones.some((z) => zoneKeys.includes(z)));
-    if (!pool.length) return null;
-    const weights = {};
-    for (const t of pool) {
-      const tierFit = t.tier === tier ? 1 : Math.abs(t.tier - tier) === 1 ? 0.25 : 0.03;
-      weights[t.id] = t.weight * tierFit;
-    }
+    const weights = weightsFor(zoneKeys, tier, false);
+    if (!Object.keys(weights).length) return null;
     for (let attempt = 0; attempt < 8; attempt++) {
       const id = rng.weighted(weights);
       const variant = rng.int(0, VARIANTS - 1);
-      const d = buildingDims(id, variant);
+      const d = dimsOf(id, variant);
       const w = rot % 2 ? d.h : d.w;
       const h = rot % 2 ? d.w : d.h;
-      if (w <= maxW && h <= maxH && !(TYPE_BY_ID[id].unique && uniquePlaced.has(id))) return { id, variant };
+      if (w <= maxW && h <= maxH && uniqueOk(id)) return { id, variant };
     }
     return null;
   };
 
-  const inner = cell - road;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const z = zoneFor(c, r);
-      cells.push({ c, r, x: seaWidth + c * cell + road / 2, y: r * cell + road / 2, w: inner, h: inner, style: z.style, density: z.density });
+  const pickFit = (zoneKeys, tier, maxFront, maxDepth) => {
+    const weights = weightsFor(zoneKeys, tier, true);
+    if (!Object.keys(weights).length) return null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const id = rng.weighted(weights);
+      const variant = rng.int(0, VARIANTS - 1);
+      const d = dimsOf(id, variant);
+      if (d.w <= maxFront && d.h <= maxDepth && uniqueOk(id)) return { id, variant, d };
     }
-  }
-  const zoneAt = (c, r) => (c < 0 || r < 0 || c >= cols || r >= rows ? null : cells[r * cols + c]);
-  const urban = (zc) => Boolean(zc) && zc.style !== 'forest' && zc.style !== 'water';
+    return null;
+  };
 
-  // Roads run along cell borders wherever a neighbouring cell is urban, plus two highways.
-  const HIGHWAY_ROW = L.highwayRow;
-  const HIGHWAY_COL = 20;
-  const roadH = (c, r) => r === HIGHWAY_ROW || urban(zoneAt(c, r)) || urban(zoneAt(c, r - 1));
-  const roadV = (c, r) => c === HIGHWAY_COL || urban(zoneAt(c, r)) || urban(zoneAt(c - 1, r));
-  const roads = [];
-  for (let r = 0; r <= rows; r++) for (let c = 0; c < cols; c++) if (roadH(c, r)) roads.push({ x0: seaWidth + c * cell, y0: r * cell, x1: seaWidth + (c + 1) * cell, y1: r * cell, horiz: true });
-  for (let c = 0; c <= cols; c++) for (let r = 0; r < rows; r++) if (roadV(c, r)) roads.push({ x0: seaWidth + c * cell, y0: r * cell, x1: seaWidth + c * cell, y1: (r + 1) * cell, horiz: false });
+  const roadAt = (cc, rr, horiz) => edgeFor(cc, rr, horiz, p);
+  const top = roadAt(c, r, true);
+  const bottom = roadAt(c, r + 1, true);
+  const left = roadAt(c, r, false);
+  const right = roadAt(c + 1, r, false);
 
-  function streetDressing(zc) {
+  function streetDressing() {
     const { x, y, w, style } = zc;
     const isUrban = style !== 'forest' && style !== 'park';
     const edges = [
-      { has: roadH(zc.c, zc.r), horiz: true, at: y - 8, out: -1 },
-      { has: roadH(zc.c, zc.r + 1), horiz: true, at: y + w + 8, out: 1 },
-      { has: roadV(zc.c, zc.r), horiz: false, at: x - 8, out: -1 },
-      { has: roadV(zc.c + 1, zc.r), horiz: false, at: x + w + 8, out: 1 },
+      { has: Boolean(top), horiz: true, at: y - 8, out: -1 },
+      { has: Boolean(bottom), horiz: true, at: y + w + 8, out: 1 },
+      { has: Boolean(left), horiz: false, at: x - 8, out: -1 },
+      { has: Boolean(right), horiz: false, at: x + w + 8, out: 1 },
     ];
     const lampType = style === 'neon' ? 'neon_lamp' : 'lamppost';
     for (const e of edges) {
@@ -251,19 +404,17 @@ export function generateCity(seed = 1) {
       for (let t = 30; t < w; t += isUrban ? 70 : 140) {
         const px = e.horiz ? x + t : e.at;
         const py = e.horiz ? e.at : y + t;
-        if (!isWater(px, py)) addProp(lampType, px, py, e.horiz ? (e.out > 0 ? 2 : 0) : e.out > 0 ? 1 : 3);
+        if (!water(px, py)) addProp(lampType, px, py, e.horiz ? (e.out > 0 ? 2 : 0) : e.out > 0 ? 1 : 3);
       }
       if (!isUrban) continue;
-      // Parked cars in the curb lane
       const lane = e.at + e.out * 14;
       for (let t = 20; t < w - 20; t += rng.int(18, 40)) {
         if (!rng.chance(style === 'brick' ? 0.45 : 0.35)) continue;
         const id = rng.weighted({ car: 5, hatchback: 3, taxi: style === 'neon' ? 3 : 0.5, van: 2, pickup: style === 'suburb' ? 2 : 0.5, scooter: style === 'pastel' || style === 'neon' ? 2 : 0.3, bus: 0.2, truck: style === 'brick' ? 0.6 : 0.1 });
         const px = e.horiz ? x + t : lane;
         const py = e.horiz ? lane : y + t;
-        if (!isWater(px, py)) addProp(id, px, py, e.horiz ? (rng.chance(0.5) ? 0 : 2) : rng.chance(0.5) ? 1 : 3);
+        if (!water(px, py)) addProp(id, px, py, e.horiz ? (rng.chance(0.5) ? 0 : 2) : rng.chance(0.5) ? 1 : 3);
       }
-      // Sidewalk furniture
       const furniture = {
         neon: { vending: 3, neon_pole: 2, food_cart: 2, trash_can: 2, bench: 1, newspaper_box: 1, phone_booth: 1, bus_stop: 0.5, planter_tree: 2, bike_rack: 1, newsstand: 0.8, bollard: 1.5, parking_meter: 1, cafe_table: 1, recycling: 0.6 },
         brick: { trash_can: 2, dumpster: 2, barrier: 3, drums: 2, crates: 2, hydrant: 1, cone: 2, bike_rack: 1, parking_meter: 1, recycling: 1, newspaper_box: 0.5 },
@@ -274,12 +425,11 @@ export function generateCity(seed = 1) {
       for (let t = 50; t < w - 20; t += rng.int(25, 55)) {
         const px = e.horiz ? x + t : e.at + rng.range(-3, 3);
         const py = e.horiz ? e.at + rng.range(-3, 3) : y + t;
-        if (!isWater(px, py)) addProp(rng.weighted(furniture), px, py, e.horiz ? 0 : 1);
+        if (!water(px, py)) addProp(rng.weighted(furniture), px, py, e.horiz ? 0 : 1);
       }
     }
-    if (isUrban && (style === 'neon' || style === 'garden' || style === 'brick') && roadH(zc.c, zc.r) && roadV(zc.c, zc.r)) addProp('traffic_light', x - 14, y - 14);
-    if (isUrban && roadH(zc.c, zc.r) && roadV(zc.c + 1, zc.r)) addProp('street_sign', x + w + 12, y - 12);
-    // Overhead power lines on poles in the older districts.
+    if (isUrban && (style === 'neon' || style === 'garden' || style === 'brick') && top && left) addProp('traffic_light', x - 14, y - 14);
+    if (isUrban && top && right) addProp('street_sign', x + w + 12, y - 12);
     if (style === 'brick' || style === 'suburb') {
       for (const e of edges) {
         if (!e.has || !rng.chance(0.7)) continue;
@@ -287,36 +437,18 @@ export function generateCity(seed = 1) {
         for (let t = 12; t < w; t += 62) {
           const px = e.horiz ? x + t : e.at + e.out * -3;
           const py = e.horiz ? e.at + e.out * -3 : y + t;
-          if (!isWater(px, py)) chain.push(addProp('power_pole', px, py, e.horiz ? 0 : 1));
+          if (!water(px, py)) {
+            const pole = addProp('power_pole', px, py, e.horiz ? 0 : 1);
+            if (!pole.skip) chain.push(pole);
+          }
         }
         if (chain.length > 1) powerLines.push(chain);
       }
     }
-    // Manholes in the road
-    if (isUrban && roadH(zc.c, zc.r)) for (let t = 70; t < w; t += 140) decals.push({ kind: 'manhole', x: x + t, y: y - 30 - 8 * (t % 2 ? 1 : -1), w: 6, h: 6 });
+    if (isUrban && top) for (let t = 70; t < w; t += 140) decals.push({ kind: 'manhole', x: x + t, y: y - 30 - 8 * (t % 2 ? 1 : -1), w: 6, h: 6 });
   }
 
-  // Pick a type whose street frontage and depth fit, regardless of how it will be rotated.
-  const pickFit = (zoneKeys, tier, maxFront, maxDepth) => {
-    const pool = BUILDING_TYPES.filter((t) => t.weight > 0 && t.zones.some((z) => zoneKeys.includes(z)));
-    const weights = {};
-    for (const t of pool) {
-      const tierFit = t.tier === tier ? 1 : t.tier === tier - 1 ? 0.35 : t.tier === tier + 1 ? 0.12 : 0.02;
-      weights[t.id] = t.weight * tierFit;
-    }
-    if (!Object.keys(weights).length) return null;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const id = rng.weighted(weights);
-      const variant = rng.int(0, VARIANTS - 1);
-      const d = buildingDims(id, variant);
-      if (d.w <= maxFront && d.h <= maxDepth && !(TYPE_BY_ID[id].unique && uniquePlaced.has(id))) return { id, variant, d };
-    }
-    return null;
-  };
-
-  // Street-frontage packing: buildings line every street edge shoulder to shoulder,
-  // so blocks read as dense city with no stray empty lots.
-  function fillUrban(zc) {
+  function fillUrban() {
     const { x, y, w, style, density } = zc;
     let zoneKeys = [style];
     let tier = 3;
@@ -334,6 +466,7 @@ export function generateCity(seed = 1) {
     packRect(x, y, w, w, style, zoneKeys, tier, 0);
   }
 
+  // Street-frontage packing: buildings line every street edge shoulder to shoulder.
   function packRect(x, y, w, h, style, zoneKeys, tier, depth) {
     const setback = depth === 0 ? 5 : 3;
     const maxDepth = Math.min(w, h) * 0.42;
@@ -345,7 +478,6 @@ export function generateCity(seed = 1) {
         const slotTier = rng.chance(0.25) ? Math.max(3, tier - 1) : tier;
         const pick = pickFit(zoneKeys, slotTier, remaining, maxDepth) || pickFit(zoneKeys, 3, remaining, maxDepth);
         if (!pick) {
-          // Too narrow for any building: a tree or planter fills the gap.
           if (remaining > 8) addProp(style === 'brick' ? 'dumpster' : style === 'neon' ? 'vending' : 'tree_round', sx + dx * (cursor + 5) + nx * 8, sy + dy * (cursor + 5) + ny * 8, rot);
           break;
         }
@@ -363,15 +495,14 @@ export function generateCity(seed = 1) {
       }
       return deepest + setback;
     };
-    const top = placeRow(x, y, 1, 0, 0, 1, w, 2);
-    const bot = placeRow(x, y + h, 1, 0, 0, -1, w, 0);
-    const inner0 = y + top + 4;
-    const inner1 = y + h - bot - 4;
-    const left = placeRow(x, inner0, 0, 1, 1, 0, inner1 - inner0, 3);
-    const right = placeRow(x + w, inner0, 0, 1, -1, 0, inner1 - inner0, 1);
-    const cx0 = x + left + 4;
-    const cx1 = x + w - right - 4;
-    // A big courtyard gets an inner ring of smaller buildings along a back alley.
+    const topD = placeRow(x, y, 1, 0, 0, 1, w, 2);
+    const botD = placeRow(x, y + h, 1, 0, 0, -1, w, 0);
+    const inner0 = y + topD + 4;
+    const inner1 = y + h - botD - 4;
+    const leftD = placeRow(x, inner0, 0, 1, 1, 0, inner1 - inner0, 3);
+    const rightD = placeRow(x + w, inner0, 0, 1, -1, 0, inner1 - inner0, 1);
+    const cx0 = x + leftD + 4;
+    const cx1 = x + w - rightD - 4;
     if (depth === 0 && cx1 - cx0 > 90 && inner1 - inner0 > 90) packRect(cx0 + 6, inner0 + 6, cx1 - cx0 - 12, inner1 - inner0 - 12, style, zoneKeys, Math.max(3, tier - 1), 1);
     else courtyard(cx0, inner0, cx1, inner1, style, zoneKeys, tier);
   }
@@ -389,8 +520,7 @@ export function generateCity(seed = 1) {
       return;
     }
     if (style === 'brick' || style === 'docks' || style === 'neon' || rng.chance(0.4)) {
-      // Parking lot
-      if (style !== 'docks') decals.push({ kind: 'parking', x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 });
+      if (style !== 'docks') decals.push({ kind: 'parking', x: cx, y: cy, w: cw, h: ch });
       for (let px = x0 + 8; px < x1 - 6; px += 9) {
         for (let py = y0 + 8; py < y1 - 6; py += 16) {
           if (rng.chance(0.65)) addProp(style === 'docks' ? 'container' : rng.pick(['car', 'hatchback', 'van', 'taxi', 'pickup']), px, py, 1);
@@ -403,7 +533,7 @@ export function generateCity(seed = 1) {
     }
   }
 
-  function fillSuburb(zc) {
+  function fillSuburb() {
     const { x, y, w } = zc;
     const lots = 3;
     const lot = w / lots;
@@ -414,10 +544,9 @@ export function generateCity(seed = 1) {
         const rot = j === lots - 1 ? 0 : j === 0 ? 2 : i === 0 ? 3 : i === lots - 1 ? 1 : 0;
         const pick = pickBuilding(['suburb'], 3, lot * 0.55, lot * 0.45, rot);
         if (!pick) continue;
-        const d = buildingDims(pick.id, pick.variant);
+        const d = dimsOf(pick.id, pick.variant);
         const bw = rot % 2 ? d.h : d.w;
         const bh = rot % 2 ? d.w : d.h;
-        // House sits toward the street; the backyard is behind it.
         const fx = rot === 1 ? 1 : rot === 3 ? -1 : 0;
         const fy = rot === 0 ? 1 : rot === 2 ? -1 : 0;
         const hx = lx + lot / 2 + fx * (lot / 2 - bw / 2 - 10);
@@ -449,35 +578,36 @@ export function generateCity(seed = 1) {
     const spot = () => ({ x: rng.range(yx0 + 6, yx1 - 6), y: rng.range(yy0 + 6, yy1 - 6) });
     if (rng.chance(0.75)) {
       const shed = rng.chance(0.8) ? 'garden_shed' : rng.chance(0.5) ? 'playhouse' : 'carport';
-      addBuilding(shed, rng.chance(0.5) ? yx0 + 9 : yx1 - 9, rng.chance(0.5) ? yy0 + 8 : yy1 - 8, rng.int(0, 3));
+      const sx = rng.chance(0.5) ? yx0 + 9 : yx1 - 9;
+      const sy = rng.chance(0.5) ? yy0 + 8 : yy1 - 8;
+      const rot = rng.int(0, 3);
+      if (footprintDry(sx, sy, 16, 16)) addBuilding(shed, sx, sy, rot);
     }
     const items = { tree_round: 2, tree_autumn: 1, swing_set: 1, trampoline: 1, pool: 0.8, hot_tub: 0.5, bbq: 1.5, doghouse: 1, picnic_table: 1, lawn_chair: 2, gnome: 1.5, flower_bed: 2, bush: 2, bike: 1 };
     const n = rng.int(4, 8);
     for (let i = 0; i < n; i++) {
-      const p = spot();
-      addProp(rng.weighted(items), p.x, p.y, rng.int(0, 3));
+      const s = spot();
+      addProp(rng.weighted(items), s.x, s.y, rng.int(0, 3));
     }
   }
 
   // Parks: crossing paths, a centrepiece, a pond, a playground, a sports court, trees.
-  function fillPark(zc) {
+  function fillPark() {
     const { x, y, w } = zc;
     const cx = x + w / 2;
     const cy = y + w / 2;
-    decals.push({ kind: 'path', x: cx, y: cy, w: w, h: 12 });
+    decals.push({ kind: 'path', x: cx, y: cy, w, h: 12 });
     decals.push({ kind: 'path', x: cx, y: cy, w: 12, h: w });
     decals.push({ kind: 'plaza', x: cx, y: cy, w: 56, h: 56 });
     addProp(rng.chance(0.6) ? 'fountain' : 'statue', cx, cy);
     const quads = rng.shuffle([[-1, -1], [1, -1], [-1, 1], [1, 1]]);
     const q = (i) => ({ x: cx + quads[i][0] * w * 0.27, y: cy + quads[i][1] * w * 0.27 });
-    // Pond
     const pond = q(0);
     decals.push({ kind: 'pond', x: pond.x, y: pond.y, w: 90, h: 70 });
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * Math.PI * 2;
       addProp(k % 2 ? 'bush' : 'tree_birch', pond.x + Math.cos(a) * 56, pond.y + Math.sin(a) * 46, rng.int(0, 3));
     }
-    // Playground
     const pg = q(1);
     decals.push({ kind: 'sandbox', x: pg.x, y: pg.y, w: 60, h: 50 });
     addProp('slide', pg.x - 14, pg.y - 10, 0);
@@ -485,7 +615,6 @@ export function generateCity(seed = 1) {
     addProp('swing_set', pg.x - 8, pg.y + 12, 0);
     addProp('seesaw', pg.x + 16, pg.y + 14, 0);
     addProp('bench', pg.x, pg.y + 30, 0);
-    // Sports court
     const ct = q(2);
     if (rng.chance(0.5)) {
       decals.push({ kind: 'basketball', x: ct.x, y: ct.y, w: 56, h: 32 });
@@ -495,12 +624,10 @@ export function generateCity(seed = 1) {
       decals.push({ kind: 'tennis', x: ct.x, y: ct.y, w: 60, h: 30 });
       addProp('tennis_net', ct.x, ct.y, 0);
     }
-    // Gazebo and picnic corner
     const gz = q(3);
     addProp('gazebo', gz.x, gz.y);
     addProp('picnic_table', gz.x + 22, gz.y + 10, 0);
     addProp('picnic_table', gz.x - 20, gz.y + 14, 0);
-    // Trees and lamps along the paths
     for (let t = 30; t < w - 20; t += 36) {
       addProp('lamppost', x + t, cy - 10, 0);
       addProp('lamppost', cx + 10, y + t, 1);
@@ -509,7 +636,7 @@ export function generateCity(seed = 1) {
     for (let i = 0; i < 26; i++) {
       const px = x + rng.range(8, w - 8);
       const py = y + rng.range(8, w - 8);
-      if (Math.abs(px - cx) < 14 || Math.abs(py - cy) < 14 || isWater(px, py)) continue;
+      if (Math.abs(px - cx) < 14 || Math.abs(py - cy) < 14 || water(px, py)) continue;
       if ([0, 1, 2, 3].some((k) => Math.hypot(px - q(k).x, py - q(k).y) < 50)) continue;
       addProp(rng.weighted({ tree_round: 4, tree_blossom: 2, tree_birch: 2, tree_autumn: 1, bush: 3, flower_bed: 2 }), px, py, rng.int(0, 3));
     }
@@ -517,23 +644,22 @@ export function generateCity(seed = 1) {
 
   // Plazas: a paved square with tree rows, flower beds, a centrepiece, a big screen,
   // food trucks and cafe seating.
-  function fillPlaza(zc) {
+  function fillPlaza() {
     const { x, y, w, style } = zc;
     const cx = x + w / 2;
     const cy = y + w / 2;
     decals.push({ kind: 'plaza', x: cx, y: cy, w: w - 10, h: w - 10 });
     addProp(rng.chance(0.5) ? 'statue' : 'fountain', cx, cy);
     let topY = y + 20;
-    if (!uniquePlaced.has('city_hall') && style !== 'neon') {
+    if (allowUnique && style !== 'neon') {
       uniquePlaced.add('city_hall');
-      const d = buildingDims('city_hall', 0);
+      const d = dimsOf('city_hall', 0);
       addBuilding('city_hall', cx, y + d.h / 2 + 8, 0, 0);
       topY = y + d.h + 24;
     } else {
       addProp('big_screen', cx, y + 30, 0);
       topY = y + 50;
     }
-    // Tree-lined promenade rows down both sides of the central axis.
     for (let ty = topY; ty < y + w - 40; ty += 32) {
       for (const dx of [-110, -70, 70, 110]) addProp('planter_tree', cx + dx, ty);
       addProp('bench', cx - 90, ty + 16, 1);
@@ -541,13 +667,10 @@ export function generateCity(seed = 1) {
       addProp('lamppost', cx - 40, ty, 0);
       addProp('lamppost', cx + 40, ty, 2);
     }
-    // Flower beds around the centrepiece
     for (let a = 0; a < 8; a++) addProp('flower_bed', cx + Math.cos((a / 8) * Math.PI * 2) * 26, cy + Math.sin((a / 8) * Math.PI * 2) * 26, a % 2);
-    // Cafe corner and food trucks along the bottom edge
     for (let i = 0; i < 8; i++) addProp('cafe_table', x + 30 + (i % 4) * 14, y + w - 70 + Math.floor(i / 4) * 14, 0);
     for (let i = 0; i < 3; i++) addProp('food_truck', x + w - 150 + i * 46, y + w - 28, 0);
     addProp('ice_cream_cart', cx, y + w - 60, 0);
-    // Side wings: lawns with trees
     for (const side of [-1, 1]) {
       for (let ty = topY; ty < y + w - 40; ty += 28) addProp(rng.weighted({ tree_round: 2, tree_blossom: style === 'pastel' ? 2 : 0.5, bush: 1 }), cx + side * (w / 2 - 22), ty, rng.int(0, 3));
     }
@@ -556,7 +679,7 @@ export function generateCity(seed = 1) {
     if (style === 'neon') for (let i = 0; i < 6; i++) addProp('neon_pole', cx + rng.range(-150, 150), cy + rng.range(-150, 150));
   }
 
-  function fillForest(zc) {
+  function fillForest() {
     const { x, y, w } = zc;
     const clearing = rng.chance(0.18);
     if (clearing) {
@@ -570,148 +693,334 @@ export function generateCity(seed = 1) {
     for (let i = 0; i < n; i++) {
       const px = x - 20 + rng.range(0, w + 40);
       const py = y - 20 + rng.range(0, w + 40);
-      if (isWater(px, py)) continue;
+      if (water(px, py)) continue;
       if (clearing && Math.hypot(px - x - w / 2, py - y - w / 2) < 90) continue;
       addProp(rng.weighted({ tree_pine: 5, tree_pine_tall: 3, tree_round: 1.5, tree_birch: 1.5, tree_autumn: 1, bush: 2, rock: 1.2, log: 0.5, hay: 0.1 }), px, py, rng.int(0, 3));
     }
   }
 
-  for (const zc of cells) {
-    if (zc.style === 'water') continue;
-    streetDressing(zc);
-    if (zc.style === 'forest') fillForest(zc);
-    else if (zc.style === 'park') fillPark(zc);
-    else if (zc.style === 'suburb') fillSuburb(zc);
-    else if (zc.style !== 'docks' && zc.density > 0.45 && noise2(zc.c, zc.r, 91) < 0.07) fillPlaza(zc);
-    else fillUrban(zc);
-  }
-
-  // Beach along the pastel coast: umbrellas, towels and a lifeguard tower.
-  for (let y = 11 * cell; y < WORLD.height - 60; y += 34) {
-    let bx = seaWidth + 60;
-    while (bx > 0 && isWater(bx, y) === false) bx -= 8;
-    bx += 22;
-    if (isWater(bx, y) || bx > seaWidth + 80) continue;
-    addProp('beach_umbrella', bx + rng.range(-6, 6), y + rng.range(-8, 8), 0);
-    decals.push({ kind: 'towel', x: bx + 10, y: y + 6, w: 6, h: 12 });
-    if (Math.round(y / 34) % 8 === 0) addProp('lifeguard_tower', bx + 18, y);
-  }
-
-  // ---- the suspension bridge across the lake, on the highway row
-  const bridges = [];
-  {
-    const by = HIGHWAY_ROW * cell;
-    let xa = LAKE.cx - LAKE.rx * 1.3;
-    let xb = LAKE.cx + LAKE.rx * 1.3;
-    while (!isWater(xa, by) && xa < LAKE.cx) xa += 10;
-    while (!isWater(xb, by) && xb > LAKE.cx) xb -= 10;
-    xa -= 60;
-    xb += 60;
-    // Nothing else stands on the bridge line.
-    for (const o of objects) if (o.x > xa && o.x < xb && Math.abs(o.y - by) < 60) o.state = 'removed';
-    const dd = buildingDims('bridge_deck', 0);
-    const decks = [];
-    for (let x = xa; x < xb; x += dd.w) decks.push(addBuilding('bridge_deck', x + dd.w / 2, by, 0, 0));
-    const span = xb - xa;
-    const t1 = addBuilding('bridge_tower', xa + span * 0.24, by, 0, 0);
-    const t2 = addBuilding('bridge_tower', xa + span * 0.76, by, 0, 0);
-    bridges.push({ kind: 'suspension', x0: xa, x1: xb, y: by, towers: [t1, t2], decks, deckHeight: (dd.by - 1) * dd.v, towerHeight: t1.height });
-    for (let x = xa; x < xb; x += 140) {
-      lights.push({ x, y: by - 50, h: 60, color: 0xffd38a });
-      lights.push({ x, y: by + 50, h: 60, color: 0xffd38a });
+  // Sand and sunshades where a quiet block meets the water.
+  function beach() {
+    const { x, y, w, style } = zc;
+    if (!['pastel', 'park', 'suburb', 'garden', 'forest'].includes(style) || ihash(c, r, p.s + 61) > 0.6) return;
+    const probe = [[0, 0], [w, 0], [0, w], [w, w], [w / 2, -40], [w / 2, w + 40], [-40, w / 2], [w + 40, w / 2]];
+    if (!probe.some(([dx, dy]) => water(x + dx, y + dy))) return;
+    for (let py = y + 10; py < y + w - 10; py += 30) {
+      for (let px = x + 10; px < x + w - 10; px += 30) {
+        const f = waterField(px, py, p);
+        if (f > -8 || f < -40 || !rng.chance(0.3)) continue;
+        addProp('beach_umbrella', px + rng.range(-6, 6), py + rng.range(-6, 6), 0);
+        decals.push({ kind: 'towel', x: px + 10, y: py + 6, w: 6, h: 12 });
+        if (rng.chance(0.08)) addProp('lifeguard_tower', px + 18, py);
+      }
     }
   }
-  // Road bridges where other roads cross the river
-  for (const rd of roads) {
-    if (!rd.horiz || rd.y0 === HIGHWAY_ROW * cell) continue;
-    const wet = [];
-    for (let x = rd.x0; x <= rd.x1; x += 24) if (isWater(x, rd.y0) && x > seaWidth + 200) wet.push(x);
-    if (!wet.length || wet.length > 14) continue;
-    for (const x of wet) addBuilding('road_bridge', x, rd.y0, 0, 0);
+
+  // Waterfront landmark: a lighthouse at the end of a pier.
+  function lighthouse() {
+    if (zc.style !== 'docks' || ihash(c, r, p.s + 51) > 0.3) return;
+    const cx = (c + 0.5) * cell;
+    const cy = (r + 0.5) * cell;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const ex = cx + dx * (cell / 2 + 30);
+      const ey = cy + dy * (cell / 2 + 30);
+      const tip = { x: ex + dx * 240, y: ey + dy * 240 };
+      if (!water(tip.x, tip.y) || !water(ex + dx * 120, ey + dy * 120)) continue;
+      for (let t = 0; t <= 240; t += 50) addBuilding('road_bridge', ex + dx * t, ey + dy * t, dx ? 0 : 1, 0);
+      const lh = addBuilding('lighthouse', tip.x + dx * 30, tip.y + dy * 30, 0, 0);
+      if (!lh.skip) lights.push({ x: lh.x, y: lh.y, w: 0, h: 0, height: lh.height, color: 0xfff2a8, obj: lh, big: true });
+      return;
+    }
   }
 
-  // ---- elevated metro: down the brick/neon avenue, then east across the lake
-  const metro = { points: [], segments: [], stations: [] };
-  {
-    const downtown = L.districts[0];
-    const ax = seaWidth + Math.round(Math.max(3, Math.min(6, downtown.cx))) * cell;
-    const metroRow = Math.min(rows - 2, HIGHWAY_ROW + 3);
-    const route = [[ax, cell], [ax, metroRow * cell], [seaWidth + 18 * cell, metroRow * cell]];
-    const tr = buildingDims('metro_track', 0);
-    let dist = 0;
-    for (let i = 0; i < route.length - 1; i++) {
-      const [x0, y0] = route[i];
-      const [x1, y1] = route[i + 1];
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      const dx = (x1 - x0) / len;
-      const dy = (y1 - y0) / len;
-      for (let t = tr.w / 2; t < len; t += tr.w) {
-        const px = x0 + dx * t;
-        const py = y0 + dy * t;
-        // Clear street clutter under the viaduct.
-        for (const o of objects) if (o.state === 'intact' && o.kind === 'prop' && Math.abs(o.x - px) < (dx ? tr.w / 2 + 4 : 14) && Math.abs(o.y - py) < (dx ? 14 : tr.w / 2 + 4)) o.state = 'removed';
-        const station = Math.round((dist + t) / tr.w) % 18 === 9;
-        const seg = addBuilding(station ? 'metro_station' : 'metro_track', px, py, dx ? 0 : 1, 0);
-        metro.segments.push(seg);
-        if (station) {
-          metro.stations.push(dist + t);
-          const sx = px + (dx ? 0 : 24);
-          const sy = py + (dx ? 24 : 0);
-          if (!isWater(sx, sy)) addProp('metro_entrance', sx + (dx ? 0 : 6), sy + (dx ? 6 : 0), dx ? 0 : 1);
+  // The roads this cell owns (its top and left edge), with bridges where they cross water.
+  function roads() {
+    for (const e of [top, left]) {
+      if (!e) continue;
+      chunk.roads.push({ x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, horiz: e.horiz, highway: e.hw, urban: e.urban, kind: e.kind, w: e.horiz ? cell : 0, h: e.horiz ? 0 : cell, x: (e.x0 + e.x1) / 2, y: (e.y0 + e.y1) / 2 });
+      if (e.kind === 'bridge') {
+        for (const t of e.wet) addBuilding('road_bridge', e.horiz ? e.x0 + t : e.x0, e.horiz ? e.y0 : e.y0 + t, 0, 0);
+      } else if (e.kind === 'deck') {
+        const dd = dimsOf('bridge_deck', 0);
+        const from = e.wet[0] - 60;
+        const to = e.wet[e.wet.length - 1] + 60;
+        const base = e.horiz ? e.x0 : e.y0;
+        const decks = [];
+        for (let i = Math.ceil((base + from) / dd.w - 0.5); (i + 0.5) * dd.w <= base + to; i++) {
+          const a = (i + 0.5) * dd.w;
+          if (a < base || a >= base + cell) continue;
+          decks.push(addBuilding('bridge_deck', e.horiz ? a : e.x0, e.horiz ? e.y0 : a, e.horiz ? 0 : 1, 0));
+        }
+        if (e.wet.length >= 14) {
+          const mid = base + cell / 2;
+          const tower = addBuilding('bridge_tower', e.horiz ? mid : e.x0, e.horiz ? e.y0 : mid, e.horiz ? 0 : 1, 0);
+          const td = dimsOf('bridge_tower', 0);
+          chunk.bridges.push({ horiz: e.horiz, a0: base, a1: base + cell, at: e.horiz ? e.y0 : e.x0, tower, deckHeight: (dd.by - 1) * dd.v, towerHeight: tower.height, half: td.h / 2 - 6 });
+        }
+        for (let t = 0; t < cell; t += 140) {
+          for (const side of [-50, 50]) {
+            const lx = e.horiz ? e.x0 + t : e.x0 + side;
+            const ly = e.horiz ? e.y0 + side : e.y0 + t;
+            if (water(lx, ly)) lights.push({ x: lx, y: ly, w: 0, h: 0, height: 60, color: 0xffd38a });
+          }
         }
       }
-      dist += len;
-    }
-    metro.points = route;
-    metro.length = dist;
-    metro.segLen = tr.w;
-    metro.deck = (tr.by - 2) * tr.v;
-  }
-
-  // Harbor Town's landmark: the lighthouse on a pier.
-  const pier = { x: seaWidth * 0.42, y: 3 * cell, w: seaWidth * 0.6 + 40, h: 70 };
-  const landmark = addBuilding('lighthouse', seaWidth * 0.42, 3 * cell, 0, 0);
-  lights.push({ x: landmark.x, y: landmark.y, h: landmark.height, color: 0xfff2a8, big: true });
-  for (let i = 0; i < 18; i++) {
-    const bx = rng.range(80, seaWidth - 80);
-    const by = rng.range(200, WORLD.height - 200);
-    if (isWater(bx, by)) addProp('boat', bx, by, rng.int(0, 3));
-  }
-
-  // ---- spawn: a backyard in the home neighbourhood
-  const home = L.districts.find((d) => d.home);
-  let spawn = null;
-  let bestD = Infinity;
-  for (const zc of cells) {
-    if (zc.style !== 'suburb') continue;
-    const d = Math.hypot(zc.c + 0.5 - home.cx, zc.r + 0.5 - home.cy);
-    if (d < bestD) {
-      bestD = d;
-      spawn = { x: zc.x + zc.w / 2, y: zc.y + zc.w / 2 };
     }
   }
-  spawn = spawn || { x: WORLD.width - 600, y: WORLD.height / 2 };
 
-  // Clear the drop-in point of anything taller than a person.
-  for (const o of objects) {
-    if (o.tier >= 2 && Math.abs(o.x - spawn.x) < 12 + o.w / 2 && Math.abs(o.y - spawn.y) < 12 + o.h / 2) o.state = 'removed';
+  // Elevated metro along the top edge of metro rows: one 40-unit span at a time.
+  function metro() {
+    if (!isMetroRow(r, p)) return;
+    const tr = dimsOf('metro_track', 0);
+    const y = r * cell;
+    for (let i = Math.ceil((c * cell) / tr.w - 0.5); (i + 0.5) * tr.w < (c + 1) * cell; i++) {
+      const px = (i + 0.5) * tr.w;
+      if (px < c * cell) continue;
+      const station = mod(i, 18) === 9;
+      const seg = addBuilding(station ? 'metro_station' : 'metro_track', px, y, 0, 0);
+      seg.metroRow = r;
+      seg.metroI = i;
+      if (!seg.skip) chunk.metro.push(seg);
+      if (station && !water(px, y + 30)) addProp('metro_entrance', px, y + 30, 0);
+    }
   }
-  const live = objects.filter((o) => o.state !== 'removed');
-  live.forEach((o, i) => (o.id = i));
-  const liveLights = lights.filter((l) => !l.obj || l.obj.state !== 'removed');
-  for (const b of bridges) b.decks = b.decks.filter((d) => d.state !== 'removed');
 
-  const grid = new SpatialGrid(WORLD.width, WORLD.height);
-  for (const o of live) grid.insert(o);
-  const lines = powerLines.map((chain) => chain.filter((o) => o.state !== 'removed')).filter((c) => c.length > 1);
-  return { seed, layout: L, objects: live, cells, roads, lights: liveLights, bridges, spawn, grid, landmark, pier, lake: LAKE, highwayRow: HIGHWAY_ROW, decals, powerLines: lines, metro };
+  function boats() {
+    if (zc.style !== 'water') return;
+    const n = rng.int(0, 2);
+    for (let i = 0; i < n; i++) {
+      const bx = c * cell + rng.range(40, cell - 40);
+      const by = r * cell + rng.range(40, cell - 40);
+      if (waterField(bx, by, p) > 20) addProp('boat', bx, by, rng.int(0, 3));
+    }
+  }
+
+  roads();
+  metro();
+  if (zc.style !== 'water') {
+    streetDressing();
+    if (zc.style === 'forest') fillForest();
+    else if (zc.style === 'park') fillPark();
+    else if (zc.style === 'suburb') fillSuburb();
+    else if (zc.style !== 'docks' && zc.density > 0.45 && ihash(c, r, p.s + 91) < 0.07) fillPlaza();
+    else fillUrban();
+    beach();
+    lighthouse();
+  } else boats();
+  chunk.powerLines = powerLines.filter((ch) => ch.length > 1);
+  return chunk;
 }
 
-// Make a previously generated city's layout current again (isWater etc. read it).
-export function useCity(city) {
-  L = city.layout;
+// ---------------------------------------------------------------- the streaming world
+const roadKey = (x, y) => `${Math.round(x)},${Math.round(y)}`;
+
+export class World {
+  constructor(seed = 1) {
+    this.seed = seed;
+    this.p = makeParams(seed);
+    CUR = this.p;
+    this.spawn = { ...this.p.spawn };
+    this.grid = new SpatialHash(128);
+    this.lightGrid = new SpatialHash(256);
+    this.decalGrid = new SpatialHash(256);
+    this.roadGrid = new SpatialHash(420);
+    this.chunks = new Map();
+    this.saved = new Map(); // cell key -> Map(local index -> saved state)
+    this.listeners = new Set();
+    this.graph = new Map();
+    this.roadGraph = { graph: this.graph, key: roadKey };
+    this.metroSegs = new Map();
+    this.nextId = 1;
+    this.detail = 0; // 1 = leave out pocket-sized clutter (set once the kaiju is huge)
+    this._objects = null;
+    this._roads = null;
+  }
+
+  key(c, r) {
+    return (c + 32768) * 65536 + r + 32768;
+  }
+
+  zoneFor(c, r) {
+    return zoneFor(c, r, this.p);
+  }
+
+  cellAt(x, y) {
+    return zoneFor(Math.floor(x / cell), Math.floor(y / cell), this.p);
+  }
+
+  // Road along the top (horiz) or left edge of a cell, or null.
+  edge(c, r, horiz) {
+    return edgeFor(c, r, horiz, this.p);
+  }
+
+  isWater(x, y) {
+    return waterField(x, y, this.p) > 0;
+  }
+
+  isMetroRow(r) {
+    return isMetroRow(r, this.p);
+  }
+
+  isLoaded(c, r) {
+    return this.chunks.has(this.key(c, r));
+  }
+
+  get objects() {
+    if (!this._objects) {
+      this._objects = [];
+      for (const ch of this.chunks.values()) for (const o of ch.objects) this._objects.push(o);
+    }
+    return this._objects;
+  }
+
+  get roads() {
+    if (!this._roads) {
+      this._roads = [];
+      for (const ch of this.chunks.values()) for (const rd of ch.roads) this._roads.push(rd);
+    }
+    return this._roads;
+  }
+
+  load(c, r) {
+    const chunk = generateChunk(this, c, r);
+    const saved = this.saved.get(chunk.key);
+    if (saved) {
+      for (const o of chunk.objects) {
+        const s = saved.get(o.li);
+        if (!s) continue;
+        o.state = s.state;
+        o.hp = s.hp;
+        if (s.fallDir) o.fallDir = s.fallDir;
+      }
+      this.saved.delete(chunk.key);
+    }
+    for (const o of chunk.objects) this.grid.insert(o);
+    for (const l of chunk.lights) this.lightGrid.insert(l);
+    for (const d of chunk.decals) this.decalGrid.insert(d);
+    for (const rd of chunk.roads) {
+      this.roadGrid.insert(rd);
+      for (const [x, y] of [[rd.x0, rd.y0], [rd.x1, rd.y1]]) {
+        const k = roadKey(x, y);
+        if (!this.graph.has(k)) this.graph.set(k, []);
+        this.graph.get(k).push(rd);
+      }
+    }
+    for (const seg of chunk.metro) this.metroSegs.set(`${seg.metroRow}:${seg.metroI}`, seg);
+    this.chunks.set(chunk.key, chunk);
+    this._objects = null;
+    this._roads = null;
+    for (const l of this.listeners) if (l.load) l.load(chunk);
+    return chunk;
+  }
+
+  unload(chunk) {
+    for (const l of this.listeners) if (l.unload) l.unload(chunk);
+    chunk.loaded = false;
+    let saved = null;
+    for (const o of chunk.objects) {
+      if (o.state !== 'intact' || o.hp < o.maxHp) {
+        if (!saved) saved = new Map();
+        saved.set(o.li, { state: o.state === 'collapsing' ? 'rubble' : o.state, hp: o.hp, fallDir: o.fallDir });
+      }
+      this.grid.remove(o);
+    }
+    if (saved) this.saved.set(chunk.key, saved);
+    for (const l of chunk.lights) this.lightGrid.remove(l);
+    for (const d of chunk.decals) this.decalGrid.remove(d);
+    for (const rd of chunk.roads) {
+      this.roadGrid.remove(rd);
+      for (const [x, y] of [[rd.x0, rd.y0], [rd.x1, rd.y1]]) {
+        const k = roadKey(x, y);
+        const list = this.graph.get(k);
+        if (!list) continue;
+        const i = list.indexOf(rd);
+        if (i >= 0) list.splice(i, 1);
+        if (!list.length) this.graph.delete(k);
+      }
+    }
+    for (const seg of chunk.metro) this.metroSegs.delete(`${seg.metroRow}:${seg.metroI}`);
+    this.chunks.delete(chunk.key);
+    this._objects = null;
+    this._roads = null;
+  }
+
+  // Stream cells around (x, y): everything within `must` loads now, the rest of `radius`
+  // loads nearest first, at most `maxNew` cells per call; far cells are dropped.
+  update(x, y, radius, maxNew = 4, must = 0) {
+    const c0 = Math.floor((x - radius) / cell);
+    const c1 = Math.floor((x + radius) / cell);
+    const r0 = Math.floor((y - radius) / cell);
+    const r1 = Math.floor((y + radius) / cell);
+    const missing = [];
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (this.chunks.has(this.key(c, r))) continue;
+        const dx = Math.max(c * cell - x, 0, x - (c + 1) * cell);
+        const dy = Math.max(r * cell - y, 0, y - (r + 1) * cell);
+        const d = Math.hypot(dx, dy);
+        if (d <= radius) missing.push({ c, r, d });
+      }
+    }
+    missing.sort((a, b) => a.d - b.d);
+    let n = 0;
+    for (const m of missing) {
+      if (m.d > must && n >= maxNew) break;
+      this.load(m.c, m.r);
+      n++;
+    }
+    const far = radius * 1.3 + cell;
+    for (const ch of [...this.chunks.values()]) {
+      const cx = (ch.c + 0.5) * cell;
+      const cy = (ch.r + 0.5) * cell;
+      if (Math.hypot(cx - x, cy - y) > far) this.unload(ch);
+    }
+    return missing.length - n;
+  }
+
+  nearestRoad(x, y, maxR = 3000) {
+    for (let R = 300; R <= maxR; R *= 2) {
+      let best = null;
+      let bestD = Infinity;
+      let bestT = 0;
+      for (const rd of this.roadGrid.query(x - R, y - R, x + R, y + R)) {
+        const vx = rd.x1 - rd.x0;
+        const vy = rd.y1 - rd.y0;
+        const t = Math.max(0, Math.min(1, ((x - rd.x0) * vx + (y - rd.y0) * vy) / (vx * vx + vy * vy || 1)));
+        const px = rd.x0 + vx * t;
+        const py = rd.y0 + vy * t;
+        const d = Math.hypot(x - px, y - py);
+        if (d < bestD && !isWater(px, py)) {
+          bestD = d;
+          best = rd;
+          bestT = t;
+        }
+      }
+      if (best) return { road: best, t: bestT };
+    }
+    return null;
+  }
+
+  // Metro rows run along y = row * cell; the nearest one to y.
+  metroRowNear(y) {
+    const r = Math.round(y / cell);
+    for (let d = 0; d < 12; d++) {
+      if (isMetroRow(r + d, this.p)) return r + d;
+      if (isMetroRow(r - d, this.p)) return r - d;
+    }
+    return null;
+  }
+
+  metroSeg(row, x) {
+    return this.metroSegs.get(`${row}:${Math.floor(x / dimsOf('metro_track', 0).w)}`) || null;
+  }
 }
 
-export function worldLayout() {
-  return L;
+export const METRO = (() => {
+  const tr = buildingDims('metro_track', 0);
+  return { segLen: tr.w, deck: (tr.by - 2) * tr.v, stationEvery: 18, stationOffset: 9 };
+})();
+
+// Make a world's parameters current (isWater and friends read them).
+export function useCity(world) {
+  CUR = world.p;
 }

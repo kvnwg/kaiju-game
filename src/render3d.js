@@ -1,12 +1,14 @@
 /* global THREE */
-// three.js voxel renderer: tilted camera, golden-hour-to-neon-night lighting, a painted
-// ground with baked street-light pools, streamed voxel buildings that chip and collapse,
-// instanced street props, water, the suspension bridge, and post-processing.
+// three.js voxel renderer: tilted camera, golden-hour-to-neon-night lighting, streamed ground
+// tiles with baked street-light pools, voxel buildings that chip and collapse (simplified
+// meshes once they are small next to the kaiju), instanced street props, water, suspension
+// bridges, and post-processing.
 import { WORLD } from './config.js';
 import { buildBuilding } from './buildings.js';
 import { PROP_BY_ID, buildProp } from './props.js';
 import { meshGrid, fracture } from './mesher.js';
-import { isWater, SpatialGrid } from './world.js';
+import { isWater, METRO } from './world.js';
+import { Terrain } from './terrain3d.js';
 import { VoxelGrid, hash3, shade } from './voxel.js';
 import { FX } from './fx3d.js';
 import { Actors, toGeometry } from './actors3d.js';
@@ -163,6 +165,13 @@ export class Renderer3D {
     this.fx = new FX(this.scene);
     this.actors = new Actors(this.scene, (selfLit = 0) => makeVoxelMaterial(this.uniforms, selfLit));
     this.ambient = new Ambient(this.scene, this.voxelMat);
+    this.terrain = new Terrain(this.scene, this.renderer);
+    this.bridgeMeshes = new Map();
+    this._pm = new THREE.Matrix4();
+    this._pq = new THREE.Quaternion();
+    this._pe = new THREE.Euler();
+    this._pv = new THREE.Vector3();
+    this._ps = new THREE.Vector3(1, 1, 1);
     this.variants = new Map();
     this.propCache = new Map();
     this.bld = new Map();
@@ -172,7 +181,6 @@ export class Renderer3D {
     this.rubbleCache = new Map();
     this.bInst = new Map();
     this.rInst = new Map();
-    this.variantCounts = new Map();
     this.floaters = new Map();
     this.cityBuilt = null;
     this.frameTimes = [];
@@ -255,25 +263,44 @@ export class Renderer3D {
     return { x: c * ix + s * iy, y: -s * ix + c * iy };
   }
 
-  buildCity(city) {
-    if (this.cityBuilt === city) return;
+  // Follow a streaming world: cells loading and unloading add and drop bridges and meshes.
+  buildCity(world) {
+    if (this.cityBuilt === world) return;
     this.clearCity();
-    this.cityBuilt = city;
-    this.city = city;
-    const before = new Set(this.scene.children);
-    this.variantCounts.clear();
-    this.paintGround(city);
-    this.buildWater(city);
-    this.buildProps(city);
-    this.buildBridge(city);
-    this.ambient.build(city);
-    for (const o of city.objects) if (o.kind === 'building') this.variantCounts.set(`${o.type}:${o.variant}`, (this.variantCounts.get(`${o.type}:${o.variant}`) || 0) + 1);
-    this.cityMeshes = this.scene.children.filter((o) => !before.has(o));
-    this.lightGrid = new SpatialGrid(WORLD.width, WORLD.height, 256);
-    for (const l of city.lights) {
-      l.w = 0;
-      l.h2 = l.h;
-      this.lightGrid.insert({ ...l, w: 0, h: 0, ref: l });
+    this.cityBuilt = world;
+    this.city = world;
+    this.terrain.attach(world);
+    this.ambient.build(world);
+    this.listener = { load: (ch) => this.chunkLoaded(ch), unload: (ch) => this.chunkUnloaded(ch) };
+    world.listeners.add(this.listener);
+    for (const ch of world.chunks.values()) this.chunkLoaded(ch);
+  }
+
+  chunkLoaded(ch) {
+    this.propsDirty = true;
+    this.buildingsDirty = true;
+    this.ambient.dirty = true;
+    for (const b of ch.bridges) this.buildBridge(ch, b);
+  }
+
+  chunkUnloaded(ch) {
+    this.propsDirty = true;
+    this.buildingsDirty = true;
+    this.ambient.dirty = true;
+    for (const [id, rec] of this.bld) {
+      if (rec.obj.chunk !== ch) continue;
+      this.disposeRec(rec);
+      this.bld.delete(id);
+      this.collapses.delete(rec);
+      this.remeshQueue.delete(rec);
+    }
+    const parts = this.bridgeMeshes.get(ch);
+    if (parts) {
+      for (const bp of parts) for (const m of bp.meshes) {
+        this.scene.remove(m);
+        m.dispose();
+      }
+      this.bridgeMeshes.delete(ch);
     }
   }
 
@@ -325,33 +352,17 @@ export class Renderer3D {
     for (let i = n; i < this.flashPool.length; i++) this.flashPool[i].visible = false;
   }
 
-  // A new run brings a new map: drop everything the previous city added to the scene.
+  // A new run brings a new world: drop everything the previous one added to the scene.
   clearCity() {
-    if (!this.cityMeshes) return;
-    const shared = new Set([...this.propCache.values()].map((e) => e.geo));
-    for (const o of this.cityMeshes) {
-      this.scene.remove(o);
-      o.traverse((m) => {
-        if (m.isInstancedMesh) m.dispose();
-        if (m.geometry && !shared.has(m.geometry)) m.geometry.dispose();
-        const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
-        for (const mat of mats) {
-          if (mat === this.voxelMat) continue;
-          for (const key of ['map', 'emissiveMap', 'normalMap', 'alphaMap']) if (mat[key]) mat[key].dispose();
-          mat.dispose();
-        }
-      });
-    }
-    for (const e of this.propCache.values()) e.im = null;
-    for (const map of [this.bInst, this.rInst]) {
-      for (const e of map.values()) {
-        this.scene.remove(e.im);
-        e.im.dispose();
-      }
-      map.clear();
-    }
-    this.cityMeshes = null;
+    if (!this.cityBuilt) return;
+    this.cityBuilt.listeners.delete(this.listener);
+    for (const ch of [...this.bridgeMeshes.keys()]) this.chunkUnloaded(ch);
+    this.terrain.clear();
+    this.ambient.clear();
+    for (const e of this.propCache.values()) e.n = 0;
+    this.cityBuilt = null;
     this.lastPropAt = null;
+    this.lastBldAt = null;
   }
 
   startRun(game) {
@@ -373,294 +384,8 @@ export class Renderer3D {
     const k = game.kaiju;
     this.target.set(k.x, 0, k.y);
     this.camDist = this.distFor(game.viewSpan(k.r));
-  }
-
-  // ---------------------------------------------------------------- ground
-  paintGround(city) {
-    const S = 4;
-    const W = Math.ceil(WORLD.width / S);
-    const H = Math.ceil(WORLD.height / S);
-    const cv = document.createElement('canvas');
-    cv.width = W;
-    cv.height = H;
-    const ctx = cv.getContext('2d');
-    ctx.fillStyle = '#5f8f45';
-    ctx.fillRect(0, 0, W, H);
-    const styleColor = { forest: '#3a6232', park: '#5f9a44', suburb: '#6c9c4c', neon: '#34373f', brick: '#6e665e', garden: '#99968c', pastel: '#cdb79a', docks: '#7d7870', water: '#6f9a4e' };
-    for (const c of city.cells) {
-      ctx.fillStyle = styleColor[c.style];
-      ctx.fillRect((c.x - 30) / S, (c.y - 30) / S, (c.w + 60) / S, (c.h + 60) / S);
-      if (c.style === 'forest' || c.style === 'park' || c.style === 'suburb') {
-        for (let i = 0; i < 260; i++) {
-          const x = c.x - 30 + hash3(c.c, c.r, i) * (c.w + 60);
-          const y = c.y - 30 + hash3(c.r, i, c.c) * (c.h + 60);
-          ctx.fillStyle = hash3(i, c.c, c.r) < 0.5 ? shadeHex(styleColor[c.style], 0.88) : shadeHex(styleColor[c.style], 1.1);
-          ctx.fillRect(x / S, y / S, 2, 2);
-        }
-      } else if (c.style === 'pastel') {
-        ctx.fillStyle = 'rgba(120,90,70,0.12)';
-        for (let x = c.x - 30; x < c.x + c.w + 30; x += 8) for (let y = c.y - 30; y < c.y + c.h + 30; y += 8) if (((x + y) / 8) % 2 === 0) ctx.fillRect(x / S, y / S, 1, 1);
-      }
-    }
-    // Water, with sand beaches.
-    const Q = 12;
-    for (let y = 0; y < WORLD.height; y += Q) {
-      for (let x = 0; x < WORLD.width; x += Q) {
-        if (!isWater(x, y)) continue;
-        ctx.fillStyle = '#d8c48e';
-        ctx.fillRect((x - Q * 2) / S, (y - Q * 2) / S, (Q * 5) / S, (Q * 5) / S);
-      }
-    }
-    for (let y = 0; y < WORLD.height; y += Q) for (let x = 0; x < WORLD.width; x += Q) if (isWater(x, y)) {
-      ctx.fillStyle = '#2d5d7a';
-      ctx.fillRect(x / S, y / S, Q / S + 0.5, Q / S + 0.5);
-    }
-    // Roads: sidewalks, asphalt, then markings.
-    const urbanAt = (x, y) => {
-      const c = Math.floor((x - WORLD.seaWidth) / WORLD.cell);
-      const r = Math.floor(y / WORLD.cell);
-      const cell = city.cells[r * WORLD.cols + c];
-      return cell && cell.style !== 'forest' && cell.style !== 'water';
-    };
-    const rw = WORLD.road;
-    for (const r of city.roads) {
-      const mx = (r.x0 + r.x1) / 2;
-      const my = (r.y0 + r.y1) / 2;
-      const urban = urbanAt(mx + (r.horiz ? 0 : 20), my + (r.horiz ? 20 : 0)) || urbanAt(mx - (r.horiz ? 0 : 20), my - (r.horiz ? 20 : 0));
-      if (!urban) continue;
-      ctx.fillStyle = '#a7a39a';
-      if (r.horiz) ctx.fillRect((r.x0 - rw / 2 - 8) / S, (r.y0 - rw / 2 - 8) / S, (r.x1 - r.x0 + rw + 16) / S, (rw + 16) / S);
-      else ctx.fillRect((r.x0 - rw / 2 - 8) / S, (r.y0 - rw / 2 - 8) / S, (rw + 16) / S, (r.y1 - r.y0 + rw + 16) / S);
-    }
-    for (const r of city.roads) {
-      ctx.fillStyle = '#3a3c42';
-      if (r.horiz) ctx.fillRect((r.x0 - rw / 2) / S, (r.y0 - rw / 2) / S, (r.x1 - r.x0 + rw) / S, rw / S);
-      else ctx.fillRect((r.x0 - rw / 2) / S, (r.y0 - rw / 2) / S, rw / S, (r.y1 - r.y0 + rw) / S);
-    }
-    for (const r of city.roads) {
-      ctx.fillStyle = '#e2bd45';
-      const len = r.horiz ? r.x1 - r.x0 : r.y1 - r.y0;
-      for (let t = rw / 2 + 6; t < len - rw / 2 - 6; t += 24) {
-        if (r.horiz) ctx.fillRect((r.x0 + t) / S, r.y0 / S - 0.5, 12 / S, 1);
-        else ctx.fillRect(r.x0 / S - 0.5, (r.y0 + t) / S, 1, 12 / S);
-      }
-      // Crosswalk stripes near the intersections in town
-      if (urbanAt(r.x0 + 30, r.y0 + 30)) {
-        ctx.fillStyle = 'rgba(240,240,235,0.85)';
-        for (let k = -rw / 2 + 6; k < rw / 2 - 4; k += 8) {
-          if (r.horiz) {
-            ctx.fillRect((r.x0 + rw / 2 + 2) / S, (r.y0 + k) / S, 10 / S, 4 / S);
-            ctx.fillRect((r.x1 - rw / 2 - 12) / S, (r.y0 + k) / S, 10 / S, 4 / S);
-          } else {
-            ctx.fillRect((r.x0 + k) / S, (r.y0 + rw / 2 + 2) / S, 4 / S, 10 / S);
-            ctx.fillRect((r.x0 + k) / S, (r.y1 - rw / 2 - 12) / S, 4 / S, 10 / S);
-          }
-        }
-      }
-    }
-    // Pier
-    const p = city.pier;
-    ctx.fillStyle = '#7a5a3c';
-    ctx.fillRect((p.x - 30) / S, (p.y - p.h / 2) / S, p.w / S, p.h / S);
-    // Painted ground details: paths, ponds, courts, plazas, parking bays, manholes, towels.
-    const R = (x, y, w, h, c) => {
-      ctx.fillStyle = c;
-      ctx.fillRect((x - w / 2) / S, (y - h / 2) / S, w / S, h / S);
-    };
-    for (const d of city.decals || []) {
-      switch (d.kind) {
-        case 'path':
-          R(d.x, d.y, d.w, d.h, '#cdbb94');
-          break;
-        case 'plaza':
-          R(d.x, d.y, d.w, d.h, '#c4c0b8');
-          ctx.fillStyle = '#b2ada3';
-          for (let x = d.x - d.w / 2; x < d.x + d.w / 2; x += 8) for (let y = d.y - d.h / 2; y < d.y + d.h / 2; y += 8) if (((x + y) / 8) % 2 < 1) ctx.fillRect(x / S, y / S, 4 / S + 0.5, 4 / S + 0.5);
-          break;
-        case 'pond':
-          ctx.fillStyle = '#b8a27a';
-          ctx.beginPath();
-          ctx.ellipse(d.x / S, d.y / S, (d.w / 2 + 5) / S, (d.h / 2 + 5) / S, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#2f6f9a';
-          ctx.beginPath();
-          ctx.ellipse(d.x / S, d.y / S, d.w / 2 / S, d.h / 2 / S, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#4f8fba';
-          ctx.beginPath();
-          ctx.ellipse((d.x - d.w * 0.12) / S, (d.y - d.h * 0.12) / S, d.w * 0.22 / S, d.h * 0.14 / S, 0, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        case 'sandbox':
-          R(d.x, d.y, d.w + 4, d.h + 4, '#8a6a48');
-          R(d.x, d.y, d.w, d.h, '#e0cc8e');
-          break;
-        case 'basketball':
-        case 'tennis': {
-          const ball = d.kind === 'basketball';
-          R(d.x, d.y, d.w + 8, d.h + 8, ball ? '#5a5d63' : '#3a7a5a');
-          R(d.x, d.y, d.w, d.h, ball ? '#c86a3a' : '#3a6aa8');
-          ctx.strokeStyle = '#f2f2f2';
-          ctx.lineWidth = 1;
-          ctx.strokeRect((d.x - d.w / 2) / S, (d.y - d.h / 2) / S, d.w / S, d.h / S);
-          ctx.beginPath();
-          ctx.moveTo(d.x / S, (d.y - d.h / 2) / S);
-          ctx.lineTo(d.x / S, (d.y + d.h / 2) / S);
-          ctx.stroke();
-          if (ball) {
-            ctx.beginPath();
-            ctx.arc(d.x / S, d.y / S, 5 / S * 1.5, 0, Math.PI * 2);
-            ctx.stroke();
-          }
-          break;
-        }
-        case 'parking':
-          R(d.x, d.y, d.w, d.h, '#45474d');
-          ctx.fillStyle = 'rgba(240,240,235,0.8)';
-          for (let x = d.x - d.w / 2 + 4; x < d.x + d.w / 2; x += 9) for (let y = d.y - d.h / 2 + 2; y < d.y + d.h / 2 - 10; y += 16) ctx.fillRect(x / S, y / S, 1, 12 / S);
-          break;
-        case 'manhole':
-          ctx.fillStyle = '#26272b';
-          ctx.beginPath();
-          ctx.arc(d.x / S, d.y / S, 3 / S + 0.6, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        case 'towel':
-          R(d.x, d.y, d.w, d.h, ['#d94f4f', '#3b6fd1', '#f2c12e', '#2f9e8f', '#d94f8a'][Math.floor(d.y) % 5]);
-          break;
-        default:
-          break;
-      }
-    }
-    // Contact shadows under buildings and trees.
-    for (const o of city.objects) {
-      if (o.kind === 'building' && !o.walkable) {
-        ctx.fillStyle = 'rgba(0,0,0,0.16)';
-        ctx.fillRect((o.x - o.w / 2 - 6) / S, (o.y - o.h / 2 - 6) / S, (o.w + 12) / S, (o.h + 12) / S);
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.fillRect((o.x - o.w / 2 - 2) / S, (o.y - o.h / 2 - 2) / S, (o.w + 4) / S, (o.h + 4) / S);
-      } else if (o.type && o.type.startsWith('tree')) {
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.beginPath();
-        ctx.arc(o.x / S, o.y / S, (o.w * 0.6) / S, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    // Per-pixel grain so lawns and pavement read as surfaces, not flat fills.
-    const img = ctx.getImageData(0, 0, W, H);
-    const px = img.data;
-    for (let i = 0, n = 0; i < px.length; i += 4, n++) {
-      const g = 0.9 + hash3(n % W, Math.floor(n / W), 7) * 0.2;
-      px[i] = Math.min(255, px[i] * g);
-      px[i + 1] = Math.min(255, px[i + 1] * g);
-      px[i + 2] = Math.min(255, px[i + 2] * g);
-    }
-    ctx.putImageData(img, 0, 0);
-    const map = new THREE.CanvasTexture(cv);
-    map.magFilter = THREE.NearestFilter;
-    map.minFilter = THREE.LinearMipmapLinearFilter;
-    map.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-
-    // Night light pools, baked once; their strength follows the time of day.
-    const G = 8;
-    const gv = document.createElement('canvas');
-    gv.width = Math.ceil(WORLD.width / G);
-    gv.height = Math.ceil(WORLD.height / G);
-    const gx = gv.getContext('2d');
-    gx.fillStyle = '#000';
-    gx.fillRect(0, 0, gv.width, gv.height);
-    // 'lighten' keeps the brightest pool instead of summing, so rows of lamps don't burn out to white.
-    gx.globalCompositeOperation = 'lighten';
-    const pool = (x, y, r, color, a) => {
-      const c = new THREE.Color(color);
-      const grad = gx.createRadialGradient(x / G, y / G, 0, x / G, y / G, r / G);
-      const rgba = (al) => `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${al})`;
-      grad.addColorStop(0, rgba(a));
-      grad.addColorStop(0.5, rgba(a * 0.35));
-      grad.addColorStop(1, rgba(0));
-      gx.fillStyle = grad;
-      gx.fillRect((x - r) / G, (y - r) / G, (2 * r) / G, (2 * r) / G);
-    };
-    for (const l of city.lights) pool(l.x, l.y, l.big ? 220 : Math.max(26, l.h * 3.2), l.color, l.big ? 0.4 : 0.62);
-    const neon = [0xff2bd6, 0x22e6ff, 0x7b5cff, 0xffd23f];
-    for (const o of city.objects) {
-      if (o.kind !== 'building' || o.walkable) continue;
-      if (o.style === 'neon' || (o.style === 'brick' && o.tier >= 4)) pool(o.x, o.y, Math.max(o.w, o.h) * 0.85, neon[o.id % 4], 0.35);
-      else if (o.tier >= 3) pool(o.x, o.y, Math.max(o.w, o.h) * 0.7, 0xffc36b, 0.18);
-    }
-    const glow = new THREE.CanvasTexture(gv);
-    this.groundMat = new THREE.MeshLambertMaterial({ map, emissiveMap: glow, emissive: 0xffffff, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 });
-    // Light pools tint the surface they fall on, so pale paving doesn't burn out to white.
-    this.groundMat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance *= 0.5 + diffuseColor.rgb * 0.5;');
-    };
-    const geo = new THREE.PlaneGeometry(WORLD.width, WORLD.height);
-    geo.rotateX(-Math.PI / 2);
-    const ground = new THREE.Mesh(geo, this.groundMat);
-    ground.position.set(WORLD.width / 2, 0, WORLD.height / 2);
-    ground.receiveShadow = true;
-    this.scene.add(ground);
-    // Countryside beyond the map edge: strips around the map that never overlap the ground.
-    const outerMat = new THREE.MeshLambertMaterial({ color: 0x3e6a34 });
-    const big = 20000;
-    for (const [x0, z0, x1, z1] of [[WORLD.width, -big, WORLD.width + big, WORLD.height + big], [0, -big, WORLD.width, 0], [0, WORLD.height, WORLD.width, WORLD.height + big]]) {
-      const strip = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(-Math.PI / 2), outerMat);
-      strip.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
-      this.scene.add(strip);
-    }
-  }
-
-  buildWater(city) {
-    const Q = 16;
-    const mw = Math.ceil(WORLD.width / Q);
-    const mh = Math.ceil(WORLD.height / Q);
-    const mc = document.createElement('canvas');
-    mc.width = mw;
-    mc.height = mh;
-    const mx = mc.getContext('2d');
-    const img = mx.createImageData(mw, mh);
-    for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
-      const v = isWater(x * Q + Q / 2, y * Q + Q / 2) ? 255 : 0;
-      const i = (y * mw + x) * 4;
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-      img.data[i + 3] = 255;
-    }
-    mx.putImageData(img, 0, 0);
-    const mask = new THREE.CanvasTexture(mc);
-    // Wave normal map
-    const n = 256;
-    const nc = document.createElement('canvas');
-    nc.width = nc.height = n;
-    const nx = nc.getContext('2d');
-    const nimg = nx.createImageData(n, n);
-    const hgt = (x, y) => Math.sin(x * 0.098) * 0.5 + Math.sin(y * 0.073 + x * 0.03) * 0.6 + Math.sin((x + y) * 0.21) * 0.25 + Math.sin((x - y * 0.6) * 0.147) * 0.3;
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      const dx = hgt(x + 1, y) - hgt(x - 1, y);
-      const dy = hgt(x, y + 1) - hgt(x, y - 1);
-      const i = (y * n + x) * 4;
-      nimg.data[i] = 128 + dx * 60;
-      nimg.data[i + 1] = 128 + dy * 60;
-      nimg.data[i + 2] = 255;
-      nimg.data[i + 3] = 255;
-    }
-    nx.putImageData(nimg, 0, 0);
-    const normal = new THREE.CanvasTexture(nc);
-    normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
-    normal.repeat.set(WORLD.width / 140, WORLD.height / 140);
-    this.waterNormal = normal;
-    this.waterMat = new THREE.MeshPhongMaterial({ color: 0x3a8ac0, specular: 0x4a5a6a, shininess: 45, transparent: true, opacity: 0.9, alphaMap: mask, normalMap: normal, normalScale: new THREE.Vector2(0.5, 0.5), depthWrite: false });
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.width, WORLD.height).rotateX(-Math.PI / 2), this.waterMat);
-    water.position.set(WORLD.width / 2, 1, WORLD.height / 2);
-    water.renderOrder = 2;
-    water.receiveShadow = true;
-    this.scene.add(water);
-    const seaMat = this.waterMat.clone();
-    seaMat.alphaMap = null;
-    seaMat.transparent = false;
-    this.seaMat = seaMat;
-    const sea = new THREE.Mesh(new THREE.PlaneGeometry(20000, WORLD.height + 40000).rotateX(-Math.PI / 2), seaMat);
-    sea.position.set(-10000, 1, WORLD.height / 2);
-    this.scene.add(sea);
+    // Paint the ground around the drop-in point before the first frame.
+    this.terrain.update(k.stage, k.x, k.y, game.viewSpan(k.r), 0, new THREE.Color(SKY[0].water), 0, 60);
   }
 
   // ---------------------------------------------------------------- props (instanced, refilled for the view)
@@ -670,32 +395,27 @@ export class Renderer3D {
     if (!e) {
       const p = buildProp(type, variant);
       const geo = toGeometry(meshGrid(p.grid, { v: p.v, ox: p.origin.x, oz: p.origin.z, jitter: 0.05 }));
-      e = { key, built: p, geo, im: null, cap: 0, n: 0 };
+      e = { key, type, built: p, geo, im: null, cap: 0, n: 0 };
       this.propCache.set(key, e);
     }
     return e;
   }
 
-  buildProps(city) {
-    const counts = new Map();
-    for (const o of city.objects) if (o.kind === 'prop') counts.set(`${o.type}:${o.variant}`, (counts.get(`${o.type}:${o.variant}`) || 0) + 1);
-    for (const [key, n] of counts) {
-      const [type, v] = key.split(':');
-      const e = this.propEntry(type, Number(v));
-      e.cap = Math.min(n, 6000);
-      e.im = new THREE.InstancedMesh(e.geo, this.voxelMat, e.cap);
-      e.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      e.im.frustumCulled = false;
-      e.im.count = 0;
-      e.im.castShadow = PROP_BY_ID[type].tier >= 2;
-      e.im.receiveShadow = true;
-      this.scene.add(e.im);
+  // Instanced meshes grow as the view takes in more of the city.
+  ensureInst(e, need, castShadow) {
+    if (e.im && e.cap >= need) return;
+    if (e.im) {
+      this.scene.remove(e.im);
+      e.im.dispose();
     }
-    this._pm = new THREE.Matrix4();
-    this._pq = new THREE.Quaternion();
-    this._pe = new THREE.Euler();
-    this._pv = new THREE.Vector3();
-    this._ps = new THREE.Vector3(1, 1, 1);
+    e.cap = Math.max(16, 2 ** Math.ceil(Math.log2(need * 1.3)));
+    e.im = new THREE.InstancedMesh(e.geo, this.voxelMat, e.cap);
+    e.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    e.im.frustumCulled = false;
+    e.im.count = 0;
+    e.im.castShadow = castShadow;
+    e.im.receiveShadow = true;
+    this.scene.add(e.im);
   }
 
   refreshProps(game, half) {
@@ -709,7 +429,20 @@ export class Renderer3D {
     for (const e of this.propCache.values()) e.n = 0;
     const pxPerUnit = this.h / (half * 2);
     const R = half * 1.5;
-    for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
+    const found = game.grid.query(cx - R, cz - R, cx + R, cz + R);
+    let grow = false;
+    for (const o of found) {
+      if (o.kind !== 'prop' || o.state !== 'intact') continue;
+      if (o.height * pxPerUnit < 1.2 && o.tier < k.stage - 1) continue;
+      const e = this.propEntry(o.type, o.variant);
+      e.n++;
+      if (!e.im || e.n > e.cap) grow = true;
+    }
+    if (grow) {
+      for (const e of this.propCache.values()) if (e.n && (!e.im || e.n > e.cap)) this.ensureInst(e, e.n, PROP_BY_ID[e.type].tier >= 2);
+    }
+    for (const e of this.propCache.values()) e.n = 0;
+    for (const o of found) {
       if (o.kind !== 'prop' || o.state !== 'intact') continue;
       if (o.height * pxPerUnit < 1.2 && o.tier < k.stage - 1) continue;
       const e = this.propCache.get(`${o.type}:${o.variant}`);
@@ -729,62 +462,60 @@ export class Renderer3D {
   }
 
   // ---------------------------------------------------------------- bridge cables
-  buildBridge(city) {
-    this.bridgeParts = [];
-    for (const b of city.bridges) {
-      const [t1, t2] = b.towers;
-      const top = t1.height * 0.97;
-      const deck = b.deckHeight;
-      const curve = (x) => {
-        if (x <= t1.x) return deck + (top - deck) * Math.pow((x - b.x0) / (t1.x - b.x0), 1.4);
-        if (x >= t2.x) return deck + (top - deck) * Math.pow((b.x1 - x) / (b.x1 - t2.x), 1.4);
-        const u = (x - t1.x) / (t2.x - t1.x);
-        return deck + 6 + (top - deck - 6) * Math.pow(2 * u - 1, 2);
-      };
-      const box = new THREE.BoxGeometry(1, 1, 1);
-      const cableMat = new THREE.MeshLambertMaterial({ color: 0xc0432c });
-      const cables = [];
-      const suspenders = [];
-      const lamps = [];
-      for (const side of [-1, 1]) {
-        const z = b.y + side * (t1.h / 2 - 6);
-        for (let x = b.x0; x < b.x1; x += 4) {
-          const y0 = curve(x);
-          const y1 = curve(x + 4);
-          cables.push({ x: x + 2, y: (y0 + y1) / 2, z, len: Math.hypot(4, y1 - y0), ang: Math.atan2(y1 - y0, 4) });
-          if (Math.round(x) % 16 < 4 && x > b.x0 + 10 && x < b.x1 - 10) suspenders.push({ x, y: (y0 + deck) / 2, z, h: y0 - deck });
-          if (Math.round(x) % 40 < 4) lamps.push({ x, y: y0 + 1.5, z });
-        }
+  // Cables hang from each tower and dip to their lowest halfway to the next one.
+  buildBridge(ch, b) {
+    const tw = b.tower;
+    const top = b.towerHeight * 0.97;
+    const deck = b.deckHeight;
+    const mid = (b.a0 + b.a1) / 2;
+    const halfSpan = (b.a1 - b.a0) / 2;
+    const curve = (a) => deck + 6 + (top - deck - 6) * Math.pow((a - mid) / halfSpan, 2);
+    const pos = (a, side, y) => (b.horiz ? new THREE.Vector3(a, y, b.at + side) : new THREE.Vector3(b.at + side, y, a));
+    this._box = this._box || new THREE.BoxGeometry(1, 1, 1);
+    this._cableMat = this._cableMat || new THREE.MeshLambertMaterial({ color: 0xc0432c });
+    const cables = [];
+    const suspenders = [];
+    const lamps = [];
+    for (const side of [-b.half, b.half]) {
+      for (let a = b.a0; a < b.a1; a += 4) {
+        const y0 = curve(a);
+        const y1 = curve(a + 4);
+        cables.push({ p: pos(a + 2, side, (y0 + y1) / 2), len: Math.hypot(4, y1 - y0), ang: Math.atan2(y1 - y0, 4) });
+        if (Math.round(a) % 16 < 4) suspenders.push({ p: pos(a, side, (y0 + deck) / 2), h: y0 - deck });
+        if (Math.round(a) % 40 < 4) lamps.push(pos(a, side, y0 + 1.5));
       }
-      const mk = (n, mat) => {
-        const im = new THREE.InstancedMesh(box, mat, n);
-        im.frustumCulled = false;
-        this.scene.add(im);
-        return im;
-      };
-      const cim = mk(cables.length, cableMat);
-      const sim = mk(suspenders.length, cableMat);
-      const lim = mk(lamps.length, new THREE.MeshBasicMaterial({ color: 0xfff0b0 }));
-      const m = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      const e = new THREE.Euler();
-      cables.forEach((c, i) => {
-        e.set(0, 0, c.ang);
-        q.setFromEuler(e);
-        m.compose(new THREE.Vector3(c.x, c.y, c.z), q, new THREE.Vector3(c.len + 0.5, 2.2, 2.2));
-        cim.setMatrixAt(i, m);
-      });
-      suspenders.forEach((s, i) => {
-        m.compose(new THREE.Vector3(s.x, s.y, s.z), new THREE.Quaternion(), new THREE.Vector3(0.8, Math.max(0.1, s.h), 0.8));
-        sim.setMatrixAt(i, m);
-      });
-      lamps.forEach((l, i) => {
-        m.compose(new THREE.Vector3(l.x, l.y, l.z), new THREE.Quaternion(), new THREE.Vector3(2, 2, 2));
-        lim.setMatrixAt(i, m);
-      });
-      cim.castShadow = true;
-      this.bridgeParts.push({ bridge: b, meshes: [cim, sim, lim], lampsMat: lim.material });
     }
+    const mk = (n, mat) => {
+      const im = new THREE.InstancedMesh(this._box, mat, Math.max(1, n));
+      im.frustumCulled = false;
+      this.scene.add(im);
+      return im;
+    };
+    const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff0b0 });
+    const cim = mk(cables.length, this._cableMat);
+    const sim = mk(suspenders.length, this._cableMat);
+    const lim = mk(lamps.length, lampMat);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    cables.forEach((c, i) => {
+      if (b.horiz) e.set(0, 0, c.ang);
+      else e.set(-c.ang, 0, 0);
+      q.setFromEuler(e);
+      m.compose(c.p, q, b.horiz ? new THREE.Vector3(c.len + 0.5, 2.2, 2.2) : new THREE.Vector3(2.2, 2.2, c.len + 0.5));
+      cim.setMatrixAt(i, m);
+    });
+    suspenders.forEach((sp, i) => {
+      m.compose(sp.p, new THREE.Quaternion(), new THREE.Vector3(0.8, Math.max(0.1, sp.h), 0.8));
+      sim.setMatrixAt(i, m);
+    });
+    lamps.forEach((l, i) => {
+      m.compose(l, new THREE.Quaternion(), new THREE.Vector3(2, 2, 2));
+      lim.setMatrixAt(i, m);
+    });
+    cim.castShadow = true;
+    if (!this.bridgeMeshes.has(ch)) this.bridgeMeshes.set(ch, []);
+    this.bridgeMeshes.get(ch).push({ tower: tw, meshes: [cim, sim, lim], lampsMat: lampMat });
   }
 
   // ---------------------------------------------------------------- buildings
@@ -809,21 +540,38 @@ export class Renderer3D {
     return v.frac;
   }
 
-  // Instanced mesh for one building variant (intact) or its rubble pile.
-  instFor(map, key, geo, cap) {
+  // Instanced mesh for one building variant (intact, simplified, or its rubble pile).
+  instFor(map, key, geo) {
     let e = map.get(key);
     if (!e) {
-      const im = new THREE.InstancedMesh(geo, this.voxelMat, Math.max(1, cap));
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      im.frustumCulled = false;
-      im.castShadow = true;
-      im.receiveShadow = true;
-      im.count = 0;
-      this.scene.add(im);
-      e = { im, n: 0, cap: Math.max(1, cap) };
+      e = { geo, im: null, n: 0, cap: 0 };
       map.set(key, e);
     }
     return e;
+  }
+
+  // Half-resolution voxel copy of a building, for when it is small next to the kaiju.
+  lodGeo(v) {
+    if (v.lod) return v.lod;
+    const g = v.built.grid;
+    const nx = Math.ceil(g.nx / 2);
+    const ny = Math.ceil(g.ny / 2);
+    const nz = Math.ceil(g.nz / 2);
+    const out = new VoxelGrid(nx, ny, nz);
+    for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+      let val = 0;
+      let cnt = 0;
+      for (let dy = 1; dy >= 0; dy--) for (let dz = 0; dz < 2; dz++) for (let dx = 0; dx < 2; dx++) {
+        const s2 = g.get(x * 2 + dx, y * 2 + dy, z * 2 + dz);
+        if (!s2) continue;
+        cnt++;
+        if (!val) val = s2;
+      }
+      if (cnt >= 3) out.data[out.idx(x, y, z)] = val;
+    }
+    const b = v.built;
+    v.lod = toGeometry(meshGrid(out, { v: b.dims.v * 2, ox: b.origin.x / 2, oz: b.origin.z / 2 }));
+    return v.lod;
   }
 
   // A building gets its own mesh only once it is hit, so it can lose chunks and fall.
@@ -863,10 +611,10 @@ export class Renderer3D {
     if (!moved && !this.buildingsDirty) return;
     this.lastBldAt = { x: cx, z: cz, half };
     this.buildingsDirty = false;
-    for (const e of this.bInst.values()) e.n = 0;
-    for (const e of this.rInst.values()) e.n = 0;
+    const stage = game.kaiju.stage;
+    const span = game.viewSpan();
     const missing = [];
-    const m = this._pm;
+    const list = [];
     for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
       if (o.kind !== 'building') continue;
       const rec = this.bld.get(o.id);
@@ -878,26 +626,43 @@ export class Renderer3D {
       }
       if (o.state === 'intact') {
         if (rec && rec.mesh) continue;
-        const e = this.instFor(this.bInst, key, v.geo, this.variantCounts.get(key) || 1);
-        if (e.n >= e.cap) continue;
-        this._pv.set(o.x, 0, o.y);
-        this._pe.set(0, (o.rot * Math.PI) / 2, 0);
-        this._pq.setFromEuler(this._pe);
-        m.compose(this._pv, this._pq, this._ps);
-        e.im.setMatrixAt(e.n++, m);
+        // Buildings far below the kaiju's size (or far off at big sizes) use the simple mesh.
+        const lod = o.tier <= stage - 2 || (stage >= 4 && o.tier <= stage - 1 && Math.hypot(o.x - cx, o.y - cz) > span * 1.1);
+        list.push(lod ? this.instFor(this.bInst, `${key}:L`, null) : this.instFor(this.bInst, key, v.geo), o, 0);
+        if (lod) list[list.length - 3].lodOf = v;
       } else if (!o.walkable && !(rec && rec.collapse)) {
-        const e = this.instFor(this.rInst, key, this.rubbleGeo(v), this.variantCounts.get(key) || 1);
-        if (e.n >= e.cap) continue;
+        list.push(this.instFor(this.rInst, key, null), o, 1);
+        list[list.length - 3].rubbleOf = v;
+      }
+    }
+    for (const map of [this.bInst, this.rInst]) for (const e of map.values()) e.n = 0;
+    for (let i = 0; i < list.length; i += 3) list[i].n++;
+    for (const map of [this.bInst, this.rInst]) {
+      for (const e of map.values()) {
+        if (!e.n || (e.im && e.n <= e.cap)) continue;
+        if (!e.geo) e.geo = e.lodOf ? this.lodGeo(e.lodOf) : this.rubbleGeo(e.rubbleOf);
+        this.ensureInst(e, e.n, true);
+      }
+    }
+    for (const map of [this.bInst, this.rInst]) for (const e of map.values()) e.n = 0;
+    const m = this._pm;
+    for (let i = 0; i < list.length; i += 3) {
+      const e = list[i];
+      const o = list[i + 1];
+      if (!e.im || e.n >= e.cap) continue;
+      if (list[i + 2] === 0) this._pv.set(o.x, 0, o.y);
+      else {
         const dir = o.fallDir || { x: 0, y: 0 };
         this._pv.set(o.x + dir.x * o.w * 0.2, 0, o.y + dir.y * o.h * 0.2);
-        this._pe.set(0, (o.rot * Math.PI) / 2, 0);
-        this._pq.setFromEuler(this._pe);
-        m.compose(this._pv, this._pq, this._ps);
-        e.im.setMatrixAt(e.n++, m);
       }
+      this._pe.set(0, (o.rot * Math.PI) / 2, 0);
+      this._pq.setFromEuler(this._pe);
+      m.compose(this._pv, this._pq, this._ps);
+      e.im.setMatrixAt(e.n++, m);
     }
     for (const map of [this.bInst, this.rInst]) {
       for (const e of map.values()) {
+        if (!e.im) continue;
         e.im.count = e.n;
         e.im.visible = e.n > 0;
         e.im.instanceMatrix.needsUpdate = true;
@@ -909,7 +674,7 @@ export class Renderer3D {
       const t0 = performance.now();
       for (const o of missing) {
         this.variant(o);
-        if (performance.now() - t0 > 10) break;
+        if (performance.now() - t0 > 8) break;
       }
       this.buildingsDirty = true;
     }
@@ -1237,10 +1002,10 @@ export class Renderer3D {
         }
         case 'trainDie': {
           const tr = e.train;
-          const deck = game.city.metro.deck + 4;
+          const deck = METRO.deck + 4;
           this.fx.fireBurst(tr.x, deck, tr.y, 24, 10);
           for (let i = 0; i < 3; i++) {
-            const p = game.metroAt(tr.s - tr.dir * i * 36);
+            const p = game.metroAt(tr.s - tr.dir * i * 36, tr.row);
             this.fx.addDebris({ x: p.x, y: deck, z: p.y, vx: e.dir.x * 40 + (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 30, vz: e.dir.y * 40 + (Math.random() - 0.5) * 30, sx: 34, sy: 12, sz: 12, size: 34, color: 0xc8ccd2, life: 12 });
           }
           break;
@@ -1260,16 +1025,16 @@ export class Renderer3D {
     for (const l of this.actors.lightSources(game, this.t)) cands.push(l);
     if (night > 0.15) {
       const R = this.camDist * 0.7;
-      const near = this.lightGrid.query(this.target.x - R, this.target.z - R, this.target.x + R, this.target.z + R);
+      const near = game.city.lightGrid.query(this.target.x - R, this.target.z - R, this.target.x + R, this.target.z + R);
       const arr = [];
       for (const l of near) {
-        if (l.ref.obj && l.ref.obj.state !== 'intact') continue;
+        if (l.obj && l.obj.state !== 'intact') continue;
         arr.push({ l, d: Math.hypot(l.x - this.target.x, l.y - this.target.z) });
       }
       arr.sort((a, b) => a.d - b.d);
       for (const { l } of arr.slice(0, 5)) {
-        const flick = l.ref.flicker ? 0.8 + Math.random() * 0.4 : 1;
-        cands.push({ x: l.x, y: l.h2 * 0.9, z: l.y, color: l.color, intensity: (l.ref.big ? 0.8 : 0.55) * night * flick, radius: l.ref.big ? 400 : Math.max(30, l.h2 * 4), prio: 1 });
+        const flick = l.flicker ? 0.8 + Math.random() * 0.4 : 1;
+        cands.push({ x: l.x, y: l.height * 0.9, z: l.y, color: l.color, intensity: (l.big ? 0.8 : 0.55) * night * flick, radius: l.big ? 400 : Math.max(30, l.height * 4), prio: 1 });
       }
     }
     cands.sort((a, b) => b.prio - a.prio);
@@ -1352,15 +1117,13 @@ export class Renderer3D {
     this.sun.intensity = key.sunI;
     this.scene.fog.color.copy(key.fog);
     this.scene.background.copy(key.fog);
-    this.groundMat.emissiveIntensity = key.night * 0.75;
-    this.waterMat.color.copy(key.water);
-    this.seaMat.color.copy(key.water);
-    this.waterNormal.offset.set(this.t * 0.01, this.t * 0.006);
     if (this.bloom) this.bloom.strength = key.bloom;
-    for (const bp of this.bridgeParts) {
-      const ok = bp.bridge.towers.every((tw) => tw.state === 'intact');
-      for (const m of bp.meshes) m.visible = ok;
-      bp.lampsMat.color.setScalar(0.5 + key.night * 0.6);
+    for (const parts of this.bridgeMeshes.values()) {
+      for (const bp of parts) {
+        const ok = bp.tower.state === 'intact';
+        for (const m of bp.meshes) m.visible = ok;
+        bp.lampsMat.color.setScalar(0.5 + key.night * 0.6);
+      }
     }
 
     // Camera: tilted, looking slightly ahead of the kaiju, pulling back as it grows.
@@ -1415,6 +1178,7 @@ export class Renderer3D {
     }
 
     const half = span * 0.75;
+    this.terrain.update(k.stage, this.target.x, this.target.z, span, key.night, key.water, this.t);
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);
@@ -1453,10 +1217,4 @@ export class Renderer3D {
       }
     }
   }
-}
-
-function shadeHex(hexStr, f) {
-  const c = parseInt(hexStr.slice(1), 16);
-  const s = shade(c, f);
-  return `#${s.toString(16).padStart(6, '0')}`;
 }

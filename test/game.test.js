@@ -4,6 +4,13 @@ import { Game, distToRect } from '../src/game.js';
 import { STAGES, MAX_STAGE } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
+import { waterField } from '../src/world.js';
+
+// Generate a wide area around the spawn point (normally the world streams in as you move).
+function wide(g, radius = 2600) {
+  g.city.update(g.kaiju.x, g.kaiju.y, radius, Infinity);
+  return g;
+}
 
 test('a human-sized kaiju starts among people and grows by eating them', () => {
   const g = new Game({ seed: 5 });
@@ -147,7 +154,7 @@ test('Thick Hide reduces bullet and shell damage only', () => {
 });
 
 test('hits on buildings report an impact point for the voxel chipping', () => {
-  const g = new Game({ seed: 4 });
+  const g = wide(new Game({ seed: 4 }));
   g.kaiju.stage = 4;
   const b = g.objects.find((o) => o.kind === 'building' && o.tier === 4);
   g.damageObject(b, 50, { x: 1, y: 0 }, 'hit', { x: b.x - b.w / 2, y: b.y });
@@ -165,7 +172,7 @@ function neighbourPair(g, tier) {
 }
 
 test('Domino Effect topples neighbours in the fall direction', () => {
-  const g = new Game({ seed: 6 });
+  const g = wide(new Game({ seed: 6 }), 1500);
   g.kaiju.stage = 4;
   const pair = neighbourPair(g, 4);
   assert.ok(pair, 'found neighbouring buildings');
@@ -174,7 +181,7 @@ test('Domino Effect topples neighbours in the fall direction', () => {
   for (let i = 0; i < 30; i++) g.update(1 / 30);
   assert.equal(n.hp, n.maxHp, 'no damage without the augment');
 
-  const g2 = new Game({ seed: 6 });
+  const g2 = wide(new Game({ seed: 6 }), 1500);
   g2.kaiju.stage = 4;
   const [a2, n2] = neighbourPair(g2, 4);
   g2.held.set('dominoEffect', 1);
@@ -185,7 +192,7 @@ test('Domino Effect topples neighbours in the fall direction', () => {
 });
 
 test('chain collapses drop biomass only with the Demolition Crew set', () => {
-  const g = new Game({ seed: 7 });
+  const g = wide(new Game({ seed: 7 }));
   g.kaiju.stage = 4;
   const [a, b] = g.objects.filter((o) => o.kind === 'building' && o.tier === 4);
   const bio0 = g.stats.biomass;
@@ -235,7 +242,7 @@ test('autopiloted runs grow through all six stages, fight the boss and mostly wi
 });
 
 test('chained kills build a combo that pays a scrap bonus when it lapses', () => {
-  const g = new Game({ seed: 5 });
+  const g = wide(new Game({ seed: 5 }));
   g.kaiju.stage = 3;
   const k = g.kaiju;
   k.level = 200; // keep level-up picks from pausing the clock
@@ -245,9 +252,15 @@ test('chained kills build a combo that pays a scrap bonus when it lapses', () =>
   const events = g.drainEvents();
   assert.ok(events.some((e) => e.type === 'comboTier' && e.tier === 1), 'x10 milestone');
   const scrap = g.stats.scrap;
-  // Park out at sea so nothing keeps the combo alive.
-  k.x = 150;
-  k.y = 1500;
+  // Park out on the water so nothing keeps the combo alive.
+  let spot = null;
+  for (let r = 1500; !spot && r < 20000; r += 100) for (let a = 0; a < 6.28 && !spot; a += 0.05) if (waterField(k.x + Math.cos(a) * r, k.y + Math.sin(a) * r) > 160) spot = { x: k.x + Math.cos(a) * r, y: k.y + Math.sin(a) * r };
+  k.x = spot.x;
+  k.y = spot.y;
+  g.people = [];
+  g.traffic = [];
+  g.units = [];
+  g.director.spawnT = 99;
   k.invuln = 99;
   for (let i = 0; i < 30 * 3; i++) g.update(1 / 30);
   assert.equal(g.combo.n, 0);

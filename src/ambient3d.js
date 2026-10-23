@@ -5,8 +5,7 @@ import { meshGrid } from './mesher.js';
 import { trainCarModel, birdModel, blimpModel } from './models.js';
 import { buildProp } from './props.js';
 import { toGeometry } from './actors3d.js';
-import { isWater } from './world.js';
-import { WORLD } from './config.js';
+import { isWater, METRO } from './world.js';
 
 const BIRDS_PER_FLOCK = 16;
 const MAX_FLOCKS = 6;
@@ -22,14 +21,15 @@ export class Ambient {
     this._s = new THREE.Vector3(1, 1, 1);
   }
 
-  build(city) {
-    this.city = city;
+  build(world) {
+    this.world = world;
+    this.dirty = true;
+    if (this.wires) return;
     // Power cables
     this.wireMat = new THREE.LineBasicMaterial({ color: 0x1e1e22 });
     this.wires = new THREE.LineSegments(new THREE.BufferGeometry(), this.wireMat);
     this.wires.frustumCulled = false;
     this.scene.add(this.wires);
-    this.poles = new Set(city.powerLines.flat());
     this.brokenPoles = -1;
     // Metro cars
     const mk = (front) => {
@@ -45,53 +45,66 @@ export class Ambient {
     this.birdMesh.frustumCulled = false;
     this.birdMesh.count = 0;
     this.scene.add(this.birdMesh);
-    this.roosts = city.decals.filter((d) => d.kind === 'plaza' || d.kind === 'pond').map((d) => ({ x: d.x, y: d.y }));
     this.flocks = [];
-    // Boats circling the lake and cruising the coast
+    // Boats cruising whatever water is near
     const boat = buildProp('boat', 1);
     this.boatMesh = new THREE.InstancedMesh(toGeometry(meshGrid(boat.grid, { v: boat.v * 1.6, ox: boat.origin.x, oz: boat.origin.z })), this.mat, 14);
     this.boatMesh.frustumCulled = false;
     this.boatMesh.castShadow = true;
+    this.boatMesh.count = 0;
     this.scene.add(this.boatMesh);
     this.boats = [];
-    const L = city.lake;
-    for (let i = 0; i < 8; i++) this.boats.push({ kind: 'lake', cx: L.cx, cy: L.cy, rx: L.rx * (0.35 + (i % 4) * 0.12), ry: L.ry * (0.35 + (i % 4) * 0.12), a: (i / 8) * Math.PI * 2, speed: 0.025 + (i % 3) * 0.01 });
-    for (let i = 0; i < 6; i++) this.boats.push({ kind: 'sea', x: 200 + (i % 3) * 180, y: 600 + i * 900, dir: i % 2 ? 1 : -1, speed: 30 + i * 4 });
-    // Blimp over downtown
+    // An advertising blimp drifting after the action
     const blm = blimpModel();
     this.blimp = new THREE.Mesh(toGeometry(meshGrid(blm.grid, { v: blm.v, ox: blm.origin.x, oz: blm.origin.z, oy: 5 })), this.mat);
     this.blimp.castShadow = true;
     this.scene.add(this.blimp);
-    const dt = city.layout ? city.layout.districts[0] : { cx: 5, cy: 8.3 };
-    this.blimpAt = { x: WORLD.seaWidth + dt.cx * WORLD.cell, y: dt.cy * WORLD.cell };
+    this.blimpAt = null;
+  }
+
+  clear() {
+    this.reset();
+    this.boats = [];
+    this.blimpAt = null;
+    if (this.wires) {
+      this.wires.geometry.dispose();
+      this.wires.geometry = new THREE.BufferGeometry();
+    }
   }
 
   reset() {
+    if (!this.trainMeshes) return;
     for (const [, group] of this.trainMeshes) this.scene.remove(group);
     this.trainMeshes.clear();
     this.flocks = [];
     this.brokenPoles = -1;
+    this.dirty = true;
   }
 
-  rebuildWires() {
+  // Cables for the power lines of every loaded cell near the camera.
+  rebuildWires(view) {
     const pts = [];
     const sagSteps = 6;
-    for (const chain of this.city.powerLines) {
-      for (let i = 0; i < chain.length - 1; i++) {
-        const a = chain[i];
-        const b = chain[i + 1];
-        if (a.state !== 'intact' || b.state !== 'intact') continue;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const px = -dy / len;
-        const py = dx / len;
-        for (const off of [-3, 0, 3]) {
-          for (let k = 0; k < sagSteps; k++) {
-            for (const kk of [k, k + 1]) {
-              const t = kk / sagSteps;
-              const sag = Math.sin(t * Math.PI) * 3;
-              pts.push(a.x + dx * t + px * off, 18.5 - sag - (off === 0 ? 1 : 0), a.y + dy * t + py * off);
+    const R = view.span * 1.6 + 400;
+    for (const ch of this.world.chunks.values()) {
+      if (!ch.powerLines.length || Math.abs((ch.c + 0.5) * 420 - view.x) > R || Math.abs((ch.r + 0.5) * 420 - view.z) > R) continue;
+      for (const chain of ch.powerLines) {
+        for (let i = 0; i < chain.length - 1; i++) {
+          const a = chain[i];
+          const b = chain[i + 1];
+          if (a.state !== 'intact' || b.state !== 'intact') continue;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const px = -dy / len;
+          const py = dx / len;
+          for (const off of [-3, 0, 3]) {
+            for (let k = 0; k < sagSteps; k++) {
+              for (const kk of [k, k + 1]) {
+                const t = kk / sagSteps;
+                const sag = Math.sin(t * Math.PI) * 3;
+                pts.push(a.x + dx * t + px * off, 18.5 - sag - (off === 0 ? 1 : 0), a.y + dy * t + py * off);
+              }
             }
           }
         }
@@ -101,34 +114,47 @@ export class Ambient {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.wires.geometry = g;
+    this.wiresAt = { x: view.x, z: view.z, span: view.span };
   }
 
   update(game, dt, t, view) {
-    // Cables drop when a pole on either end is knocked down.
+    // Cables drop when a pole on either end is knocked down; the set follows the camera.
     this.wireCheck = (this.wireCheck || 0) - dt;
-    if (this.wireCheck <= 0) {
+    this.wires.visible = view.span < 2400;
+    if (this.wireCheck <= 0 && this.wires.visible) {
       this.wireCheck = 0.4;
       let broken = 0;
-      for (const p of this.poles) if (p.state !== 'intact') broken++;
-      if (broken !== this.brokenPoles) {
+      for (const ch of this.world.chunks.values()) for (const chain of ch.powerLines) for (const p of chain) if (p.state !== 'intact') broken++;
+      const w = this.wiresAt;
+      const far = !w || Math.hypot(view.x - w.x, view.z - w.z) > view.span * 0.5 || Math.abs(view.span - w.span) > view.span * 0.3;
+      if (broken !== this.brokenPoles || this.dirty || far) {
         this.brokenPoles = broken;
-        this.rebuildWires();
+        this.dirty = false;
+        this.rebuildWires(view);
       }
     }
-    this.wires.visible = view.span < 2400;
     this.updateTrains(game);
     this.updateBirds(game, dt, t, view);
-    this.updateBoats(dt, t, game);
-    // Blimp: a slow loop over downtown, high above the towers.
+    this.updateBoats(dt, t, view);
+    // Blimp: a slow loop high above the towers, drifting after the kaiju.
+    const k = game.kaiju;
+    if (!this.blimpAt) this.blimpAt = { x: k.x + 400, y: k.y - 300 };
+    const ba = this.blimpAt;
+    const dx = k.x - ba.x;
+    const dy = k.y - ba.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1200) {
+      const step = Math.min(d - 1200, 90 * dt);
+      ba.x += (dx / d) * step;
+      ba.y += (dy / d) * step;
+    }
     const a = t * 0.012;
-    this.blimp.position.set(this.blimpAt.x + Math.cos(a) * 900, 380 + Math.sin(t * 0.3) * 6, this.blimpAt.y + Math.sin(a) * 700);
+    this.blimp.position.set(ba.x + Math.cos(a) * 900, 380 + Math.sin(t * 0.3) * 6, ba.y + Math.sin(a) * 700);
     this.blimp.rotation.y = -(a + Math.PI / 2);
   }
 
   updateTrains(game) {
     const live = new Set();
-    const metro = game.city.metro;
-    if (!metro) return;
     for (const tr of game.trains) {
       live.add(tr);
       let group = this.trainMeshes.get(tr);
@@ -143,8 +169,8 @@ export class Ambient {
         this.trainMeshes.set(tr, group);
       }
       group.children.forEach((m, i) => {
-        const p = game.metroAt(tr.s - tr.dir * i * 36);
-        m.position.set(p.x, metro.deck + 2.5, p.y);
+        const p = game.metroAt(tr.s - tr.dir * i * 36, tr.row);
+        m.position.set(p.x, METRO.deck + 2.5, p.y);
         m.rotation.y = -(p.heading + (tr.dir < 0 ? Math.PI : 0));
       });
     }
@@ -162,7 +188,8 @@ export class Ambient {
       for (const f of this.flocks) if (Math.hypot(f.x - view.x, f.y - view.z) > view.span * 1.5) f.gone = true;
       this.flocks = this.flocks.filter((f) => !f.gone && f.life > 0);
       if (this.flocks.length < MAX_FLOCKS) {
-        const near = this.roosts.filter((r) => Math.hypot(r.x - view.x, r.y - view.z) < view.span * 1.1 && !this.flocks.some((f) => f.roost === r));
+        const R = view.span * 1.1;
+        const near = this.world.decalGrid.query(view.x - R, view.z - R, view.x + R, view.z + R).filter((r) => (r.kind === 'plaza' || r.kind === 'pond') && !this.flocks.some((f) => f.roost === r));
         if (near.length) {
           const r = near[Math.floor(Math.random() * near.length)];
           this.flocks.push({ roost: r, x: r.x, y: r.y, h: 18 + Math.random() * 14, life: 999, scared: false, phase: Math.random() * 6, birds: Array.from({ length: BIRDS_PER_FLOCK }, () => ({ a: Math.random() * 6.28, r: 10 + Math.random() * 18, dh: Math.random() * 6, vx: 0, vy: 0, vz: 0, px: 0, py: 0, pz: 0 })) });
@@ -218,27 +245,31 @@ export class Ambient {
     this.birdMesh.instanceMatrix.needsUpdate = true;
   }
 
-  updateBoats(dt, t, game) {
+  // A handful of boats on whatever water is in view: they cruise straight and turn back at
+  // the shore, and new ones put out as the camera moves on.
+  updateBoats(dt, t, view) {
+    const R = view.span * 1.2;
+    this.boats = this.boats.filter((b) => Math.hypot(b.x - view.x, b.y - view.z) < R * 1.5);
+    if (this.boats.length < 10 && view.span < 3000) {
+      for (let tries = 0; tries < 4; tries++) {
+        const x = view.x + (Math.random() * 2 - 1) * R;
+        const y = view.z + (Math.random() * 2 - 1) * R;
+        if (!isWater(x, y) || !isWater(x + 30, y) || !isWater(x - 30, y)) continue;
+        this.boats.push({ x, y, heading: Math.random() * Math.PI * 2, speed: 18 + Math.random() * 16 });
+        break;
+      }
+    }
     let n = 0;
     for (const b of this.boats) {
-      let x;
-      let y;
-      let heading;
-      if (b.kind === 'lake') {
-        b.a += dt * b.speed;
-        x = b.cx + Math.cos(b.a) * b.rx;
-        y = b.cy + Math.sin(b.a) * b.ry;
-        heading = Math.atan2(Math.cos(b.a) * b.ry, -Math.sin(b.a) * b.rx);
-      } else {
-        b.y += b.dir * b.speed * dt;
-        if (b.y < 200 || b.y > game.city.lake.cy * 2) b.dir *= -1;
-        x = b.x;
-        y = b.y;
-        heading = b.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-      }
-      if (!isWater(x, y)) continue;
-      this._v.set(x, 0.6 + Math.sin(t * 2 + n) * 0.3, y);
-      this._e.set(0, -heading, Math.sin(t * 1.5 + n) * 0.04);
+      const nx = b.x + Math.cos(b.heading) * b.speed * dt;
+      const ny = b.y + Math.sin(b.heading) * b.speed * dt;
+      if (isWater(nx + Math.cos(b.heading) * 20, ny + Math.sin(b.heading) * 20)) {
+        b.x = nx;
+        b.y = ny;
+      } else b.heading += Math.PI * (0.6 + Math.random() * 0.8);
+      if (n >= 14) continue;
+      this._v.set(b.x, 0.6 + Math.sin(t * 2 + n) * 0.3, b.y);
+      this._e.set(0, -b.heading, Math.sin(t * 1.5 + n) * 0.04);
       this._q.setFromEuler(this._e);
       this._s.set(1, 1, 1);
       this._m.compose(this._v, this._q, this._s);
