@@ -73,7 +73,7 @@ export class Terrain {
     this.waterNormal.wrapS = this.waterNormal.wrapT = THREE.RepeatWrapping;
     this.waterNormal.repeat.set(CELL / 140, CELL / 140);
     // Plain ground under everything, so a tile still being painted never shows the sky.
-    this.under = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a8a44 }));
+    this.under = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a8a44, polygonOffset: true, polygonOffsetFactor: 8, polygonOffsetUnits: 16 }));
     this.under.position.y = -0.6;
     this.under.receiveShadow = true;
     scene.add(this.under);
@@ -112,8 +112,8 @@ export class Terrain {
     this.night = night;
     this.waterColor.copy(waterColor);
     this.waterNormal.offset.set(t * 0.01, t * 0.006);
-    this.under.position.x = tx;
-    this.under.position.z = tz;
+    // Kept well below the tiles at every zoom, so it never wins the depth test against them.
+    this.under.position.set(tx, -Math.max(0.6, span * 0.012), tz);
     this.under.scale.set(span * 14, 1, span * 14);
     for (const tile of this.tiles.values()) {
       tile.mesh.material.emissiveIntensity = night * 0.75;
