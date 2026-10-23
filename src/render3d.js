@@ -16,7 +16,7 @@ import { Ambient } from './ambient3d.js';
 import { personModel } from './models.js';
 
 export const QUALITY = {
-  high: { name: 'High', pixelRatio: 1.5, shadows: 2048, bloom: true, tilt: true, lights: 8 },
+  high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8 },
   medium: { name: 'Medium', pixelRatio: 1, shadows: 1024, bloom: true, tilt: false, lights: 6 },
   low: { name: 'Low', pixelRatio: 0.75, shadows: 0, bloom: false, tilt: false, lights: 4 },
 };
@@ -389,12 +389,24 @@ export class Renderer3D {
   }
 
   // ---------------------------------------------------------------- props (instanced, refilled for the view)
-  propEntry(type, variant) {
-    const key = `${type}:${variant}`;
+  // lod 1 / 2: half / quarter-resolution copies for props that cover only a few pixels.
+  propEntry(type, variant, lod = 0) {
+    const key = lod ? `${type}:${variant}:L${lod}` : `${type}:${variant}`;
     let e = this.propCache.get(key);
     if (!e) {
       const p = buildProp(type, variant);
-      const geo = toGeometry(meshGrid(p.grid, { v: p.v, ox: p.origin.x, oz: p.origin.z, jitter: 0.05 }));
+      let geo;
+      if (lod) {
+        const g = p.grid;
+        const f = 2 ** lod;
+        const out = new VoxelGrid(Math.ceil(g.nx / f), Math.ceil(g.ny / f), Math.ceil(g.nz / f));
+        for (let y = 0; y < out.ny; y++) for (let z = 0; z < out.nz; z++) for (let x = 0; x < out.nx; x++) {
+          let val = 0;
+          for (let dy = f - 1; dy >= 0 && !val; dy--) for (let dz = 0; dz < f && !val; dz++) for (let dx = 0; dx < f && !val; dx++) val = g.get(x * f + dx, y * f + dy, z * f + dz);
+          if (val) out.data[out.idx(x, y, z)] = val;
+        }
+        geo = toGeometry(meshGrid(out, { v: p.v * f, ox: p.origin.x / f, oz: p.origin.z / f, jitter: 0.05 }));
+      } else geo = toGeometry(meshGrid(p.grid, { v: p.v, ox: p.origin.x, oz: p.origin.z, jitter: 0.05 }));
       e = { key, type, built: p, geo, im: null, cap: 0, n: 0 };
       this.propCache.set(key, e);
     }
@@ -427,14 +439,19 @@ export class Renderer3D {
     this.lastPropAt = { x: cx, z: cz, half };
     this.propsDirty = false;
     for (const e of this.propCache.values()) e.n = 0;
-    const pxPerUnit = this.h / (half * 2);
     const R = half * 1.5;
-    const found = game.grid.query(cx - R, cz - R, cx + R, cz + R);
-    let grow = false;
-    for (const o of found) {
+    const view = this.viewTest();
+    // Props too small to make out are skipped; small ones use the half-resolution copy.
+    const found = [];
+    for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
       if (o.kind !== 'prop' || o.state !== 'intact') continue;
-      if (o.height * pxPerUnit < 1.2 && o.tier < k.stage - 1) continue;
-      const e = this.propEntry(o.type, o.variant);
+      const px = view.px(o.x, o.y, Math.max(o.height, o.w));
+      if (px < 3.5 || !view.visible(o.x, o.y, o.height, o.height)) continue;
+      found.push(o, this.propEntry(o.type, o.variant, px < 7 ? 2 : px < 14 ? 1 : 0));
+    }
+    let grow = false;
+    for (let i = 1; i < found.length; i += 2) {
+      const e = found[i];
       e.n++;
       if (!e.im || e.n > e.cap) grow = true;
     }
@@ -442,11 +459,10 @@ export class Renderer3D {
       for (const e of this.propCache.values()) if (e.n && (!e.im || e.n > e.cap)) this.ensureInst(e, e.n, PROP_BY_ID[e.type].tier >= 2);
     }
     for (const e of this.propCache.values()) e.n = 0;
-    for (const o of found) {
-      if (o.kind !== 'prop' || o.state !== 'intact') continue;
-      if (o.height * pxPerUnit < 1.2 && o.tier < k.stage - 1) continue;
-      const e = this.propCache.get(`${o.type}:${o.variant}`);
-      if (!e || !e.im || e.n >= e.cap) continue;
+    for (let i = 0; i < found.length; i += 2) {
+      const o = found[i];
+      const e = found[i + 1];
+      if (!e.im || e.n >= e.cap) continue;
       this._pv.set(o.x, 0, o.y);
       this._pe.set(0, (o.rot * Math.PI) / 2, 0);
       this._pq.setFromEuler(this._pe);
@@ -457,6 +473,8 @@ export class Renderer3D {
       if (!e.im) continue;
       e.im.count = e.n;
       e.im.visible = e.n > 0;
+      // Street clutter only casts shadows while the kaiju is small enough to see them.
+      e.im.castShadow = k.stage <= 3 && PROP_BY_ID[e.type].tier >= 2;
       e.im.instanceMatrix.needsUpdate = true;
     }
   }
@@ -550,28 +568,55 @@ export class Renderer3D {
     return e;
   }
 
-  // Half-resolution voxel copy of a building, for when it is small next to the kaiju.
-  lodGeo(v) {
-    if (v.lod) return v.lod;
+  // Lower-resolution voxel copies of a building (level 1: half, level 2: quarter), for when
+  // it covers few pixels on screen.
+  lodGeo(v, level) {
+    v.lods = v.lods || [];
+    if (v.lods[level]) return v.lods[level];
+    const f = 2 ** level;
     const g = v.built.grid;
-    const nx = Math.ceil(g.nx / 2);
-    const ny = Math.ceil(g.ny / 2);
-    const nz = Math.ceil(g.nz / 2);
+    const nx = Math.ceil(g.nx / f);
+    const ny = Math.ceil(g.ny / f);
+    const nz = Math.ceil(g.nz / f);
     const out = new VoxelGrid(nx, ny, nz);
+    const need = Math.ceil(f * f * f * 0.35);
     for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
       let val = 0;
       let cnt = 0;
-      for (let dy = 1; dy >= 0; dy--) for (let dz = 0; dz < 2; dz++) for (let dx = 0; dx < 2; dx++) {
-        const s2 = g.get(x * 2 + dx, y * 2 + dy, z * 2 + dz);
+      for (let dy = f - 1; dy >= 0; dy--) for (let dz = 0; dz < f; dz++) for (let dx = 0; dx < f; dx++) {
+        const s2 = g.get(x * f + dx, y * f + dy, z * f + dz);
         if (!s2) continue;
         cnt++;
         if (!val) val = s2;
       }
-      if (cnt >= 3) out.data[out.idx(x, y, z)] = val;
+      if (cnt >= need) out.data[out.idx(x, y, z)] = val;
     }
     const b = v.built;
-    v.lod = toGeometry(meshGrid(out, { v: b.dims.v * 2, ox: b.origin.x / 2, oz: b.origin.z / 2 }));
-    return v.lod;
+    v.lods[level] = toGeometry(meshGrid(out, { v: b.dims.v * f, ox: b.origin.x / f, oz: b.origin.z / f }));
+    return v.lods[level];
+  }
+
+  // Camera view-projection for culling instances; returns a test of whether a box at (x, y)
+  // up to height h lands on screen (with a margin) and roughly how many pixels a unit covers.
+  viewTest() {
+    this.camera.updateMatrixWorld();
+    const m = new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
+    const cam = this.camera.position;
+    const focal = this.h / (2 * Math.tan((FOV * Math.PI) / 360));
+    const onScreen = (x, z, y, pad) => {
+      const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+      if (w <= 0) return false;
+      const px = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w;
+      const py = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
+      return px > -1 - pad && px < 1 + pad && py > -1 - pad && py < 1 + pad;
+    };
+    return {
+      visible: (x, z, h, r) => {
+        const pad = 0.3 + (r * focal) / Math.max(1, Math.hypot(x - cam.x, z - cam.z, cam.y)) / this.h;
+        return onScreen(x, z, 0, pad) || onScreen(x, z, h, pad);
+      },
+      px: (x, z, size) => (size * focal) / Math.max(1, Math.hypot(x - cam.x, z - cam.z, cam.y)),
+    };
   }
 
   // A building gets its own mesh only once it is hit, so it can lose chunks and fall.
@@ -611,12 +656,13 @@ export class Renderer3D {
     if (!moved && !this.buildingsDirty) return;
     this.lastBldAt = { x: cx, z: cz, half };
     this.buildingsDirty = false;
-    const stage = game.kaiju.stage;
-    const span = game.viewSpan();
     const missing = [];
     const list = [];
+    const view = this.viewTest();
     for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
       if (o.kind !== 'building') continue;
+      const size = Math.max(o.w, o.h, o.height);
+      if (!view.visible(o.x, o.y, o.height, size * 0.6)) continue;
       const rec = this.bld.get(o.id);
       const key = `${o.type}:${o.variant}`;
       const v = this.variants.get(key);
@@ -626,10 +672,14 @@ export class Renderer3D {
       }
       if (o.state === 'intact') {
         if (rec && rec.mesh) continue;
-        // Buildings far below the kaiju's size (or far off at big sizes) use the simple mesh.
-        const lod = o.tier <= stage - 2 || (stage >= 4 && o.tier <= stage - 1 && Math.hypot(o.x - cx, o.y - cz) > span * 1.1);
-        list.push(lod ? this.instFor(this.bInst, `${key}:L`, null) : this.instFor(this.bInst, key, v.geo), o, 0);
-        if (lod) list[list.length - 3].lodOf = v;
+        // The fewer pixels a building covers, the coarser the voxels it is drawn with.
+        const px = view.px(o.x, o.y, size);
+        const lod = px > 110 ? 0 : px > 40 ? 1 : 2;
+        list.push(lod ? this.instFor(this.bInst, `${key}:L${lod}`, null) : this.instFor(this.bInst, key, v.geo), o, 0);
+        if (lod) {
+          list[list.length - 3].lodOf = v;
+          list[list.length - 3].lod = lod;
+        }
       } else if (!o.walkable && !(rec && rec.collapse)) {
         list.push(this.instFor(this.rInst, key, null), o, 1);
         list[list.length - 3].rubbleOf = v;
@@ -640,8 +690,8 @@ export class Renderer3D {
     for (const map of [this.bInst, this.rInst]) {
       for (const e of map.values()) {
         if (!e.n || (e.im && e.n <= e.cap)) continue;
-        if (!e.geo) e.geo = e.lodOf ? this.lodGeo(e.lodOf) : this.rubbleGeo(e.rubbleOf);
-        this.ensureInst(e, e.n, true);
+        if (!e.geo) e.geo = e.lodOf ? this.lodGeo(e.lodOf, e.lod) : this.rubbleGeo(e.rubbleOf);
+        this.ensureInst(e, e.n, !(e.lod >= 2));
       }
     }
     for (const map of [this.bInst, this.rInst]) for (const e of map.values()) e.n = 0;
