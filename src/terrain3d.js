@@ -167,6 +167,27 @@ export class Terrain {
   }
 
   // ---------------------------------------------------------------- painting
+  // A soft light pool, drawn once per colour and stamped wherever a light stands.
+  poolSprite(color, al) {
+    this.sprites = this.sprites || new Map();
+    const key = `${color}:${al}`;
+    let cv = this.sprites.get(key);
+    if (cv) return cv;
+    cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const g = cv.getContext('2d');
+    const c = new THREE.Color(color);
+    const rgba = (q) => `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${q})`;
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, rgba(al));
+    grad.addColorStop(0.5, rgba(al * 0.35));
+    grad.addColorStop(1, rgba(0));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    this.sprites.set(key, cv);
+    return cv;
+  }
+
   paint(i, j, ts, res) {
     const w = this.world;
     const size = ts * CELL;
@@ -222,7 +243,7 @@ export class Terrain {
     }
 
     // Water field: sampled on a grid, drawn as smooth contours (sand, wet sand, shallows, deep).
-    const N = ts === 1 ? 64 : ts === 2 ? 64 : 96;
+    const N = 64;
     const step = size / N;
     let F = null;
     {
@@ -466,7 +487,7 @@ export class Terrain {
         ctx.fillRect(o.x - o.w / 2 - 6, o.y - o.h / 2 - 6, o.w + 12, o.h + 12);
         ctx.fillStyle = 'rgba(0,0,0,0.18)';
         ctx.fillRect(o.x - o.w / 2 - 2, o.y - o.h / 2 - 2, o.w + 4, o.h + 4);
-      } else if (o.type && o.type.startsWith('tree')) {
+      } else if (o.type && o.w * k > 1.5 && o.type.startsWith('tree')) {
         ctx.fillStyle = 'rgba(0,0,0,0.18)';
         ctx.beginPath();
         ctx.arc(o.x, o.y, o.w * 0.6, 0, Math.PI * 2);
@@ -495,14 +516,8 @@ export class Terrain {
     gx.fillRect(x0, y0, size, size);
     gx.globalCompositeOperation = 'lighten';
     const pool = (x, y, r, color, al) => {
-      const c = new THREE.Color(color);
-      const grad = gx.createRadialGradient(x, y, 0, x, y, r);
-      const rgba = (q) => `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${q})`;
-      grad.addColorStop(0, rgba(al));
-      grad.addColorStop(0.5, rgba(al * 0.35));
-      grad.addColorStop(1, rgba(0));
-      gx.fillStyle = grad;
-      gx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      if (r * gk < 0.8) return;
+      gx.drawImage(this.poolSprite(color, al), x - r, y - r, 2 * r, 2 * r);
     };
     for (const l of w.lightGrid.query(x0 - 230, y0 - 230, x0 + size + 230, y0 + size + 230)) pool(l.x, l.y, l.big ? 220 : Math.max(26, l.height * 3.2), l.color, l.big ? 0.4 : 0.62);
     for (const o of w.grid.query(x0 - 120, y0 - 120, x0 + size + 120, y0 + size + 120)) {
