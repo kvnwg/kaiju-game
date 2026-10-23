@@ -53,7 +53,7 @@ export class UI {
     const s = STAGES[k.stage];
     const growth = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / s.biomassToNext);
     this.growthFill.style.width = `${growth * 100}%`;
-    this.growthText.textContent = k.stage >= MAX_STAGE ? `Stage 5 · ${s.name} · max size` : `Stage ${k.stage} · ${s.name}`;
+    this.growthText.textContent = k.stage >= MAX_STAGE ? `Stage ${k.stage} · ${s.name} · max size` : `Stage ${k.stage} · ${s.name}`;
     this.scrapEl.textContent = fmtNum(game.stats.scrap);
     this.timerEl.textContent = fmtTime(game.time);
 
