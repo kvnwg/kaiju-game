@@ -37,6 +37,9 @@ export class UI {
     this.hpText = $('#hp span');
     this.growthFill = $('#growth .fill');
     this.growthText = $('#growth span');
+    this.growthPct = $('#growth em');
+    this.stageNum = $('#stageBadge b');
+    this.hpBar = $('#hp');
     this.scrapEl = $('#scrap');
     this.timerEl = $('#timer');
     this.bossbar = $('#bossbar');
@@ -45,6 +48,7 @@ export class UI {
     this.augbar = $('#augbar');
     this.bannerEl = $('#banner');
     this.hintEl = $('#hint');
+    this.hintText = $('#hint span');
     this.modals = {
       pick: $('#pick'), revive: $('#revive'), results: $('#results'), menu: $('#menu'), pause: $('#pause'),
     };
@@ -65,11 +69,14 @@ export class UI {
     const k = game.kaiju;
     this.hpFill.style.width = `${(100 * k.hp) / k.maxHp}%`;
     this.shieldFill.style.width = `${Math.min(100, (100 * k.shield) / k.maxHp)}%`;
-    this.hpText.textContent = `${fmtNum(k.hp)} / ${fmtNum(k.maxHp)}${k.shield > 1 ? ` +${fmtNum(k.shield)}` : ''}`;
+    this.hpText.textContent = `${fmtNum(k.hp)}/${fmtNum(k.maxHp)}${k.shield > 1 ? ` +${fmtNum(k.shield)}` : ''}`;
+    this.hpBar.classList.toggle('low', k.hp < k.maxHp * 0.3);
     const s = STAGES[k.stage];
     const growth = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / s.biomassToNext);
     this.growthFill.style.width = `${growth * 100}%`;
-    this.growthText.textContent = k.stage >= MAX_STAGE ? `Stage ${k.stage} · ${s.name} · max size` : `Stage ${k.stage} · ${s.name}`;
+    this.growthText.textContent = s.name;
+    this.growthPct.textContent = k.stage >= MAX_STAGE ? 'MAX' : `${Math.floor(growth * 100)}%`;
+    this.stageNum.textContent = k.stage;
     this.scrapEl.textContent = fmtNum(game.stats.scrap);
     this.timerEl.textContent = fmtTime(game.time);
 
@@ -121,7 +128,7 @@ export class UI {
   }
 
   hint(text) {
-    this.hintEl.textContent = text;
+    if (text) this.hintText.textContent = text;
     this.hintEl.classList.toggle('show', Boolean(text));
   }
 
@@ -156,8 +163,10 @@ export class UI {
       .join('');
     const freeLabel = p.freeRerolls > 0 ? 'Reroll (free)' : 'Reroll used';
     el.innerHTML = `<div class="panel pick-panel">
-        <h2>You grew! Pick an augment</h2>
-        <p class="muted">${tierName} tier · lasts the rest of the run</p>
+        <div class="pick-head">
+          <h2>Size up!</h2>
+          <p><span class="tier-chip tier-${p.tier}">${tierName} pick</span>Lasts the rest of the run</p>
+        </div>
         <div class="cards">${cards}</div>
         <div class="row">
           <button class="btn ghost" id="rerollFree" ${p.freeRerolls > 0 ? '' : 'disabled'}>${freeLabel}</button>

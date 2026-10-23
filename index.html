@@ -18,20 +18,25 @@
 
     <div id="hud" class="hidden">
       <div class="top">
-        <div class="bars">
-          <div id="hp" class="bar"><div class="fill"></div><div class="shield"></div><span></span></div>
-          <div id="growth" class="bar"><div class="fill"></div><span></span></div>
+        <div class="vitals">
+          <div id="stageBadge" class="badge"><small>LV</small><b>1</b></div>
+          <div class="bars">
+            <div id="hp" class="bar"><div class="fill"></div><div class="shield"></div><i class="heart"></i><span></span></div>
+            <div id="growth" class="bar"><div class="fill"></div><span></span><em></em></div>
+          </div>
         </div>
         <div class="meta">
-          <div class="pill"><i class="scrap-icon"></i><span id="scrap">0</span></div>
-          <div class="pill" id="timer">0:00</div>
-          <button id="pauseBtn" class="icon-btn" aria-label="Pause">II</button>
+          <div class="meta-row">
+            <div class="pill"><i class="scrap-icon"></i><span id="scrap">0</span></div>
+            <button id="pauseBtn" class="icon-btn" aria-label="Pause">II</button>
+          </div>
+          <div class="pill small" id="timer">0:00</div>
         </div>
       </div>
       <div id="bossbar" class="hidden"><span></span><div class="track"><div class="fill"></div></div></div>
       <div id="banner" class="banner"></div>
       <div id="preyArrow" class="hidden"><span></span></div>
-      <div id="hint"></div>
+      <div id="hint"><b>TIP</b><span></span></div>
       <div id="augbar"></div>
     </div>
 

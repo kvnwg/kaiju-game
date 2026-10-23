@@ -38,8 +38,8 @@ function startRun({ kaijuId, difficulty, firstRun = false }) {
   ui.augSig = null;
   movedFor = 0;
   pendingGrowBanner = null;
-  hintUntil = firstRun || profile.runs < 2 ? performance.now() + 10000 : 0;
-  ui.hint(hintUntil ? 'You are human-sized. Drag (or WASD) to move; you attack automatically. Eat people to grow.' : '');
+  hintUntil = firstRun || profile.runs < 2 ? performance.now() + 7000 : 0;
+  ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');
 }
 
 function showMenu() {
@@ -60,6 +60,8 @@ function handleEvents(events) {
       case 'grow':
         // Every grow opens a pick; announce the new stage once the pick is made.
         pendingGrowBanner = e.stage;
+        hintUntil = 0;
+        ui.hint('');
         break;
       case 'pick':
         if (game.state !== 'picking') break;

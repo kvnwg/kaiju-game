@@ -89,6 +89,16 @@ export class Actors {
     const rig = partsGroup(KAIJU_MODELS[id](), kmat);
     rig.mat = kmat;
     rig.yaw = null;
+    // X-ray silhouette: drawn only where the kaiju is hidden behind buildings, so you never
+    // lose sight of it under a roof.
+    const ghost = new THREE.MeshBasicMaterial({ color: 0x9cff7a, transparent: true, opacity: 0.38, depthFunc: THREE.GreaterDepth, depthWrite: false });
+    const meshes = [];
+    rig.root.traverse((m) => m.isMesh && meshes.push(m));
+    for (const m of meshes) {
+      const g = new THREE.Mesh(m.geometry, ghost);
+      g.renderOrder = 30;
+      m.add(g);
+    }
     this.kaiju = rig;
     this.scene.add(rig.root);
   }

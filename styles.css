@@ -1,4 +1,6 @@
-/* Pixel-art UI: pixel fonts, hard 3px outlines with notched corners, stepped bars, no blur. */
+/* Pixel-art UI over a voxel game: pixel fonts, hard 2px outlines with notched corners, stepped
+   bars, no blur. Single dark look; every colour and font is set explicitly so the host page's
+   reset (light scheme, system font, dark body text) can't leak in. */
 :root {
   --bg: #14161b;
   --ink: #0d0e14;
@@ -17,11 +19,12 @@
   --prismatic: #c58bff;
   --accent: #ff7a1a;
   --accent-lo: #a34607;
-  --p: 3px; /* one "pixel" of UI chrome */
+  --p: 2px; /* one "pixel" of UI chrome */
   --display: 'Press Start 2P', 'Courier New', monospace;
   --body: 'Pixelify Sans', 'Silkscreen', 'Courier New', monospace;
   --notch: polygon(0 var(--p), var(--p) var(--p), var(--p) 0, calc(100% - var(--p)) 0, calc(100% - var(--p)) var(--p), 100% var(--p), 100% calc(100% - var(--p)), calc(100% - var(--p)) calc(100% - var(--p)), calc(100% - var(--p)) 100%, var(--p) 100%, var(--p) calc(100% - var(--p)), 0 calc(100% - var(--p)));
-  --outline: 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 2px 0 var(--ink), 0 -2px 0 var(--ink), 2px 2px 0 var(--ink), -2px 2px 0 var(--ink), 2px -2px 0 var(--ink), -2px -2px 0 var(--ink);
+  --outline: 1px 0 0 var(--ink), -1px 0 0 var(--ink), 0 1px 0 var(--ink), 0 -1px 0 var(--ink), 1px 1px 0 var(--ink), -1px 1px 0 var(--ink), 1px -1px 0 var(--ink), -1px -1px 0 var(--ink), 1px 2px 0 var(--ink);
+  --outline-big: 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 2px 0 var(--ink), 0 -2px 0 var(--ink), 2px 2px 0 var(--ink), -2px 2px 0 var(--ink), 2px -2px 0 var(--ink), -2px -2px 0 var(--ink);
   --ico-heart: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'><rect x='1' y='0' width='1' height='1' fill='%230d0e14'/><rect x='2' y='0' width='1' height='1' fill='%230d0e14'/><rect x='4' y='0' width='1' height='1' fill='%230d0e14'/><rect x='5' y='0' width='1' height='1' fill='%230d0e14'/><rect x='0' y='1' width='1' height='1' fill='%230d0e14'/><rect x='1' y='1' width='1' height='1' fill='%23ff4d5a'/><rect x='2' y='1' width='1' height='1' fill='%23ff4d5a'/><rect x='3' y='1' width='1' height='1' fill='%230d0e14'/><rect x='4' y='1' width='1' height='1' fill='%23ff4d5a'/><rect x='5' y='1' width='1' height='1' fill='%23ff4d5a'/><rect x='6' y='1' width='1' height='1' fill='%230d0e14'/><rect x='0' y='2' width='1' height='1' fill='%230d0e14'/><rect x='1' y='2' width='1' height='1' fill='%23ff4d5a'/><rect x='2' y='2' width='1' height='1' fill='%23ffffff'/><rect x='3' y='2' width='1' height='1' fill='%23ff4d5a'/><rect x='4' y='2' width='1' height='1' fill='%23ff4d5a'/><rect x='5' y='2' width='1' height='1' fill='%23ff4d5a'/><rect x='6' y='2' width='1' height='1' fill='%230d0e14'/><rect x='0' y='3' width='1' height='1' fill='%230d0e14'/><rect x='1' y='3' width='1' height='1' fill='%23ff4d5a'/><rect x='2' y='3' width='1' height='1' fill='%23ff4d5a'/><rect x='3' y='3' width='1' height='1' fill='%23ff4d5a'/><rect x='4' y='3' width='1' height='1' fill='%23ff4d5a'/><rect x='5' y='3' width='1' height='1' fill='%23b3202c'/><rect x='6' y='3' width='1' height='1' fill='%230d0e14'/><rect x='1' y='4' width='1' height='1' fill='%230d0e14'/><rect x='2' y='4' width='1' height='1' fill='%23ff4d5a'/><rect x='3' y='4' width='1' height='1' fill='%23ff4d5a'/><rect x='4' y='4' width='1' height='1' fill='%23b3202c'/><rect x='5' y='4' width='1' height='1' fill='%230d0e14'/><rect x='2' y='5' width='1' height='1' fill='%230d0e14'/><rect x='3' y='5' width='1' height='1' fill='%23b3202c'/><rect x='4' y='5' width='1' height='1' fill='%230d0e14'/><rect x='3' y='6' width='1' height='1' fill='%230d0e14'/></svg>");
   --ico-gem: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'><rect x='3' y='0' width='1' height='1' fill='%230d0e14'/><rect x='2' y='1' width='1' height='1' fill='%230d0e14'/><rect x='3' y='1' width='1' height='1' fill='%23ffd84a'/><rect x='4' y='1' width='1' height='1' fill='%230d0e14'/><rect x='1' y='2' width='1' height='1' fill='%230d0e14'/><rect x='2' y='2' width='1' height='1' fill='%23ffd84a'/><rect x='3' y='2' width='1' height='1' fill='%23ffffff'/><rect x='4' y='2' width='1' height='1' fill='%23ffd84a'/><rect x='5' y='2' width='1' height='1' fill='%230d0e14'/><rect x='0' y='3' width='1' height='1' fill='%230d0e14'/><rect x='1' y='3' width='1' height='1' fill='%23ffd84a'/><rect x='2' y='3' width='1' height='1' fill='%23ffffff'/><rect x='3' y='3' width='1' height='1' fill='%23ffd84a'/><rect x='4' y='3' width='1' height='1' fill='%23ffd84a'/><rect x='5' y='3' width='1' height='1' fill='%23c99a12'/><rect x='6' y='3' width='1' height='1' fill='%230d0e14'/><rect x='1' y='4' width='1' height='1' fill='%230d0e14'/><rect x='2' y='4' width='1' height='1' fill='%23ffd84a'/><rect x='3' y='4' width='1' height='1' fill='%23ffd84a'/><rect x='4' y='4' width='1' height='1' fill='%23c99a12'/><rect x='5' y='4' width='1' height='1' fill='%230d0e14'/><rect x='2' y='5' width='1' height='1' fill='%230d0e14'/><rect x='3' y='5' width='1' height='1' fill='%23c99a12'/><rect x='4' y='5' width='1' height='1' fill='%230d0e14'/><rect x='3' y='6' width='1' height='1' fill='%230d0e14'/></svg>");
   --ico-skull: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 6' shape-rendering='crispEdges'><rect x='1' y='0' width='1' height='1' fill='%230d0e14'/><rect x='2' y='0' width='1' height='1' fill='%230d0e14'/><rect x='3' y='0' width='1' height='1' fill='%230d0e14'/><rect x='4' y='0' width='1' height='1' fill='%230d0e14'/><rect x='5' y='0' width='1' height='1' fill='%230d0e14'/><rect x='0' y='1' width='1' height='1' fill='%230d0e14'/><rect x='1' y='1' width='1' height='1' fill='%23f3f1ea'/><rect x='2' y='1' width='1' height='1' fill='%23f3f1ea'/><rect x='3' y='1' width='1' height='1' fill='%23f3f1ea'/><rect x='4' y='1' width='1' height='1' fill='%23f3f1ea'/><rect x='5' y='1' width='1' height='1' fill='%23f3f1ea'/><rect x='6' y='1' width='1' height='1' fill='%230d0e14'/><rect x='0' y='2' width='1' height='1' fill='%230d0e14'/><rect x='1' y='2' width='1' height='1' fill='%23f3f1ea'/><rect x='2' y='2' width='1' height='1' fill='%230d0e14'/><rect x='3' y='2' width='1' height='1' fill='%23f3f1ea'/><rect x='4' y='2' width='1' height='1' fill='%230d0e14'/><rect x='5' y='2' width='1' height='1' fill='%23f3f1ea'/><rect x='6' y='2' width='1' height='1' fill='%230d0e14'/><rect x='0' y='3' width='1' height='1' fill='%230d0e14'/><rect x='1' y='3' width='1' height='1' fill='%23f3f1ea'/><rect x='2' y='3' width='1' height='1' fill='%23f3f1ea'/><rect x='3' y='3' width='1' height='1' fill='%23f3f1ea'/><rect x='4' y='3' width='1' height='1' fill='%23f3f1ea'/><rect x='5' y='3' width='1' height='1' fill='%23f3f1ea'/><rect x='6' y='3' width='1' height='1' fill='%230d0e14'/><rect x='1' y='4' width='1' height='1' fill='%230d0e14'/><rect x='2' y='4' width='1' height='1' fill='%23f3f1ea'/><rect x='3' y='4' width='1' height='1' fill='%230d0e14'/><rect x='4' y='4' width='1' height='1' fill='%23f3f1ea'/><rect x='5' y='4' width='1' height='1' fill='%230d0e14'/><rect x='1' y='5' width='1' height='1' fill='%230d0e14'/><rect x='2' y='5' width='1' height='1' fill='%230d0e14'/><rect x='3' y='5' width='1' height='1' fill='%230d0e14'/><rect x='4' y='5' width='1' height='1' fill='%230d0e14'/><rect x='5' y='5' width='1' height='1' fill='%230d0e14'/></svg>");
@@ -41,12 +44,17 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.3;
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-#app { position: fixed; inset: 0; }
+#app { position: fixed; inset: 0; color: var(--text); font-family: var(--body); font-size: 16px; line-height: 1.3; }
+:where(#app) button { font-family: inherit; color: inherit; }
 
 #game {
   position: absolute;
@@ -60,12 +68,12 @@ html, body {
 .hidden { display: none !important; }
 
 /* Shared pixel frame: dark outline, bevel light top-left and shade bottom-right, notched corners. */
-.bar, .pill, .icon-btn, .chip, #hint, .panel, .btn, .card, .kcard, .city, .stat, .loot, .segs, .card .set, .run-title, #bossbar .track {
+.bar, .pill, .icon-btn, .chip, .panel, .btn, .card, .kcard, .city, .stat, .loot, .segs, .card .set, .run-title, #bossbar .track {
   border: var(--p) solid var(--ink);
   border-radius: 0;
   clip-path: var(--notch);
 }
-.pill, .icon-btn, .chip, #hint, .panel, .card, .kcard, .city, .stat, .loot {
+.pill, .icon-btn, .chip, .panel, .card, .kcard, .city, .stat, .loot {
   box-shadow: inset var(--p) var(--p) 0 rgba(255, 255, 255, 0.12), inset calc(-1 * var(--p)) calc(-1 * var(--p)) 0 rgba(0, 0, 0, 0.35);
 }
 
@@ -99,80 +107,109 @@ html, body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
 }
-#hud .top { display: flex; gap: 8px; align-items: flex-start; }
-#hud .bars { flex: 1; display: flex; flex-direction: column; gap: 4px; max-width: 420px; min-width: 0; }
+#hud .top { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+#hud .vitals { display: flex; gap: 6px; align-items: stretch; flex: 1; min-width: 0; max-width: 360px; }
+#hud .bars { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* Stage badge: the kaiju's size class at a glance. */
+.badge {
+  flex: none;
+  width: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--growth-lo);
+  border: var(--p) solid var(--ink);
+  clip-path: var(--notch);
+  box-shadow: inset 0 var(--p) 0 #5bc24a, inset 0 calc(-1 * var(--p)) 0 #1f6a1c;
+}
+.badge small { font-family: var(--display); font-size: 6px; line-height: 1; color: #c8ffb2; letter-spacing: 1px; }
+.badge b { font-family: var(--display); font-size: 16px; line-height: 1; font-weight: 400; color: var(--text); text-shadow: 2px 2px 0 var(--ink); }
+
 .bar {
   position: relative;
-  height: 24px;
-  background: #262a3c;
+  height: 20px;
+  background: #2a1820;
   overflow: hidden;
+  box-shadow: inset 0 var(--p) 0 rgba(0, 0, 0, 0.45);
 }
 .bar .fill, .bar .shield { position: absolute; left: 0; top: 0; bottom: 0; transition: width 0.15s steps(4); }
-#hp .fill { background: var(--hp); box-shadow: inset 0 var(--p) 0 #ff8f98, inset 0 calc(-1 * var(--p)) 0 var(--hp-lo); }
-#hp .shield { background: repeating-linear-gradient(90deg, #d8cfb8 0 6px, #9f9580 6px 9px); opacity: 0.85; }
-#growth { height: 20px; }
+#hp .fill { background: var(--hp); box-shadow: inset 0 var(--p) 0 #ff9aa2, inset 0 calc(-1 * var(--p)) 0 var(--hp-lo); }
+#hp .shield { background: repeating-linear-gradient(90deg, #dfe6ee 0 6px, #a8b3c0 6px 8px); opacity: 0.85; }
+#hp.low .fill { animation: lowhp 0.6s steps(1) infinite; }
+@keyframes lowhp { 50% { background: #ffd0d4; } }
+#growth { height: 16px; background: #14261a; }
 #growth .fill { background: var(--growth); box-shadow: inset 0 var(--p) 0 #b4ff95, inset 0 calc(-1 * var(--p)) 0 var(--growth-lo); }
-/* segment notches over the fill */
+/* segment ticks over the fill */
 .bar::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(90deg, transparent 0 15px, rgba(13, 14, 20, 0.45) 15px 18px);
+  background: repeating-linear-gradient(90deg, transparent 0 18px, rgba(13, 14, 20, 0.35) 18px 20px);
   pointer-events: none;
 }
-.bar span {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 100%;
-  font-family: var(--display);
-  font-size: 10px;
-  line-height: 1;
-  padding-left: 6px;
-  text-shadow: var(--outline);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#hp span::before, #growth span::before {
-  content: '';
-  flex: none;
-  width: 14px;
-  height: 14px;
+.bar .heart {
+  position: absolute;
+  z-index: 2;
+  left: 4px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
   background: var(--ico-heart) center / contain no-repeat;
   image-rendering: pixelated;
 }
-#growth span { font-size: 8px; }
-#growth span::before { width: 12px; height: 12px; background-image: var(--ico-up); }
-#hud .meta { display: flex; gap: 4px; align-items: center; }
+.bar span, .bar em {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--display);
+  font-size: 8px;
+  font-style: normal;
+  line-height: 1;
+  color: var(--text);
+  text-shadow: var(--outline);
+  white-space: nowrap;
+}
+#hp span { left: 20px; }
+#growth span { left: 5px; text-transform: uppercase; }
+#growth em { right: 5px; color: #d6ffc4; }
+
+#hud .meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; flex: none; }
+#hud .meta-row { display: flex; gap: 4px; }
 .pill {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 8px 0 6px;
   background: var(--panel);
   font-family: var(--display);
-  font-size: 11px;
-  text-shadow: 2px 2px 0 var(--ink);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text);
+  text-shadow: 1px 1px 0 var(--ink);
+  font-variant-numeric: tabular-nums;
 }
+.pill.small { height: 20px; font-size: 8px; padding: 0 6px; color: var(--muted); }
 .scrap-icon {
   display: inline-block;
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   background: var(--ico-gem) center / contain no-repeat;
   image-rendering: pixelated;
 }
 .icon-btn {
   pointer-events: auto;
   position: relative;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   background: var(--panel);
   color: transparent;
@@ -183,14 +220,14 @@ html, body {
 .icon-btn::before, .icon-btn::after {
   content: '';
   position: absolute;
-  top: 8px;
+  top: 7px;
   width: 4px;
   height: 10px;
   background: var(--text);
-  box-shadow: 2px 2px 0 var(--ink);
+  box-shadow: 1px 1px 0 var(--ink);
 }
-.icon-btn::before { left: 8px; }
-.icon-btn::after { left: 15px; }
+.icon-btn::before { left: 7px; }
+.icon-btn::after { left: 13px; }
 .icon-btn:active { transform: translate(1px, 1px); }
 
 #bossbar {
@@ -258,16 +295,17 @@ html, body {
   font-size: clamp(16px, 4.6vw, 36px);
   line-height: 1.25;
   text-transform: uppercase;
-  text-shadow: var(--outline), 4px 5px 0 var(--ink);
+  text-shadow: var(--outline-big), 4px 5px 0 var(--ink);
 }
 .banner .sub {
   display: inline-block;
   margin: 10px auto 0;
-  max-width: 520px;
-  padding: 8px 12px;
-  font-size: 16px;
+  max-width: min(360px, 100%);
+  padding: 7px 10px;
+  font-size: 14px;
   line-height: 1.3;
-  background: rgba(13, 14, 20, 0.82);
+  color: var(--text);
+  background: rgba(20, 22, 33, 0.9);
   clip-path: var(--notch);
 }
 .banner.grow .title { color: #b6ff8f; }
@@ -285,21 +323,39 @@ html, body {
   100% { transform: scale(1); }
 }
 
+/* Tutorial tip: a small toast above the move tiles. */
 #hint {
   position: absolute;
   left: 50%;
-  bottom: 64px;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 52px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: max-content;
-  max-width: calc(100% - 24px);
+  max-width: min(340px, calc(100% - 32px));
+  padding: 7px 10px 7px 7px;
   transform: translateX(-50%);
-  padding: 9px 12px 8px;
-  text-align: center;
-  font-size: 16px;
-  line-height: 1.3;
-  background: var(--panel);
+  background: rgba(20, 22, 33, 0.92);
+  border: var(--p) solid var(--ink);
+  clip-path: var(--notch);
+  box-shadow: inset 0 var(--p) 0 rgba(255, 255, 255, 0.1);
+  color: var(--text);
   opacity: 0;
+  visibility: hidden;
 }
-#hint.show { opacity: 1; animation: blink 1.2s steps(1) infinite; }
+#hint b {
+  flex: none;
+  padding: 4px 5px 3px;
+  font-family: var(--display);
+  font-size: 8px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--scrap);
+}
+#hint span { font-family: var(--body); font-size: 14px; line-height: 1.25; }
+#hint.show { opacity: 1; visibility: visible; animation: tipIn 0.3s steps(3) both; }
+@keyframes tipIn { 0% { transform: translate(-50%, 12px); opacity: 0; } 100% { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes blink { 85% { opacity: 0.6; } }
 @keyframes pulse { 50% { opacity: 0.45; } }
 
@@ -404,7 +460,7 @@ html, body {
   line-height: 1.2;
   text-transform: uppercase;
   color: #ffb13b;
-  text-shadow: 0 var(--p) 0 #ff7a1a, 0 calc(2 * var(--p)) 0 #c24a0a, var(--outline), 4px calc(3 * var(--p) + 2px) 0 var(--ink);
+  text-shadow: 0 3px 0 #ff7a1a, 0 6px 0 #c24a0a, var(--outline-big), 4px 11px 0 var(--ink);
 }
 .kaiju-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .kcard {
@@ -447,10 +503,6 @@ html, body {
   .city-row { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .panel { padding: 16px; }
-  .bar span { font-size: 9px; }
-  #growth span { font-size: 7px; }
-  .pill { font-size: 10px; padding: 0 7px; }
-  #hint { font-size: 15px; }
 }
 
 /* ---------- 3D overlays ---------- */
@@ -577,4 +629,23 @@ html, body {
   .tile { width: 36px; height: 36px; }
   .tile .aug-ico { width: 22px; height: 22px; }
   .card .aug-ico { width: 36px; height: 36px; }
+}
+
+/* Pick screen header */
+.pick-head { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.pick-head h2 { margin: 0; font-size: 20px; color: #b6ff8f; text-shadow: 3px 3px 0 var(--ink); }
+.pick-head p { margin: 0; font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.tier-chip { text-transform: uppercase; font-family: var(--display); font-size: 8px; line-height: 1; padding: 4px 6px 3px; color: var(--ink); background: var(--tc); }
+@media (max-width: 640px) {
+  .pick-panel { padding: 14px; }
+  .pick-panel .cards { gap: 8px; margin-top: 12px; }
+  .card { padding: 10px 12px; gap: 6px; }
+  .card .text { font-size: 15px; }
+  .card .name { font-size: 12px; }
+  .pick-panel .row { margin-top: 12px; }
+  .pick-panel .btn { font-size: 10px; padding: 10px 12px 9px; }
+}
+/* Big screens: scale the whole HUD up so it reads at desktop distance. */
+@media (min-width: 900px) and (min-height: 600px) {
+  #hud .top, #bossbar, #augbar, #hint { zoom: 1.5; }
 }
