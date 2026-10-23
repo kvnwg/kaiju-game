@@ -244,6 +244,26 @@ export function generateCity(seed = 1) {
     if (isUrban && (style === 'neon' || style === 'garden' || style === 'brick') && roadH(zc.c, zc.r) && roadV(zc.c, zc.r)) addProp('traffic_light', x - 14, y - 14);
   }
 
+  // Pick a type whose street frontage and depth fit, regardless of how it will be rotated.
+  const pickFit = (zoneKeys, tier, maxFront, maxDepth) => {
+    const pool = BUILDING_TYPES.filter((t) => t.weight > 0 && t.zones.some((z) => zoneKeys.includes(z)));
+    const weights = {};
+    for (const t of pool) {
+      const tierFit = t.tier === tier ? 1 : t.tier === tier - 1 ? 0.35 : t.tier === tier + 1 ? 0.12 : 0.02;
+      weights[t.id] = t.weight * tierFit;
+    }
+    if (!Object.keys(weights).length) return null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const id = rng.weighted(weights);
+      const variant = rng.int(0, VARIANTS - 1);
+      const d = buildingDims(id, variant);
+      if (d.w <= maxFront && d.h <= maxDepth && !(TYPE_BY_ID[id].unique && uniquePlaced.has(id))) return { id, variant, d };
+    }
+    return null;
+  };
+
+  // Street-frontage packing: buildings line every street edge shoulder to shoulder,
+  // so blocks read as dense city with no stray empty lots.
   function fillUrban(zc) {
     const { x, y, w, style, density } = zc;
     let zoneKeys = [style];
@@ -259,37 +279,74 @@ export function generateCity(seed = 1) {
     } else if (style === 'docks') {
       zoneKeys = ['docks'];
     }
-    const lots = tier >= 4 ? 2 : 3;
-    const lot = w / lots;
-    for (let i = 0; i < lots; i++) {
-      for (let j = 0; j < lots; j++) {
-        const lx = x + i * lot;
-        const ly = y + j * lot;
-        // Face the nearest block edge.
-        const m = Math.min(i, lots - 1 - i, j, lots - 1 - j);
-        const rot = m === lots - 1 - j ? 0 : m === j ? 2 : m === lots - 1 - i ? 1 : 3;
-        const pick = pickBuilding(zoneKeys, tier, lot - 10, lot - 10, rot);
-        if (!pick) continue;
-        const d = buildingDims(pick.id, pick.variant);
-        const bw = rot % 2 ? d.h : d.w;
-        const bh = rot % 2 ? d.w : d.h;
-        // Push toward the street side of the lot.
-        const sx = rot === 1 ? lot - bw / 2 - 6 : rot === 3 ? bw / 2 + 6 : lot / 2;
-        const sy = rot === 0 ? lot - bh / 2 - 6 : rot === 2 ? bh / 2 + 6 : lot / 2;
-        const bx = lx + sx;
-        const by = ly + sy;
-        if (!footprintDry(bx, by, bw, bh)) continue;
-        if (TYPE_BY_ID[pick.id].unique) uniquePlaced.add(pick.id);
-        addBuilding(pick.id, bx, by, rot, pick.variant);
-        if (rng.chance(0.5)) {
-          const px = lx + rng.range(8, lot - 8);
-          const py = ly + rng.range(8, lot - 8);
-          if (Math.abs(px - bx) > bw / 2 + 6 || Math.abs(py - by) > bh / 2 + 6) {
-            const id = style === 'brick' ? rng.pick(['dumpster', 'crates', 'drums', 'car']) : style === 'docks' ? rng.pick(['container', 'crates', 'container']) : rng.pick(['tree_round', 'planter', 'bench', 'car']);
-            if (!isWater(px, py)) addProp(id, px, py, rng.int(0, 3));
-          }
+    packRect(x, y, w, w, style, zoneKeys, tier, 0);
+  }
+
+  function packRect(x, y, w, h, style, zoneKeys, tier, depth) {
+    const setback = depth === 0 ? 5 : 3;
+    const maxDepth = Math.min(w, h) * 0.42;
+    const placeRow = (sx, sy, dx, dy, nx, ny, len, rot) => {
+      let deepest = 0;
+      let cursor = 4;
+      while (cursor < len - 14) {
+        const remaining = len - cursor - 4;
+        const slotTier = rng.chance(0.25) ? Math.max(3, tier - 1) : tier;
+        const pick = pickFit(zoneKeys, slotTier, remaining, maxDepth) || pickFit(zoneKeys, 3, remaining, maxDepth);
+        if (!pick) {
+          // Too narrow for any building: a tree or planter fills the gap.
+          if (remaining > 8) addProp(style === 'brick' ? 'dumpster' : style === 'neon' ? 'vending' : 'tree_round', sx + dx * (cursor + 5) + nx * 8, sy + dy * (cursor + 5) + ny * 8, rot);
+          break;
+        }
+        const along = cursor + pick.d.w / 2;
+        const bx = sx + dx * along + nx * (setback + pick.d.h / 2);
+        const by = sy + dy * along + ny * (setback + pick.d.h / 2);
+        const fw = rot % 2 ? pick.d.h : pick.d.w;
+        const fh = rot % 2 ? pick.d.w : pick.d.h;
+        if (footprintDry(bx, by, fw, fh)) {
+          if (TYPE_BY_ID[pick.id].unique) uniquePlaced.add(pick.id);
+          addBuilding(pick.id, bx, by, rot, pick.variant);
+          deepest = Math.max(deepest, pick.d.h);
+        }
+        cursor += pick.d.w + rng.int(2, 6);
+      }
+      return deepest + setback;
+    };
+    const top = placeRow(x, y, 1, 0, 0, 1, w, 2);
+    const bot = placeRow(x, y + h, 1, 0, 0, -1, w, 0);
+    const inner0 = y + top + 4;
+    const inner1 = y + h - bot - 4;
+    const left = placeRow(x, inner0, 0, 1, 1, 0, inner1 - inner0, 3);
+    const right = placeRow(x + w, inner0, 0, 1, -1, 0, inner1 - inner0, 1);
+    const cx0 = x + left + 4;
+    const cx1 = x + w - right - 4;
+    // A big courtyard gets an inner ring of smaller buildings along a back alley.
+    if (depth === 0 && cx1 - cx0 > 90 && inner1 - inner0 > 90) packRect(cx0 + 6, inner0 + 6, cx1 - cx0 - 12, inner1 - inner0 - 12, style, zoneKeys, Math.max(3, tier - 1), 1);
+    else courtyard(cx0, inner0, cx1, inner1, style, zoneKeys, tier);
+  }
+
+  // Whatever is left inside a block: a small building, a parking lot or a garden.
+  function courtyard(x0, y0, x1, y1, style, zoneKeys, tier) {
+    const cw = x1 - x0;
+    const ch = y1 - y0;
+    if (cw < 24 || ch < 24) return;
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const small = cw > 50 && ch > 50 ? pickFit(zoneKeys, Math.max(3, tier - 1), cw - 10, ch - 10) : null;
+    if (small && rng.chance(0.6) && footprintDry(cx, cy, small.d.w, small.d.h)) {
+      addBuilding(small.id, cx, cy, rng.chance(0.5) ? 0 : 2, small.variant);
+      return;
+    }
+    if (style === 'brick' || style === 'docks' || style === 'neon' || rng.chance(0.4)) {
+      // Parking lot
+      for (let px = x0 + 8; px < x1 - 6; px += 9) {
+        for (let py = y0 + 8; py < y1 - 6; py += 16) {
+          if (rng.chance(0.65)) addProp(style === 'docks' ? 'container' : rng.pick(['car', 'hatchback', 'van', 'taxi', 'pickup']), px, py, 1);
         }
       }
+      return;
+    }
+    for (let i = 0; i < Math.min(14, Math.floor((cw * ch) / 500)); i++) {
+      addProp(rng.weighted({ tree_round: 3, tree_blossom: style === 'pastel' ? 3 : 1, palm: style === 'pastel' ? 2 : 0, bench: 2, flower_bed: 2, planter: 2, picnic_table: 1 }), rng.range(x0 + 6, x1 - 6), rng.range(y0 + 6, y1 - 6), rng.int(0, 3));
     }
   }
 

@@ -176,9 +176,32 @@ function frame(now) {
       }
     }
     renderer.render(game, inRun && !paused ? dt : dt * 0.25);
-    if (inRun) ui.updateHud(game);
+    if (inRun) {
+      ui.updateHud(game);
+      updatePreyArrow();
+    }
   }
   requestAnimationFrame(frame);
+}
+
+const preyArrow = document.getElementById('preyArrow');
+function updatePreyArrow() {
+  const p = game.prey;
+  const k = game.kaiju;
+  const far = p && Math.hypot(p.x - k.x, p.y - k.y) > game.viewSpan() * 0.55;
+  if (!far || game.state !== 'playing' || game.boss) {
+    preyArrow.classList.add('hidden');
+    return;
+  }
+  const s = renderer.project(p.x, p.y, 0);
+  const cx = renderer.w / 2;
+  const cy = renderer.h / 2;
+  const a = Math.atan2(s.y - cy, s.x - cx);
+  const rx = cx - 40;
+  const ry = cy - 90;
+  const t = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
+  preyArrow.classList.remove('hidden');
+  preyArrow.style.transform = `translate(${cx + Math.cos(a) * t}px, ${cy + Math.sin(a) * t}px) rotate(${a}rad)`;
 }
 
 function boot() {

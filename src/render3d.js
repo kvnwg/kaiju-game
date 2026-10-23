@@ -25,7 +25,7 @@ const FOV = 32;
 const SKY = [
   { sun: 0xffd9a8, sunI: 0.95, elev: 0.6, az: -0.9, hemiS: 0xd8e0f0, hemiG: 0x7a6a4e, hemiI: 0.5, fog: 0xf0d6b8, night: 0, bloom: 0.22, water: 0x3a8ac0 },
   { sun: 0xff8a50, sunI: 0.85, elev: 0.26, az: -1.25, hemiS: 0x9a7ab8, hemiG: 0x4a3a4a, hemiI: 0.45, fog: 0xd08a98, night: 0.4, bloom: 0.55, water: 0x2a5a8a },
-  { sun: 0x8fa8ff, sunI: 0.32, elev: 0.95, az: 0.6, hemiS: 0x2a3770, hemiG: 0x0d0f1a, hemiI: 0.48, fog: 0x0c1230, night: 1, bloom: 1.0, water: 0x0e2a4a },
+  { sun: 0x8fa8ff, sunI: 0.32, elev: 0.95, az: 0.6, hemiS: 0x2a3770, hemiG: 0x0d0f1a, hemiI: 0.48, fog: 0x0c1230, night: 1, bloom: 0.75, water: 0x0e2a4a },
 ];
 
 function lerpKey(t) {
@@ -130,6 +130,9 @@ export class Renderer3D {
     this.remeshQueue = new Set();
     this.collapses = new Set();
     this.rubbleCache = new Map();
+    this.bInst = new Map();
+    this.rInst = new Map();
+    this.variantCounts = new Map();
     this.floaters = new Map();
     this.cityBuilt = null;
     this.frameTimes = [];
@@ -155,7 +158,7 @@ export class Renderer3D {
     if (this.quality.bloom && THREE.EffectComposer && THREE.UnrealBloomPass) {
       const c = new THREE.EffectComposer(this.renderer);
       c.addPass(new THREE.RenderPass(this.scene, this.camera));
-      this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.55, 0.8);
+      this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 0.86);
       c.addPass(this.bloom);
       this.tilt = this.quality.tilt ? new THREE.ShaderPass(TILT_SHIFT) : null;
       if (this.tilt) c.addPass(this.tilt);
@@ -203,6 +206,7 @@ export class Renderer3D {
     this.buildWater(city);
     this.buildProps(city);
     this.buildBridge(city);
+    for (const o of city.objects) if (o.kind === 'building') this.variantCounts.set(`${o.type}:${o.variant}`, (this.variantCounts.get(`${o.type}:${o.variant}`) || 0) + 1);
     this.lightGrid = new SpatialGrid(WORLD.width, WORLD.height, 256);
     for (const l of city.lights) {
       l.w = 0;
@@ -224,6 +228,7 @@ export class Renderer3D {
     for (const [, f] of this.floaters) f.el.remove();
     this.floaters.clear();
     this.propsDirty = true;
+    this.buildingsDirty = true;
     this.dusk = game.dusk;
     const k = game.kaiju;
     this.target.set(k.x, 0, k.y);
@@ -373,17 +378,21 @@ export class Renderer3D {
       else if (o.tier >= 3) pool(o.x, o.y, Math.max(o.w, o.h) * 0.7, 0xffc36b, 0.18);
     }
     const glow = new THREE.CanvasTexture(gv);
-    this.groundMat = new THREE.MeshLambertMaterial({ map, emissiveMap: glow, emissive: 0xffffff, emissiveIntensity: 0 });
+    this.groundMat = new THREE.MeshLambertMaterial({ map, emissiveMap: glow, emissive: 0xffffff, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 });
     const geo = new THREE.PlaneGeometry(WORLD.width, WORLD.height);
     geo.rotateX(-Math.PI / 2);
     const ground = new THREE.Mesh(geo, this.groundMat);
     ground.position.set(WORLD.width / 2, 0, WORLD.height / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
-    // Countryside beyond the map edge.
-    const outer = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.width * 4, WORLD.height * 4).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x3e6a34 }));
-    outer.position.set(WORLD.width * 1.5, -0.3, WORLD.height / 2);
-    this.scene.add(outer);
+    // Countryside beyond the map edge: strips around the map that never overlap the ground.
+    const outerMat = new THREE.MeshLambertMaterial({ color: 0x3e6a34 });
+    const big = 20000;
+    for (const [x0, z0, x1, z1] of [[WORLD.width, -big, WORLD.width + big, WORLD.height + big], [0, -big, WORLD.width, 0], [0, WORLD.height, WORLD.width, WORLD.height + big]]) {
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(-Math.PI / 2), outerMat);
+      strip.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
+      this.scene.add(strip);
+    }
   }
 
   buildWater(city) {
@@ -424,9 +433,9 @@ export class Renderer3D {
     normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
     normal.repeat.set(WORLD.width / 140, WORLD.height / 140);
     this.waterNormal = normal;
-    this.waterMat = new THREE.MeshPhongMaterial({ color: 0x3a8ac0, specular: 0xb0c8e0, shininess: 70, transparent: true, opacity: 0.9, alphaMap: mask, normalMap: normal, normalScale: new THREE.Vector2(0.5, 0.5), depthWrite: false });
+    this.waterMat = new THREE.MeshPhongMaterial({ color: 0x3a8ac0, specular: 0x4a5a6a, shininess: 45, transparent: true, opacity: 0.9, alphaMap: mask, normalMap: normal, normalScale: new THREE.Vector2(0.5, 0.5), depthWrite: false });
     const water = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.width, WORLD.height).rotateX(-Math.PI / 2), this.waterMat);
-    water.position.set(WORLD.width / 2, 0.5, WORLD.height / 2);
+    water.position.set(WORLD.width / 2, 1, WORLD.height / 2);
     water.renderOrder = 2;
     water.receiveShadow = true;
     this.scene.add(water);
@@ -434,8 +443,8 @@ export class Renderer3D {
     seaMat.alphaMap = null;
     seaMat.transparent = false;
     this.seaMat = seaMat;
-    const sea = new THREE.Mesh(new THREE.PlaneGeometry(8000, WORLD.height * 4).rotateX(-Math.PI / 2), seaMat);
-    sea.position.set(-4000, 0.4, WORLD.height / 2);
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(20000, WORLD.height + 40000).rotateX(-Math.PI / 2), seaMat);
+    sea.position.set(-10000, 1, WORLD.height / 2);
     this.scene.add(sea);
   }
 
@@ -585,70 +594,109 @@ export class Renderer3D {
     return v.frac;
   }
 
+  // Instanced mesh for one building variant (intact) or its rubble pile.
+  instFor(map, key, geo, cap) {
+    let e = map.get(key);
+    if (!e) {
+      const im = new THREE.InstancedMesh(geo, this.voxelMat, Math.max(1, cap));
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.frustumCulled = false;
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.count = 0;
+      this.scene.add(im);
+      e = { im, n: 0, cap: Math.max(1, cap) };
+      map.set(key, e);
+    }
+    return e;
+  }
+
+  // A building gets its own mesh only once it is hit, so it can lose chunks and fall.
   ensureMesh(o) {
     let rec = this.bld.get(o.id);
     if (rec && rec.mesh) return rec;
     if (!rec) {
-      rec = { obj: o, mesh: null, removed: null, geo: null, rubble: null };
+      rec = { obj: o, mesh: null, removed: null, geo: null };
       this.bld.set(o.id, rec);
     }
+    rec.v = this.variant(o);
     if (o.state === 'rubble') return rec;
-    const v = this.variant(o);
-    rec.v = v;
-    const mesh = new THREE.Mesh(rec.geo || v.geo, this.voxelMat);
+    const mesh = new THREE.Mesh(rec.geo || rec.v.geo, this.voxelMat);
     mesh.position.set(o.x, 0, o.y);
     mesh.rotation.y = (o.rot * Math.PI) / 2;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.scene.add(mesh);
     rec.mesh = mesh;
+    this.buildingsDirty = true;
     return rec;
   }
 
   disposeRec(rec) {
     if (rec.mesh) this.scene.remove(rec.mesh);
     if (rec.geo) rec.geo.dispose();
-    if (rec.rubble) this.scene.remove(rec.rubble);
     rec.mesh = null;
     rec.geo = null;
-    rec.rubble = null;
   }
 
-  streamBuildings(game, half) {
+  refreshBuildings(game, half) {
     const cx = this.target.x;
     const cz = this.target.z;
-    const R = half * 1.7 + 120;
-    const near = game.grid.query(cx - R, cz - R, cx + R, cz + R);
-    const want = [];
-    for (const o of near) {
+    const R = half * 1.7 + 160;
+    const last = this.lastBldAt;
+    const moved = !last || Math.hypot(cx - last.x, cz - last.z) > half * 0.08 || Math.abs(half - last.half) > half * 0.05;
+    if (!moved && !this.buildingsDirty) return;
+    this.lastBldAt = { x: cx, z: cz, half };
+    this.buildingsDirty = false;
+    for (const e of this.bInst.values()) e.n = 0;
+    for (const e of this.rInst.values()) e.n = 0;
+    const missing = [];
+    const m = this._pm;
+    for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
       if (o.kind !== 'building') continue;
-      let rec = this.bld.get(o.id);
-      if (o.state === 'rubble') {
-        if (!rec) {
-          rec = { obj: o, mesh: null, removed: null, geo: null, rubble: null };
-          this.bld.set(o.id, rec);
-        }
-        if (!rec.rubble && !rec.collapse) this.placeRubble(rec);
+      const rec = this.bld.get(o.id);
+      const key = `${o.type}:${o.variant}`;
+      const v = this.variants.get(key);
+      if (!v) {
+        missing.push(o);
         continue;
       }
-      if (o.state === 'intact' && (!rec || !rec.mesh)) want.push(o);
-    }
-    want.sort((a, b) => Math.hypot(a.x - cx, a.y - cz) - Math.hypot(b.x - cx, b.y - cz));
-    const t0 = performance.now();
-    for (const o of want) {
-      this.ensureMesh(o);
-      if (performance.now() - t0 > 8) break;
-    }
-    // Drop far-away meshes (shared geometry stays cached).
-    if (this.bld.size > 900) {
-      const far = R * 1.4;
-      for (const [id, rec] of this.bld) {
-        const o = rec.obj;
-        if (rec.collapse || Math.hypot(o.x - cx, o.y - cz) < far) continue;
-        if (rec.removed && o.state === 'intact') continue; // keep damage
-        this.disposeRec(rec);
-        this.bld.delete(id);
+      if (o.state === 'intact') {
+        if (rec && rec.mesh) continue;
+        const e = this.instFor(this.bInst, key, v.geo, this.variantCounts.get(key) || 1);
+        if (e.n >= e.cap) continue;
+        this._pv.set(o.x, 0, o.y);
+        this._pe.set(0, (o.rot * Math.PI) / 2, 0);
+        this._pq.setFromEuler(this._pe);
+        m.compose(this._pv, this._pq, this._ps);
+        e.im.setMatrixAt(e.n++, m);
+      } else if (!o.walkable && !(rec && rec.collapse)) {
+        const e = this.instFor(this.rInst, key, this.rubbleGeo(v), this.variantCounts.get(key) || 1);
+        if (e.n >= e.cap) continue;
+        const dir = o.fallDir || { x: 0, y: 0 };
+        this._pv.set(o.x + dir.x * o.w * 0.2, 0, o.y + dir.y * o.h * 0.2);
+        this._pe.set(0, (o.rot * Math.PI) / 2, 0);
+        this._pq.setFromEuler(this._pe);
+        m.compose(this._pv, this._pq, this._ps);
+        e.im.setMatrixAt(e.n++, m);
       }
+    }
+    for (const map of [this.bInst, this.rInst]) {
+      for (const e of map.values()) {
+        e.im.count = e.n;
+        e.im.visible = e.n > 0;
+        e.im.instanceMatrix.needsUpdate = true;
+      }
+    }
+    // Build new variants nearest first, within a frame budget; refill next frame.
+    if (missing.length) {
+      missing.sort((a, b) => Math.hypot(a.x - cx, a.y - cz) - Math.hypot(b.x - cx, b.y - cz));
+      const t0 = performance.now();
+      for (const o of missing) {
+        this.variant(o);
+        if (performance.now() - t0 > 10) break;
+      }
+      this.buildingsDirty = true;
     }
     let n = 0;
     for (const rec of this.remeshQueue) {
@@ -768,12 +816,17 @@ export class Renderer3D {
   destroyed(e) {
     const o = e.obj;
     if (o.kind === 'prop') return this.propBreak(o, e.dir);
-    const rec = this.bld.get(o.id);
+    this.buildingsDirty = true;
     const dist = Math.hypot(o.x - this.target.x, o.y - this.target.z);
-    if (!rec || !rec.mesh || dist > this.camDist * 2) {
-      if (rec) this.disposeRec(rec);
+    if (dist > this.camDist * 2) {
+      const rec = this.bld.get(o.id);
+      if (rec) {
+        this.disposeRec(rec);
+        this.bld.delete(o.id);
+      }
       return;
     }
+    const rec = this.ensureMeshFor(o);
     const size = Math.max(o.w, o.h);
     this.fx.dustCloud(o.x, 0, o.y, size * 0.6, 12);
     if (e.animated) {
@@ -782,10 +835,27 @@ export class Renderer3D {
       this.breakApart(rec, e.dir, 0.25, 50);
     } else {
       this.breakApart(rec, e.dir, 1, 90);
-      this.scene.remove(rec.mesh);
-      rec.mesh = null;
-      this.placeRubble(rec);
+      this.disposeRec(rec);
+      this.bld.delete(o.id);
     }
+  }
+
+  // Like ensureMesh, but works after the game already marked the building as collapsing.
+  ensureMeshFor(o) {
+    let rec = this.bld.get(o.id);
+    if (rec && rec.mesh) return rec;
+    if (!rec) {
+      rec = { obj: o, mesh: null, removed: null, geo: null };
+      this.bld.set(o.id, rec);
+    }
+    rec.v = this.variant(o);
+    const mesh = new THREE.Mesh(rec.geo || rec.v.geo, this.voxelMat);
+    mesh.position.set(o.x, 0, o.y);
+    mesh.rotation.y = (o.rot * Math.PI) / 2;
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    rec.mesh = mesh;
+    return rec;
   }
 
   updateCollapses(dt) {
@@ -809,11 +879,10 @@ export class Renderer3D {
       }
       if (p >= 1) {
         this.breakApart(rec, c.dir, 0.6, 90);
-        if (rec.mesh) this.scene.remove(rec.mesh);
-        rec.mesh = null;
-        rec.collapse = null;
+        this.disposeRec(rec);
+        this.bld.delete(o.id);
         this.collapses.delete(rec);
-        this.placeRubble(rec);
+        this.buildingsDirty = true;
         this.fx.dustCloud(o.x, 0, o.y, Math.max(o.w, o.h) * 0.8, 10);
       }
     }
@@ -823,8 +892,15 @@ export class Renderer3D {
     let g = this.rubbleCache.get(v.key);
     if (g) return g;
     const b = v.built;
-    const frac = this.fracture(v);
-    const colors = frac.chunks.slice().sort((a, c) => c.voxels.length - a.voxels.length).slice(0, 6).map((c) => c.color);
+    // Rubble takes the building's own most common bright colours plus concrete greys.
+    const tally = new Map();
+    const data = b.grid.data;
+    for (let i = 0; i < data.length; i += 7) {
+      const c = data[i] & 0xffffff;
+      if (!data[i] || ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) < 120) continue;
+      tally.set(c, (tally.get(c) || 0) + 1);
+    }
+    const colors = [...tally.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5).map((x) => x[0]);
     colors.push(0x8d8a83, 0x6f6c66, 0x4a4744);
     const nx = b.dims.bx + 4;
     const nz = b.dims.bz + 4;
@@ -838,21 +914,6 @@ export class Renderer3D {
     g = toGeometry(meshGrid(grid, { v: b.dims.v, ox: nx / 2, oz: nz / 2, jitter: 0.1 }));
     this.rubbleCache.set(v.key, g);
     return g;
-  }
-
-  placeRubble(rec) {
-    if (rec.rubble) return;
-    const o = rec.obj;
-    if (o.walkable) return;
-    const v = rec.v || this.variant(o);
-    const m = new THREE.Mesh(this.rubbleGeo(v), this.voxelMat);
-    const dir = o.fallDir || { x: 0, y: 0 };
-    m.position.set(o.x + dir.x * o.w * 0.2, 0, o.y + dir.y * o.h * 0.2);
-    m.rotation.y = (o.rot * Math.PI) / 2;
-    m.receiveShadow = true;
-    m.castShadow = true;
-    this.scene.add(m);
-    rec.rubble = m;
   }
 
   propBreak(o, dir) {
@@ -998,6 +1059,12 @@ export class Renderer3D {
     }
   }
 
+  // World position -> screen pixels (and whether it is in view).
+  project(x, y, h = 0) {
+    const v = new THREE.Vector3(x, h, y).project(this.camera);
+    return { x: ((v.x + 1) / 2) * this.w, y: ((1 - v.y) / 2) * this.h, behind: v.z > 1 };
+  }
+
   kaijuElevation(game) {
     const k = game.kaiju;
     for (const o of game.grid.query(k.x - 1, k.y - 1, k.x + 1, k.y + 1)) {
@@ -1061,8 +1128,9 @@ export class Renderer3D {
       this.target.z + Math.cos(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
     );
     this.camera.lookAt(this.target);
-    this.camera.near = Math.max(0.5, d * 0.05);
-    this.camera.far = d * 6;
+    // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
+    this.camera.near = Math.max(1, d * 0.25);
+    this.camera.far = d * 4.5;
     this.camera.updateProjectionMatrix();
     this.scene.fog.near = d * 1.05;
     this.scene.fog.far = d * 3.4;
@@ -1087,7 +1155,7 @@ export class Renderer3D {
     }
 
     const half = span * 0.75;
-    this.streamBuildings(game, half);
+    this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);

@@ -179,6 +179,25 @@ export class Game {
     return false;
   }
 
+  // The nearest thing worth eating at this size: guides the player when the area is cleared.
+  findPrey(maxR = 6000) {
+    const k = this.kaiju;
+    for (let R = 250; R <= maxR; R *= 2) {
+      let best = null;
+      let bestD = Infinity;
+      for (const o of this.grid.query(k.x - R, k.y - R, k.x + R, k.y + R)) {
+        if (o.state !== 'intact' || o.tier < k.stage || !canDamage(o.tier, k.stage, o.landmark)) continue;
+        const d = Math.hypot(o.x - k.x, o.y - k.y);
+        if (d < bestD) {
+          bestD = d;
+          best = o;
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
   // ---------------------------------------------------------------- main loop
   update(realDt) {
     if (this.state !== 'playing') return;
@@ -201,6 +220,11 @@ export class Game {
     this.updateObjects(dt);
     this.updateFires(dt);
     this.updateFx(dt);
+    this.preyT = (this.preyT || 0) - dt;
+    if (this.preyT <= 0) {
+      this.preyT = 1;
+      this.prey = this.findPrey();
+    }
     this.shake = Math.max(0, this.shake - realDt * 2.5);
   }
 

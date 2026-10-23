@@ -394,3 +394,24 @@ html, body {
   color: transparent;
 }
 .panel h3 + .segs { margin-top: 0; }
+
+/* Points toward the nearest thing worth eating once the area around you is cleared. */
+#preyArrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+#preyArrow span {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 28px;
+  height: 28px;
+  background: #7dff5a;
+  clip-path: polygon(100% 50%, 0 0, 22% 50%, 0 100%);
+  filter: drop-shadow(0 0 6px rgba(125, 255, 90, 0.8));
+  animation: pulse 1.2s ease-in-out infinite;
+}

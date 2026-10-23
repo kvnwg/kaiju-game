@@ -18,8 +18,8 @@ export const STAGES = [
   { n: 1, name: 'Hatchling', size: 'Human', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 15, pickOdds: null },
   { n: 2, name: 'Prowler', size: 'Backyard', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 220, pickOdds: { silver: 1 } },
   { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 1300, pickOdds: { silver: 1 } },
-  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 4500, pickOdds: { silver: 0.5, gold: 0.5 } },
-  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 15000, pickOdds: { gold: 1 } },
+  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 6500, pickOdds: { silver: 0.5, gold: 0.5 } },
+  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 26000, pickOdds: { gold: 1 } },
   { n: 6, name: 'Apex', size: 'Skyline', radius: 135, maxHp: 3200, damage: 5120, speed: 520, biomassToNext: Infinity, pickOdds: { gold: 0.7, prismatic: 0.3 } },
 ];
 export const MAX_STAGE = 6;
@@ -119,8 +119,8 @@ export const ENEMIES = {
   tank: { name: 'Tank', tier: 4, r: 15, hp: 1600, speed: 45, standoff: 220, range: 480, cd: 3.2, attack: 'shell', dmg: 40, aoe: 26, vehicle: true },
   infantry: { name: 'Rocket team', tier: 4, r: 4, hp: 240, speed: 50, standoff: 180, range: 360, cd: 2.8, attack: 'rocket', dmg: 10, proj: 220, soft: true },
   heli: { name: 'Gunship drone', tier: 4, r: 14, hp: 1200, speed: 140, standoff: 260, range: 450, cd: 3.2, attack: 'missile', dmg: 8, proj: 260, flying: true, vehicle: true },
-  jet: { name: 'Jet', tier: 5, r: 18, hp: 2000, speed: 1500, standoff: 0, range: 0, cd: 0, attack: 'strafe', dmg: 110, aoe: 52, flying: true, vehicle: true },
-  artillery: { name: 'Artillery', tier: 5, r: 18, hp: 3600, speed: 20, standoff: 900, range: 1300, cd: 4.2, attack: 'artillery', dmg: 130, aoe: 80, vehicle: true },
+  jet: { name: 'Jet', tier: 5, r: 18, hp: 2000, speed: 1500, standoff: 0, range: 0, cd: 0, attack: 'strafe', dmg: 95, aoe: 52, flying: true, vehicle: true },
+  artillery: { name: 'Artillery', tier: 5, r: 18, hp: 3600, speed: 20, standoff: 900, range: 1300, cd: 4.2, attack: 'artillery', dmg: 110, aoe: 80, vehicle: true },
   mech: { name: 'Mini-mech', tier: 5, r: 24, hp: 10000, speed: 75, standoff: 330, range: 560, cd: 2.4, attack: 'laser', dmg: 56, aoe: 23 },
 };
 

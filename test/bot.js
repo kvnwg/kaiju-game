@@ -80,6 +80,7 @@ export function botStep(game) {
     }
   }
   if (best) game.setInput(best.x - k.x, best.y - k.y);
+  else if (game.prey) game.setInput(game.prey.x - k.x, game.prey.y - k.y);
   else game.setInput(-1, Math.sin(game.time));
 }
 

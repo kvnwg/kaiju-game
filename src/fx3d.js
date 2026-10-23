@@ -200,7 +200,7 @@ export class FX {
       this.bits.add({ x, y: y + r * 0.3, z, vx: Math.cos(a) * sp, vy: r * (1 + Math.random() * 3), vz: Math.sin(a) * sp, drag: 1, lift: -r * 8, size: Math.max(0.3, r * 0.12), life: l, max: l, a: 1, ...rgb(0xffc04a) });
     }
     this.dustCloud(x, y, z, r * 0.9, 5, 0x5a5552);
-    this.flash(x, y + r * 0.5, z, 0xff9a3c, 3, r * 6, 0.35);
+    this.flash(x, y + r * 0.5, z, 0xff9a3c, 1.1, Math.min(r * 3, 400), 0.35);
   }
 
   sparks(x, y, z, color, size, n = 5) {
@@ -427,7 +427,7 @@ export class FX {
       m.scale.set(len, b.width * 0.35 * (0.6 + a * 0.4), b.width * 0.35 * (0.6 + a * 0.4));
       if (!b._lit) {
         b._lit = true;
-        this.flash((b.x1 + b.x2) / 2, h, (b.y1 + b.y2) / 2, b.color, 4, len * 0.7, b.max);
+        this.flash((b.x1 + b.x2) / 2, h, (b.y1 + b.y2) / 2, b.color, 1.4, Math.min(len * 0.5, 600), b.max);
       }
     }
   }
@@ -457,7 +457,7 @@ export class FX {
       if (!b._lit) {
         b._lit = true;
         const last = b.points[b.points.length - 1];
-        this.flash(last.x, game.kaiju.r, last.y, 0x8fd8ff, 3, game.kaiju.r * 8, 0.2);
+        this.flash(last.x, game.kaiju.r, last.y, 0x8fd8ff, 1.2, game.kaiju.r * 5, 0.2);
       }
     }
   }
