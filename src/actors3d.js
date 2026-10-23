@@ -57,6 +57,9 @@ export class Actors {
     this.scene = scene;
     this.makeMat = makeMat;
     this.mat = makeMat();
+    this.flashMat = makeMat();
+    this.flashMat.emissive.setRGB(1.25, 1.25, 1.22);
+    this.carFlash = [];
     this.kaiju = null;
     this.boss = null;
     this.unitGeo = {};
@@ -258,8 +261,11 @@ export class Actors {
     rig.root.position.set(b.x, 0, b.y);
     rig.root.rotation.y = -b.aim;
     animateRig(rig, b.walk * 4, b.state !== 'idle' || true, t, b.state === 'windup');
-    const fl = b.flash > 0 ? 0.5 : b.state === 'windup' ? 0.25 + 0.25 * Math.sin(t * 30) : 0;
-    rig.mat.emissive.setRGB(fl, fl * 0.4, fl * 0.2);
+    if (b.flash > 0) rig.mat.emissive.setRGB(0.75, 0.75, 0.72);
+    else {
+      const fl = b.state === 'windup' ? 0.25 + 0.25 * Math.sin(t * 30) : 0;
+      rig.mat.emissive.setRGB(fl, fl * 0.4, fl * 0.2);
+    }
   }
 
   unitGeometry(type) {
@@ -297,8 +303,8 @@ export class Actors {
       m.rotation.y = -(faceAim ? u.aim : u.heading) + (u.type === 'police' ? Math.sin(t * 9 + u.age) * 0.18 * st : 0);
       m.rotation.order = 'YXZ';
       m.rotation.z = u.type === 'heli' ? Math.sin(t * 3 + u.age) * 0.08 : u.type === 'cop' ? -st * 0.35 : 0;
-      const pulse = u.flash > 0 ? 1.25 : 1;
-      m.scale.setScalar(pulse);
+      m.material = u.flash > 0 ? this.flashMat : this.mat;
+      m.scale.setScalar(u.flash > 0 ? 1.15 : 1);
     }
     for (const [u, m] of this.unitMeshes) {
       if (live.has(u)) continue;
@@ -349,6 +355,7 @@ export class Actors {
 
   updateTraffic(game) {
     const counts = new Map();
+    let nf = 0;
     for (const c of game.traffic) {
       const im = this.trafficMesh(c.model, c.variant);
       const i = counts.get(im) || 0;
@@ -360,7 +367,23 @@ export class Actors {
       this._s.setScalar(c.flash > 0 ? 1.15 : 1);
       this._m.compose(this._v, this._q, this._s);
       im.setMatrixAt(i, this._m);
+      if (c.flash > 0) {
+        // White copy over a car that was hit but is still driving.
+        let fm = this.carFlash[nf];
+        if (!fm) {
+          fm = new THREE.Mesh(im.geometry, this.flashMat);
+          this.scene.add(fm);
+          this.carFlash.push(fm);
+        }
+        nf++;
+        fm.geometry = im.geometry;
+        fm.visible = true;
+        fm.position.copy(this._v);
+        fm.quaternion.copy(this._q);
+        fm.scale.setScalar(1.2);
+      }
     }
+    for (let j = nf; j < this.carFlash.length; j++) this.carFlash[j].visible = false;
     // Cars hurled by Car Toss: oversized and tumbling end over end.
     for (const p of game.projectiles) {
       if (p.kind !== 'car') continue;

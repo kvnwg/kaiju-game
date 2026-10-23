@@ -744,7 +744,7 @@ export class Game {
     if (isSnack(o.tier, stage) && !o.landmark) amount = o.hp;
     const frac = Math.min(1, amount / o.maxHp);
     o.hp -= amount;
-    o.flash = 0.12;
+    o.flash = 0.13;
     this.active.add(o);
     if (o.hp > 0) {
       if (o.structure) this.fxEvent({ t: 'hit', obj: o, x: at ? at.x : o.x, y: at ? at.y : o.y, dir: dir || { x: 0, y: 0 }, frac, h: Math.min(o.height, this.kaiju.r * 1.6) });
@@ -791,8 +791,10 @@ export class Game {
       if (o.structure && this.has('buildingEater')) this.heal(0.05);
     }
 
-    const big = o.structure && o.tier >= Math.max(2, k.stage - 1);
-    if (big) this.shake = Math.max(this.shake, Math.min(1, 0.2 + (o.tier - k.stage + 2) * 0.15));
+    // Every kill thumps the camera a little; the bigger it is next to you, the harder.
+    const rel = o.tier - k.stage;
+    const thump = o.landmark ? 1 : o.structure ? (rel >= -1 ? 0.32 + (rel + 1) * 0.16 : 0.2) : rel >= 0 ? 0.16 : 0.1;
+    this.shake = Math.max(this.shake, Math.min(1, thump));
     // Slow-motion beat on a big collapse, rationed so a rampage at Apex stays full speed.
     if (o.landmark || (o.tier >= 4 && o.tier >= k.stage && cause !== 'crush' && cause !== 'boss' && this.time >= this.slowmoReadyAt)) {
       this.slowmo = Math.max(this.slowmo, o.landmark ? 0.6 : 0.25);
@@ -1025,7 +1027,7 @@ export class Game {
     if (c.dead) return false;
     if (2 < this.kaiju.stage) amount = c.hp;
     c.hp -= amount;
-    c.flash = 0.1;
+    c.flash = 0.13;
     if (c.hp <= 0) this.killCar(c);
     return true;
   }
@@ -1034,6 +1036,7 @@ export class Game {
     if (c.dead) return;
     c.dead = true;
     const k = this.kaiju;
+    if (!c.silent) this.shake = Math.max(this.shake, k.stage <= 2 ? 0.2 : 0.1);
     const loot = lootFor(2, k.stage, 1);
     this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
     this.stats.scrap += loot.scrap * this.diff.loot;
@@ -1408,7 +1411,7 @@ export class Game {
     if (u.dead) return false;
     if (u.tier < this.kaiju.stage) amount = u.hp;
     u.hp -= amount;
-    u.flash = 0.1;
+    u.flash = 0.13;
     if (u.hp <= 0) this.killUnit(u);
     return true;
   }
@@ -1417,6 +1420,7 @@ export class Game {
     if (u.dead) return;
     u.dead = true;
     const k = this.kaiju;
+    this.shake = Math.max(this.shake, u.tier >= k.stage ? 0.3 : 0.14);
     const loot = lootFor(u.tier, k.stage);
     this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
     this.stats.scrap += loot.scrap * this.diff.loot * (this.has('scavenger') ? 1.2 : 1);

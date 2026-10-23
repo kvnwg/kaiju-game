@@ -134,6 +134,10 @@ export class Renderer3D {
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 1, 10000);
     this.uniforms = { uNight: { value: 0 } };
     this.voxelMat = makeVoxelMaterial(this.uniforms);
+    // Hit flash: the same voxels lit pure white for a few frames.
+    this.flashMat = makeVoxelMaterial(this.uniforms);
+    this.flashMat.emissive.setRGB(1.25, 1.25, 1.22);
+    this.flashPool = [];
     this.t = 0;
     this.dusk = 0;
     this.camDist = 200;
@@ -270,6 +274,35 @@ export class Renderer3D {
       l.h2 = l.h;
       this.lightGrid.insert({ ...l, w: 0, h: 0, ref: l });
     }
+  }
+
+  // Damaged-but-standing things flash white: hit buildings swap to the flash material, and
+  // instanced props get a white copy drawn just over them.
+  updateFlashes(game) {
+    for (const rec of this.bld.values()) {
+      if (!rec.mesh) continue;
+      const o = rec.obj;
+      rec.mesh.material = o.flash > 0 && o.state === 'intact' ? this.flashMat : this.voxelMat;
+    }
+    let n = 0;
+    for (const o of game.active) {
+      if (o.kind !== 'prop' || o.state !== 'intact' || !(o.flash > 0)) continue;
+      const e = this.propCache.get(`${o.type}:${o.variant}`);
+      if (!e) continue;
+      let m = this.flashPool[n];
+      if (!m) {
+        m = new THREE.Mesh(e.geo, this.flashMat);
+        this.scene.add(m);
+        this.flashPool.push(m);
+      }
+      n++;
+      m.geometry = e.geo;
+      m.visible = true;
+      m.position.set(o.x, 0, o.y);
+      m.rotation.set(0, (o.rot * Math.PI) / 2, 0);
+      m.scale.setScalar(1.06);
+    }
+    for (let i = n; i < this.flashPool.length; i++) this.flashPool[i].visible = false;
   }
 
   // A new run brings a new map: drop everything the previous city added to the scene.
@@ -1292,7 +1325,8 @@ export class Renderer3D {
     this.target.z += (lookZ - this.target.z) * Math.min(1, dt * 4);
     const elev = this.kaijuElevation(game);
     this.target.y += (elev + k.r * 0.6 - this.target.y) * Math.min(1, dt * 4);
-    const shake = game.shake * game.shake * k.r * 0.6;
+    // Shake scales with how much of the city is on screen, so a thump reads the same at every size.
+    const shake = game.shake * span * 0.022;
     const d = this.camDist;
     this.camera.position.set(
       this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
@@ -1343,6 +1377,7 @@ export class Renderer3D {
     }
     this.fx.update(dt, game);
     this.updateLights(game, key.night);
+    this.updateFlashes(game);
     this.updateFloaters(game);
 
     if (this.composer) this.composer.render(dt);
