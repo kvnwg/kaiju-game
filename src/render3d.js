@@ -11,6 +11,7 @@ import { VoxelGrid, hash3, shade } from './voxel.js';
 import { FX } from './fx3d.js';
 import { Actors, toGeometry } from './actors3d.js';
 import { Ambient } from './ambient3d.js';
+import { personModel } from './models.js';
 
 export const QUALITY = {
   high: { name: 'High', pixelRatio: 1.5, shadows: 2048, bloom: true, tilt: true, lights: 8 },
@@ -274,6 +275,19 @@ export class Renderer3D {
       l.h2 = l.h;
       this.lightGrid.insert({ ...l, w: 0, h: 0, ref: l });
     }
+  }
+
+  // Distinct voxel colours of a person look (skin, hair, shirt, trousers) for crumbs.
+  personColors(variant) {
+    this.pcols = this.pcols || new Map();
+    let cols = this.pcols.get(variant);
+    if (!cols) {
+      const set = new Set();
+      for (const v of personModel(variant).grid.data) if (v) set.add(v & 0xffffff);
+      cols = [...set];
+      this.pcols.set(variant, cols);
+    }
+    return cols;
   }
 
   // Damaged-but-standing things flash white: hit buildings swap to the flash material, and
@@ -1180,6 +1194,33 @@ export class Renderer3D {
         case 'sparks':
           this.fx.sparks(e.x, e.h, e.y, e.color, Math.max(0.3, game.kaiju.r * 0.1), 3);
           break;
+        case 'chomp': {
+          // The jaw snaps shut: cartoon crumbs in the eaten person's own colours tumble out.
+          const k = game.kaiju;
+          const m = this.actors.mouthWorld();
+          const cols = this.personColors(e.p.variant);
+          const sz = Math.max(0.16, k.r * 0.07);
+          for (let i = 0; i < 10; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = k.r * (0.6 + Math.random() * 1.4);
+            this.fx.addDebris({
+              x: m.x, y: m.y, z: m.z,
+              vx: Math.cos(a) * sp + k.facing.x * k.r, vy: k.r * (1.2 + Math.random() * 2.2), vz: Math.sin(a) * sp + k.facing.y * k.r,
+              sx: sz, sy: sz, sz, size: sz, color: cols[i % cols.length], life: 2 + Math.random() * 1.5,
+            });
+          }
+          this.fx.sparks(m.x, m.y, m.z, 0xffffff, Math.max(0.3, k.r * 0.22), 7);
+          break;
+        }
+        case 'swallow': {
+          const k = game.kaiju;
+          if (e.burp) {
+            const m = this.actors.mouthWorld();
+            this.fx.dustCloud(m.x, m.y, m.z, Math.max(0.6, k.r * 0.35), 3, 0xd8ffc8);
+            game.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.4, text: 'burp!', color: '#c8ffb2', life: 1, max: 1 });
+          }
+          break;
+        }
         case 'poof':
           this.fx.dustCloud(e.x, 1, e.y, 1.2, 3, 0xf2efe6);
           break;

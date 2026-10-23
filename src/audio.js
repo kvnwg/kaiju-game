@@ -126,6 +126,24 @@ export class Sfx {
     this.tone({ type: 'square', f0: 900, f1: 600, dur: 0.03, vol: 0.05 });
   }
 
+  squeak() {
+    if (!this.ok('squeak', 0.08)) return;
+    const f = 900 + Math.random() * 300;
+    this.tone({ type: 'square', f0: f, f1: f * 1.5, dur: 0.07, vol: 0.05 });
+  }
+
+  chomp() {
+    if (!this.ok('chomp', 0.06)) return;
+    this.noise({ dur: 0.07, vol: 0.2, f0: 2600, f1: 700, type: 'bandpass', q: 1.6 });
+    this.tone({ type: 'square', f0: 220, f1: 90, dur: 0.06, vol: 0.1 });
+  }
+
+  burp() {
+    if (!this.ok('burp', 0.4)) return;
+    this.tone({ type: 'sawtooth', f0: 110, f1: 70, dur: 0.32, vol: 0.12, attack: 0.03 });
+    this.tone({ type: 'sine', f0: 90, f1: 60, dur: 0.32, vol: 0.18, attack: 0.03 });
+  }
+
   coin(combo) {
     if (!this.ok('coin', 0.035)) return;
     const step = Math.min(24, combo);
@@ -256,7 +274,14 @@ export class Sfx {
           this.boom(1.5);
           break;
         case 'eat':
+          this.squeak();
+          break;
+        case 'chomp':
+          this.chomp();
+          break;
+        case 'swallow':
           this.gulp();
+          if (e.burp) this.burp();
           break;
         case 'orb':
           this.coin(e.combo || 0);

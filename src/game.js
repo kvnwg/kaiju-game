@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor,
+  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, rollTier, completedSets } from './augments.js';
 import { generateCity, isWater, useCity } from './world.js';
@@ -12,7 +12,7 @@ import { PERSON_VARIANTS } from './models.js';
 // Aim time before a projectile leaves the barrel (seconds); shells, artillery and lasers
 // already telegraph with ground markers.
 const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6 };
-const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'gone']);
+const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
 const cityCache = new Map(); // seed -> generated city (small; generation takes ~0.5 s)
 
 export { distToRect, distToSegment };
@@ -503,7 +503,10 @@ export class Game {
       if (u.tier < k.stage && Math.hypot(u.x - k.x, u.y - k.y) < k.r + u.r) this.killUnit(u);
     }
     for (const p of this.people) {
-      if (p.state !== 'flung' && k.stage > 1 && Math.hypot(p.x - k.x, p.y - k.y) < k.r + 1) this.flingPerson(p, true);
+      if (!p.taken && k.stage > 1 && Math.hypot(p.x - k.x, p.y - k.y) < k.r + 1) {
+        if (k.stage <= 2) this.eatPerson(p);
+        else this.flingPerson(p, true);
+      }
     }
     for (const c of this.traffic) {
       if (!c.dead && k.stage >= 2 && Math.hypot(c.x - k.x, c.y - k.y) < k.r + 4) this.killCar(c);
@@ -577,7 +580,7 @@ export class Game {
     };
     for (const u of this.units) if (!u.dead && u.type !== 'jet') consider(u, Math.hypot(u.x - k.x, u.y - k.y) - u.r);
     if (best) return best;
-    if (k.stage === 1) for (const p of this.people) if (p.state !== 'flung') consider(p, Math.hypot(p.x - k.x, p.y - k.y) - 0.8);
+    if (k.stage === 1) for (const p of this.people) if (!p.taken) consider(p, Math.hypot(p.x - k.x, p.y - k.y) - 0.8);
     if (best) return best;
     if (k.stage <= 2) for (const c of this.traffic) if (!c.dead) consider(c, Math.hypot(c.x - k.x, c.y - k.y) - 4);
     if (best) return best;
@@ -591,7 +594,7 @@ export class Game {
   damageTarget(t, amount, dir, cause = 'hit') {
     if (t.isBoss) return this.damageBoss(amount);
     if (t.isUnit) return this.damageUnit(t, amount);
-    if (t.isPerson) return this.flingPerson(t, false);
+    if (t.isPerson) return this.kaiju.stage <= 2 && cause === 'bite' ? this.eatPerson(t) : this.flingPerson(t, false);
     if (t.isCar) return this.damageCar(t, amount);
     const k = this.kaiju;
     return this.damageObject(t, amount, dir, cause, closestPoint(k.x, k.y, t));
@@ -606,7 +609,7 @@ export class Game {
     k.attackCount++;
     k.facing = k.moving ? k.facing : dir;
     if (atk.kind === 'bite') {
-      this.damageTarget(target, dmg, dir);
+      this.damageTarget(target, dmg, dir, 'bite');
     } else if (atk.kind === 'pound') {
       const radius = k.r * atk.range;
       this.areaDamage(k.x, k.y, radius, dmg, 'hit', true);
@@ -617,7 +620,7 @@ export class Game {
       const chain = [target];
       let cur = target;
       let amount = dmg;
-      this.damageTarget(target, amount, dir);
+      this.damageTarget(target, amount, dir, target.isPerson ? 'bite' : 'hit');
       for (let i = 0; i < atk.chains; i++) {
         const next = this.nearestChainTarget(cur, chain, k.r * 3);
         if (!next) break;
@@ -660,7 +663,7 @@ export class Game {
       this.damageObject(o, amount, norm(o.x - x, o.y - y), cause, closestPoint(x, y, o));
     }
     for (const u of this.units) if (!u.dead && Math.hypot(u.x - x, u.y - y) < radius + u.r) this.damageUnit(u, amount);
-    for (const p of this.people) if (p.state !== 'flung' && Math.hypot(p.x - x, p.y - y) < radius) this.flingPerson(p, false, { x, y });
+    for (const p of this.people) if (!p.taken && Math.hypot(p.x - x, p.y - y) < radius) this.flingPerson(p, false, { x, y });
     for (const c of this.traffic) if (!c.dead && Math.hypot(c.x - x, c.y - y) < radius + 4) this.damageCar(c, amount);
     const b = this.boss;
     if (hitsBoss && b && !b.dead && b.state !== 'enter' && Math.hypot(b.x - x, b.y - y) < radius + b.r) this.damageBoss(amount);
@@ -971,6 +974,19 @@ export class Game {
     const span = this.viewSpan();
     const panicR = k.r * 10 + 25;
     for (const p of this.people) {
+      if (p.state === 'eaten') {
+        // The renderer animates the snatch-toss-gulp from p.t; the sim just keeps time.
+        p.t += dt;
+        if (!p.chomped && p.t >= EAT_TIME * 0.62) {
+          p.chomped = true;
+          this.fxEvent({ t: 'chomp', p });
+        }
+        if (p.t >= EAT_TIME) {
+          p.state = 'gone';
+          this.fxEvent({ t: 'swallow', p, burp: this.rng.chance(0.12) });
+        }
+        continue;
+      }
       if (p.state === 'flung') {
         p.vz -= 60 * dt;
         p.x += p.vx * dt;
@@ -1025,8 +1041,32 @@ export class Game {
     }
   }
 
+  // While the kaiju is small it eats people whole: a snatch, a toss, a chomp and a gulp.
+  eatPerson(p) {
+    if (p.taken) return true;
+    const k = this.kaiju;
+    p.taken = true;
+    p.state = 'eaten';
+    p.t = 0;
+    p.x0 = p.x;
+    p.y0 = p.y;
+    p.chomped = false;
+    this.stats.people++;
+    const loot = lootFor(1, k.stage, 1);
+    this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
+    this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
+    if (k.stage === 1) this.heal(0.01);
+    if (!k.anim || k.anim.kind === 'eat') k.anim = { kind: 'eat', t: EAT_TIME, max: EAT_TIME };
+    const toward = norm(p.x - k.x, p.y - k.y);
+    if (!k.moving && (toward.x || toward.y)) k.facing = toward;
+    this.fxEvent({ t: 'eat', x: p.x, y: p.y });
+    this.bumpCombo();
+    return true;
+  }
+
   flingPerson(p, crushed, from = null) {
-    if (p.state === 'flung') return true;
+    if (p.taken) return true;
+    p.taken = true;
     const k = this.kaiju;
     const src = from || k;
     const d = norm(p.x - src.x, p.y - src.y);
@@ -1042,8 +1082,7 @@ export class Game {
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     this.fxEvent({ t: 'poof', x: p.x, y: p.y, small: crushed });
-    this.fxEvent({ t: 'eat', x: p.x, y: p.y });
-    if (k.stage <= 2) this.bumpCombo();
+    this.bumpCombo();
     return true;
   }
 
@@ -1148,7 +1187,7 @@ export class Game {
       this.damageObject(o, dmg, dir, 'hit', closestPoint(x1, y1, o));
     }
     for (const u of this.units) if (!u.dead && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, dmg);
-    for (const p of this.people) if (p.state !== 'flung' && distToSegment(p.x, p.y, x1, y1, x2, y2) < width / 2) this.flingPerson(p, false);
+    for (const p of this.people) if (!p.taken && distToSegment(p.x, p.y, x1, y1, x2, y2) < width / 2) this.flingPerson(p, false);
     for (const c of this.traffic) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + 4) this.damageCar(c, dmg);
     const b = this.boss;
     if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(dmg);
@@ -1187,7 +1226,7 @@ export class Game {
         const dmg = this.baseDamage() * 0.5 * 0.25;
         for (const o of this.objectsNear(f.x, f.y, f.r)) this.damageObject(o, dmg, null, 'hit', { x: f.x, y: f.y });
         for (const u of this.units) if (!u.dead && !u.flying && Math.hypot(u.x - f.x, u.y - f.y) < f.r + u.r) this.damageUnit(u, dmg);
-        for (const p of this.people) if (p.state !== 'flung' && Math.hypot(p.x - f.x, p.y - f.y) < f.r) this.flingPerson(p, false, f);
+        for (const p of this.people) if (!p.taken && Math.hypot(p.x - f.x, p.y - f.y) < f.r) this.flingPerson(p, false, f);
         const b = this.boss;
         if (b && !b.dead && b.state !== 'enter' && Math.hypot(b.x - f.x, b.y - f.y) < f.r + b.r) this.damageBoss(dmg);
       }

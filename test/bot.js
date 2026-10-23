@@ -52,7 +52,7 @@ export function botStep(game) {
   }
   // Small kaiju hunt people and cars before buildings are worth it.
   const prey = [];
-  if (k.stage === 1) prey.push(...game.people.filter((p) => p.state !== 'flung'));
+  if (k.stage === 1) prey.push(...game.people.filter((p) => !p.taken));
   if (k.stage <= 2) prey.push(...game.traffic.filter((c) => !c.dead));
   let best0 = null;
   let bestD0 = game.viewSpan() * 0.6;

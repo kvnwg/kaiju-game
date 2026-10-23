@@ -4,6 +4,7 @@ import { meshGrid } from './mesher.js';
 import { KAIJU_MODELS, UNIT_MODELS, bossModel, personModel, PERSON_VARIANTS } from './models.js';
 import { buildProp } from './props.js';
 import { arcHeight } from './fx3d.js';
+import { EAT_TIME } from './config.js';
 
 export function toGeometry(m) {
   const g = new THREE.BufferGeometry();
@@ -72,6 +73,11 @@ export class Actors {
 
     // Crowd: one instanced mesh per person look.
     this.peopleMeshes = [];
+    const pm0 = personModel(0);
+    this.personH = pm0.grid.ny * pm0.v;
+    this._mouth = new THREE.Vector3();
+    this._up = new THREE.Vector3();
+    this._half = new THREE.Vector3();
     for (let i = 0; i < PERSON_VARIANTS; i++) {
       const pm = personModel(i);
       const geo = toGeometry(meshGrid(pm.grid, { v: pm.v, ox: pm.origin.x, oz: pm.origin.z, jitter: 0.03 }));
@@ -92,14 +98,21 @@ export class Actors {
     const rig = partsGroup(KAIJU_MODELS[id](), kmat);
     rig.mat = kmat;
     rig.yaw = null;
+    // Mouth: near the tip of the jaw, in the jaw part's own space.
+    const jp = rig.model.parts.find((pp) => pp.name === 'jaw');
+    rig.mouthLocal = jp ? new THREE.Vector3(jp.grid.nx * 0.65 - jp.pivot.x, jp.grid.ny - jp.pivot.y + 0.5, jp.grid.nz / 2 - jp.pivot.z) : new THREE.Vector3(6, 6, 0);
     // X-ray silhouette: drawn only where the kaiju is hidden behind buildings, so you never
     // lose sight of it under a roof.
-    const ghost = new THREE.MeshBasicMaterial({ color: 0x9cff7a, transparent: true, opacity: 0.38, depthFunc: THREE.GreaterDepth, depthWrite: false });
+    // It is drawn after the city but before the kaiju itself, so the kaiju's own body never
+    // counts as cover (no ghost over its own tail or legs).
+    const ghost = new THREE.MeshBasicMaterial({ color: 0x356f26, blending: THREE.AdditiveBlending, depthFunc: THREE.GreaterDepth, depthWrite: false });
     const meshes = [];
     rig.root.traverse((m) => m.isMesh && meshes.push(m));
     for (const m of meshes) {
+      m.renderOrder = 10;
       const g = new THREE.Mesh(m.geometry, ghost);
-      g.renderOrder = 30;
+      g.renderOrder = 5;
+      g.castShadow = false;
       m.add(g);
     }
     this.kaiju = rig;
@@ -149,6 +162,7 @@ export class Actors {
   // Poses for augment moves layered over the walk cycle. Returns an emissive glow (rgb).
   movePose(rig, k, t) {
     const a = k.anim;
+    if (rig.nodes.body) rig.nodes.body.scale.set(1, 1, 1);
     if (!a) return [0, 0, 0];
     const f = 1 - a.t / a.max; // 0 -> 1 through the move
     const n = rig.nodes;
@@ -166,6 +180,48 @@ export class Actors {
         });
         rig.root.rotation.y += (a.side || 1) * 0.6 * (f < 0.4 ? -f : f - 0.8);
         return [0.25 * swing, 0.2 * swing, 0.1 * swing];
+      }
+      case 'eat': {
+        // Lunge with the jaw wide, track the toss upward, snap shut, then a swallow with a
+        // throat bulge and a happy little head shake.
+        const n0 = rig.nodes;
+        let head = 0;
+        let jaw = 0;
+        let lean = 0;
+        let lunge = 0;
+        if (f < 0.3) {
+          const u = f / 0.3;
+          head = -0.35 * Math.sin(u * Math.PI * 0.5);
+          jaw = -1.05;
+          lean = -0.18 * u;
+          lunge = Math.sin(u * Math.PI * 0.5);
+        } else if (f < 0.62) {
+          const u = (f - 0.3) / 0.32;
+          head = -0.35 + 0.8 * u;
+          jaw = -1.15;
+          lean = -0.18 + 0.25 * u;
+          lunge = 1 - u;
+        } else if (f < 0.7) {
+          const u = (f - 0.62) / 0.08;
+          head = 0.45 - 0.15 * u;
+          jaw = -1.15 * (1 - u);
+          lean = 0.07;
+        } else {
+          const u = (f - 0.7) / 0.3;
+          head = 0.3 * (1 - u) + Math.sin(t * 32) * 0.12 * (1 - u);
+          jaw = 0;
+          lean = 0.07 * (1 - u);
+          if (n0.body) {
+            const bulge = Math.sin(u * Math.PI);
+            n0.body.scale.set(1 - 0.03 * bulge, 1 + 0.09 * bulge, 1 + 0.06 * bulge);
+          }
+        }
+        if (n0.head) n0.head.rotation.z = head;
+        if (n0.jaw) n0.jaw.rotation.z = jaw;
+        if (n0.body) n0.body.rotation.z += lean;
+        rig.root.position.x += k.facing.x * k.r * 0.18 * lunge;
+        rig.root.position.z += k.facing.y * k.r * 0.18 * lunge;
+        return [0, 0, 0];
       }
       case 'spin': {
         // Whole body whirls; the tail streams out.
@@ -313,13 +369,80 @@ export class Actors {
     }
   }
 
+  // World position of the kaiju's mouth this frame.
+  mouthWorld(out = this._mouth) {
+    const rig = this.kaiju;
+    const jaw = rig && (rig.nodes.jaw || rig.nodes.head);
+    if (!jaw) return out.set(0, 0, 0);
+    rig.root.updateMatrixWorld(true);
+    return jaw.localToWorld(out.copy(rig.mouthLocal));
+  }
+
+  // Snatch, toss, chomp, gulp: an eaten person flies from the ground into the actual mouth.
+  placeEaten(p, k, t) {
+    const f = Math.min(1, p.t / EAT_TIME);
+    const mouth = this.mouthWorld();
+    const fx = k.facing.x;
+    const fz = k.facing.y;
+    const apexX = mouth.x + fx * k.r * 0.4;
+    const apexY = mouth.y + k.r * 1.5;
+    const apexZ = mouth.z + fz * k.r * 0.4;
+    let x;
+    let y;
+    let z;
+    let rx = 0;
+    let rz = 0;
+    let s;
+    if (f < 0.3) {
+      // Snatch: yanked up off the ground, limbs flailing.
+      const u = 1 - (1 - f / 0.3) * (1 - f / 0.3);
+      x = p.x0 + (apexX - p.x0) * u;
+      y = apexY * u;
+      z = p.y0 + (apexZ - p.y0) * u;
+      rx = Math.sin(t * 45 + p.phase) * 0.6;
+      rz = Math.cos(t * 38 + p.phase) * 0.5;
+      s = 1 - 0.35 * u;
+    } else if (f < 0.62) {
+      // Toss: flipped over the snout and dropped head-first into the open jaw.
+      const u = (f - 0.3) / 0.32;
+      const e = u * u;
+      x = apexX + (mouth.x - apexX) * e;
+      y = apexY + (mouth.y - apexY) * e + Math.sin(u * Math.PI) * k.r * 0.3;
+      z = apexZ + (mouth.z - apexZ) * e;
+      rx = Math.PI * 1.4 * u;
+      rz = Math.sin(t * 30) * 0.3;
+      s = 0.65 - 0.15 * u;
+    } else {
+      // Gulp: down the hatch, sliding back into the throat as it shrinks away.
+      const u = (f - 0.62) / 0.38;
+      x = mouth.x - fx * k.r * 0.35 * u;
+      y = mouth.y - k.r * 0.12 * u;
+      z = mouth.z - fz * k.r * 0.35 * u;
+      rx = Math.PI * 1.4;
+      s = 0.5 * (1 - u) * (1 - u);
+    }
+    // Spin about the body's middle rather than the feet.
+    this._e.set(rx, -Math.atan2(fz, fx), rz);
+    this._q.setFromEuler(this._e);
+    this._half.set(0, this.personH * 0.5 * s, 0).applyQuaternion(this._q);
+    this._v.set(x - this._half.x, y - this._half.y, z - this._half.z);
+    this._s.setScalar(Math.max(0.001, s));
+  }
+
   updatePeople(game, t) {
     const counts = new Array(PERSON_VARIANTS).fill(0);
     const m = this._m;
+    const k = game.kaiju;
     for (const p of game.people) {
       const im = this.peopleMeshes[p.variant];
       const i = counts[p.variant]++;
       if (i >= 160) continue;
+      if (p.state === 'eaten') {
+        this.placeEaten(p, k, t);
+        m.compose(this._v, this._q, this._s);
+        im.setMatrixAt(i, m);
+        continue;
+      }
       const bob = p.state === 'flung' ? 0 : Math.abs(Math.sin(p.phase)) * 0.35;
       this._v.set(p.x, p.z + bob, p.y);
       if (p.state === 'flung') this._e.set(p.spin, -p.heading, p.spin * 0.7);

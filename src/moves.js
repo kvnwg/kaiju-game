@@ -82,7 +82,7 @@ export class MoveSystem {
     for (const u of g.units) if (!u.dead && u.type !== 'jet') add(u, Math.hypot(u.x - k.x, u.y - k.y) - u.r);
     const threats = out.length;
     for (const c of g.traffic) if (!c.dead) add(c, Math.hypot(c.x - k.x, c.y - k.y) + reach * 0.15);
-    if (k.stage <= 2) for (const p of g.people) if (p.state !== 'flung') add(p, Math.hypot(p.x - k.x, p.y - k.y) + reach * 0.2);
+    if (k.stage <= 2) for (const p of g.people) if (!p.taken) add(p, Math.hypot(p.x - k.x, p.y - k.y) + reach * 0.2);
     if (out.length < max || threats === 0) {
       for (const o of g.objectsNear(k.x, k.y, reach)) {
         if (o.state !== 'intact' || !canDamage(o.tier, k.stage, o.landmark) || o.walkable) continue;
@@ -110,7 +110,7 @@ export class MoveSystem {
       if (inArc(cp.x, cp.y) || inArc(o.x, o.y, Math.min(o.w, o.h) / 2)) g.damageObject(o, dmg, norm(o.x - x, o.y - y), 'hit', cp);
     }
     for (const u of g.units) if (!u.dead && !u.flying && inArc(u.x, u.y, u.r)) g.damageUnit(u, dmg);
-    for (const p of g.people) if (p.state !== 'flung' && inArc(p.x, p.y)) g.flingPerson(p, false, { x, y });
+    for (const p of g.people) if (!p.taken && inArc(p.x, p.y)) g.flingPerson(p, false, { x, y });
     for (const c of g.traffic) if (!c.dead && inArc(c.x, c.y, 4)) g.damageCar(c, dmg);
     const b = g.boss;
     if (b && !b.dead && b.state !== 'enter' && inArc(b.x, b.y, b.r)) g.damageBoss(dmg);
@@ -178,7 +178,7 @@ export class MoveSystem {
           // Drag the small stuff in.
           const pull = reach * 1.6;
           for (const p of g.people) {
-            if (p.state === 'flung') continue;
+            if (p.taken) continue;
             const d = Math.hypot(p.x - k.x, p.y - k.y);
             if (d < pull * 1.5 && d > 0.1) {
               p.x += ((k.x - p.x) / d) * pull * 0.9 * dt;
@@ -310,7 +310,7 @@ export class MoveSystem {
     const color = echo ? GHOST : 0xffe9a8;
     for (let i = 0; i < 3; i++) g.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: radius * (0.7 + i * 0.15), life: 0.6 + i * 0.15, max: 0.6 + i * 0.15, color, width: k.r * (0.35 - i * 0.08) });
     for (const u of g.units) if (!u.dead && u.def.soft && Math.hypot(u.x - k.x, u.y - k.y) < radius) u.fear = 3;
-    for (const p of g.people) if (p.state !== 'flung' && Math.hypot(p.x - k.x, p.y - k.y) < radius * 0.6) g.flingPerson(p, false, k);
+    for (const p of g.people) if (!p.taken && Math.hypot(p.x - k.x, p.y - k.y) < radius * 0.6) g.flingPerson(p, false, k);
     // Shatter the windows nearby: every building in range gets chipped.
     for (const o of g.objectsNear(k.x, k.y, radius * 0.7)) {
       if (o.structure && o.state === 'intact') g.damageObject(o, this.base() * (g.has('sonicRoar') ? 4 : 0.5), norm(o.x - k.x, o.y - k.y), 'hit', closestPoint(k.x, k.y, o));

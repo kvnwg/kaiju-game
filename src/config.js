@@ -160,3 +160,6 @@ export const LOSS_SCRAP_KEEP = 0.5;
 
 // Ambient life: civilians and traffic near the kaiju.
 export const CROWD = { people: 55, traffic: 22, personHp: 4, carHp: 30 };
+
+// How long eating one person takes: snatch, toss, chomp, gulp (seconds).
+export const EAT_TIME = 0.8;

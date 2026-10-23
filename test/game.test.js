@@ -230,3 +230,24 @@ test('smashing something your size freezes time for a moment (hitstop)', () => {
   g.update(1 / 60);
   assert.ok(g.time - t0 < 0.005, 'simulation barely moves during hitstop');
 });
+
+test('a small kaiju eats people whole: snatch, chomp, swallow', () => {
+  const g = new Game({ seed: 5 });
+  const k = g.kaiju;
+  const p = g.people.find((q) => !q.taken);
+  k.x = p.x - 2;
+  k.y = p.y;
+  k.attackCd = 0;
+  const eaten0 = g.stats.people;
+  g.performAttack(p);
+  assert.equal(p.state, 'eaten');
+  assert.equal(g.stats.people, eaten0 + 1);
+  assert.equal(k.anim.kind, 'eat');
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) {
+    g.update(1 / 30);
+    for (const e of g.drainVfx()) seen.add(e.t);
+  }
+  assert.ok(seen.has('chomp') && seen.has('swallow'));
+  assert.ok(!g.people.includes(p), 'swallowed');
+});
