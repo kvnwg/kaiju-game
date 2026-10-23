@@ -129,12 +129,25 @@ export const ENEMIES = {
 export const ESCALATION = [
   null,
   { weights: { cop: 1 }, maxAlive: 3, interval: 6, firstDelay: 12 },
-  { weights: { police: 3, dog: 2, cop: 1 }, maxAlive: 5, interval: 4 },
-  { weights: { swat: 3, roadblock: 1, police: 1, netter: 1 }, maxAlive: 6, interval: 4 },
-  { weights: { tank: 3, infantry: 2, heli: 2, swat: 1, netter: 1 }, maxAlive: 7, interval: 3.8 },
-  { weights: { tank: 1, mech: 3, artillery: 2, heli: 1, battery: 0.6 }, maxAlive: 9, interval: 4, jetEvery: 7 },
-  { weights: { mech: 2, artillery: 1, tank: 1, battery: 0.6, netter: 0.5 }, maxAlive: 10, interval: 3.5, jetEvery: 7 },
+  { weights: { police: 3, dog: 2, cop: 2 }, maxAlive: 5, interval: 4 },
+  { weights: { swat: 3, roadblock: 1, police: 2, netter: 1, dog: 1 }, maxAlive: 6, interval: 3.5 },
+  { weights: { tank: 2, infantry: 1.5, heli: 1.5, swat: 2, police: 2, netter: 1 }, maxAlive: 7, interval: 3.2 },
+  { weights: { mech: 1.5, artillery: 1, tank: 2, infantry: 2, heli: 1.5, swat: 1, battery: 0.5 }, maxAlive: 9, interval: 3, jetEvery: 7 },
+  { weights: { mech: 1.5, artillery: 1, tank: 2, infantry: 2, heli: 1.5, swat: 1, battery: 0.5, netter: 0.5 }, maxAlive: 10, interval: 3, jetEvery: 7 },
 ];
+
+// Swarms. The military answers with numbers: squads instead of single units, and a field cap
+// that grows with size. Every unit is also scaled up to the kaiju: a tank sent against the Apex
+// is as big next to it as one sent against the Titan (and hits as hard), but anything scaled
+// up from a smaller size still breaks in one hit, so swarms can be stomped.
+export const SWARM = {
+  maxAlive: [0, 6, 12, 18, 24, 30, 36],
+  squad: { cop: 3, police: 2, dog: 3, swat: 2, netter: 1, roadblock: 1, tank: 2, infantry: 2, heli: 1, artillery: 1, mech: 1, battery: 1, jet: 1 },
+  liftSquad: 2, // squads of scaled-up units are this many times bigger
+  dmg: 0.5, // per-unit damage, since there are so many of them
+  dmgPerSize: 1.8, // damage multiplier per size a unit is scaled up
+  loot: 0.5, // swarm units are worth less each
+};
 
 // Pressure. Destruction fills a threat meter (0-100) that drains a few seconds after you stop;
 // threat speeds up and swells the military's response. Every so often a telegraphed strike

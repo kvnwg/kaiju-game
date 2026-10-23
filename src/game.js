@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING,
+  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -272,7 +272,7 @@ export class Game {
   placeOnRoad(u) {
     const r = u.road;
     const n = norm((r.x1 - r.x0) * u.dir, (r.y1 - r.y0) * u.dir);
-    const lane = u.type === 'roadblock' ? 0 : 12;
+    const lane = u.type === 'roadblock' ? 0 : Math.min(12 * (u.scale || 1), 26);
     u.x = r.x0 + (r.x1 - r.x0) * u.t - n.y * lane;
     u.y = r.y0 + (r.y1 - r.y0) * u.t + n.x * lane;
     u.heading = u.type === 'roadblock' ? Math.atan2(n.x, -n.y) : Math.atan2(n.y, n.x);
@@ -1287,7 +1287,7 @@ export class Game {
     const alive = this.units.filter((u) => !u.dead && u.type !== 'jet').length;
     if (dir.spawnT <= 0) {
       dir.spawnT = esc.interval * this.rng.range(0.7, 1.3);
-      if (alive < Math.round(esc.maxAlive * (1 + th * 0.8))) this.spawnGroup(this.rng.weighted(esc.weights));
+      if (alive < Math.round(SWARM.maxAlive[k.stage] * (1 + th * 0.8))) this.spawnGroup(this.rng.weighted(esc.weights));
     }
     if (esc.jetEvery) {
       dir.jetT -= dt * (1 + th);
@@ -1314,13 +1314,16 @@ export class Game {
     }
   }
 
-  spawnGroup(type, pos = this.spawnPoint(type)) {
-    const count = type === 'infantry' ? 2 : type === 'cop' ? 2 : 1;
-    const r = ENEMIES[type].r;
+  // A squad: a few of the same unit in a loose cluster.
+  spawnGroup(type, pos = this.spawnPoint(type), count = null) {
+    const sd = this.scaledDef(type);
+    if (count === null) count = (SWARM.squad[type] || 1) * (sd.lift ? SWARM.liftSquad : 1);
+    const r = sd.r;
     const out = [];
     for (let i = 0; i < count; i++) {
-      const x = pos.x + i * r * 2.5;
-      const y = pos.y + (i % 2) * r * 2.5;
+      const a = i * 2.4;
+      const x = pos.x + Math.cos(a) * r * 2.6 * Math.sqrt(i);
+      const y = pos.y + Math.sin(a) * r * 2.6 * Math.sqrt(i);
       const ok = !isWater(x, y) && !this.blockedAt(x, y, r);
       out.push(this.spawnUnit(type, ok ? x : pos.x, ok ? y : pos.y));
     }
@@ -1340,9 +1343,10 @@ export class Game {
     for (let i = 0; i < n; i++) {
       const type = this.rng.weighted(esc.weights);
       const a = a0 + (i % 3) * 2.1 + this.rng.range(-0.3, 0.3);
-      const d = Math.max(span * 0.6, ENEMIES[type].standoff + k.r * 3);
+      const sd = this.scaledDef(type);
+      const d = Math.max(span * 0.6, sd.standoff + k.r * 3);
       let pos = { x: k.x + Math.cos(a) * d, y: k.y + Math.sin(a) * d };
-      if (!ENEMIES[type].flying && (isWater(pos.x, pos.y) || this.blockedAt(pos.x, pos.y, ENEMIES[type].r))) {
+      if (!sd.flying && (isWater(pos.x, pos.y) || this.blockedAt(pos.x, pos.y, sd.r))) {
         const nr = this.nearestRoad(pos.x, pos.y);
         if (nr) pos = { x: nr.road.x0 + (nr.road.x1 - nr.road.x0) * nr.t, y: nr.road.y0 + (nr.road.y1 - nr.road.y0) * nr.t };
       }
@@ -1365,7 +1369,7 @@ export class Game {
   spawnElite() {
     const k = this.kaiju;
     const e = ELITES[k.stage];
-    const u = this.spawnGroup(e.type)[0];
+    const u = this.spawnGroup(e.type, undefined, 1)[0];
     u.elite = true;
     u.name = e.name;
     u.hp *= ELITE.hp;
@@ -1379,7 +1383,7 @@ export class Game {
 
   spawnPoint(type) {
     const k = this.kaiju;
-    const def = ENEMIES[type];
+    const def = this.scaledDef(type);
     const span = this.viewSpan();
     const dist = Math.max(span * this.rng.range(0.6, 0.8), def.standoff + k.r * 3);
     for (let tries = 0; tries < 12; tries++) {
@@ -1396,11 +1400,28 @@ export class Game {
     return nr ? { x: nr.road.x0 + (nr.road.x1 - nr.road.x0) * nr.t, y: nr.road.y0 + (nr.road.y1 - nr.road.y0) * nr.t } : { x, y };
   }
 
+  // A unit type's stats for the kaiju's current size: units from smaller sizes are scaled up
+  // so they stand as tall next to it as they would have at their own size.
+  scaledDef(type) {
+    const base = ENEMIES[type];
+    const stage = this.kaiju.stage;
+    const lift = Math.max(0, stage - base.tier);
+    if (!lift) return { ...base, scale: 1, lift: 0 };
+    const s = STAGES[stage].radius / STAGES[base.tier].radius;
+    const g = Math.sqrt(s);
+    return {
+      ...base, scale: s, lift, r: base.r * s, standoff: base.standoff * g, range: base.range * g, speed: base.speed * g,
+      proj: base.proj && base.proj * g, aoe: base.aoe && base.aoe * Math.pow(s, 0.7),
+    };
+  }
+
   spawnUnit(type, x, y) {
-    const def = ENEMIES[type];
+    const def = this.scaledDef(type);
+    const sc = this.enemyScale();
     const u = {
-      isUnit: true, type, def, x, y, r: def.r, tier: def.tier,
-      hp: def.hp * this.diff.enemyHp * this.enemyScale().hp, maxHp: def.hp * this.diff.enemyHp * this.enemyScale().hp, dmgMul: this.enemyScale().dmg,
+      isUnit: true, type, def, x, y, r: def.r, tier: def.lift ? this.kaiju.stage - 1 : def.tier, scale: def.scale,
+      hp: def.hp * this.diff.enemyHp * sc.hp, maxHp: def.hp * this.diff.enemyHp * sc.hp,
+      dmgMul: sc.dmg * SWARM.dmg * Math.pow(SWARM.dmgPerSize, def.lift),
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
       heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
       stress: 0, windup: 0, windupMax: 0,
@@ -1431,7 +1452,7 @@ export class Game {
     u.dir = d;
     u.line = { x1: tx - d.x * L, y1: ty - d.y * L, x2: tx + d.x * L, y2: ty + d.y * L };
     u.warn = 1.4;
-    u.width = ENEMIES.jet.aoe;
+    u.width = u.def.aoe;
     u.heading = a;
     u.struck = false;
     this.hazards.push({ kind: 'line', ...u.line, w: u.width, t: 0, delay: u.warn, visualOnly: true, jet: true });
@@ -1507,7 +1528,8 @@ export class Game {
         const nx = u.x + (mx / ml) * sp * dt * Math.min(1, ml);
         const ny = u.y + (my / ml) * sp * dt * Math.min(1, ml);
         // Mechs trample anything up to house size; everything else walks around buildings.
-        const minTier = u.type === 'mech' ? 4 : 0;
+        // Scaled-up units step over anything a size below them.
+        const minTier = Math.max(u.type === 'mech' ? 4 : 0, def.lift ? u.tier + 1 : 0);
         if (u.type === 'mech') {
           for (const o of this.objectsNear(nx, ny, u.r * 0.8)) {
             if (o.structure && !o.walkable && !o.landmark && o.tier < 4) this.destroyObject(o, norm(o.x - u.x, o.y - u.y), 'boss');
@@ -1661,11 +1683,11 @@ export class Game {
     this.shake = Math.max(this.shake, u.tier >= k.stage ? 0.3 : 0.14);
     if (u.tier >= k.stage) this.impact(0.06, 0.4);
     this.bumpCombo();
-    const loot = lootFor(u.tier, k.stage);
+    const loot = lootFor(u.tier, k.stage, u.def.lift ? SWARM.loot : 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
     this.stats.units++;
-    this.addThreat(u.tier >= k.stage ? 2.5 : 1);
+    this.addThreat(u.tier >= k.stage ? 2.5 : u.def.lift ? 0.3 : 1);
     if (u.elite) {
       // Elites pay out: a guaranteed level-up and a pile of scrap.
       k.xp = Math.max(k.xp, xpToNext(k.level));
@@ -1675,7 +1697,7 @@ export class Game {
       this.impact(0.12, 0.8);
       this.shake = Math.max(this.shake, 0.7);
     }
-    this.heal(UNIT_HEAL);
+    this.heal(u.def.lift ? UNIT_HEAL * 0.4 : UNIT_HEAL);
     if (u.def.vehicle && this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
     if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'unitDie', u, dir: norm(u.x - k.x, u.y - k.y) });
