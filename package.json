@@ -1,0 +1,12 @@
+{
+  "name": "kaiju-rampage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser prototype of the Kaiju Rampage core run loop",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes serve -l 8080 .",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "license": "MIT"
+}
