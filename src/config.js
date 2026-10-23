@@ -163,9 +163,14 @@ export const CROWD = { people: 55, traffic: 22, personHp: 4, carHp: 30 };
 // How long eating one person takes: snatch, toss, chomp, gulp (seconds).
 export const EAT_TIME = 0.8;
 
-// Experience: biomass also fills a separate XP bar. Each level-up is an augment pick; the
-// cost of a level grows geometrically so picks come every ~20-40 s at every size.
-export const XP = { base: 8, growth: 1.24 };
+// Experience: biomass also fills a separate XP bar. Each level-up is an augment pick. XP is
+// biomass measured against your size (a bigger kaiju eats bigger things, so it counts for less),
+// and every level costs 20% more than the last: picks come every ~15 s at first and thin out
+// to about one a minute late in a run.
+export const XP = { base: 5, growth: 1.17, carry: 0.6 };
 export function xpToNext(level) {
   return XP.base * Math.pow(XP.growth, level - 1);
+}
+export function xpFor(biomass, stage) {
+  return biomass / Math.pow(4, stage - 1);
 }

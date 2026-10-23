@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect } from '../src/game.js';
-import { STAGES, MAX_STAGE } from '../src/config.js';
+import { STAGES, MAX_STAGE, xpToNext } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { waterField } from '../src/world.js';
@@ -49,6 +49,21 @@ test('levels come quickly: many picks in the first five minutes, size grows slow
   simulate(g, { maxTime: 300, onTick: () => { if (g.kaiju.level !== last) { last = g.kaiju.level; ups++; } } });
   assert.ok(ups >= 8, `${ups} level-ups in 5 minutes`);
   assert.ok(g.kaiju.stage <= 4, 'size grows slower than levels');
+});
+
+test('each level costs more than the last: picks thin out late in a run, a big blast never chains them', () => {
+  for (let l = 2; l < 40; l++) assert.ok(xpToNext(l) > xpToNext(l - 1) * 1.1);
+  const g = new Game({ seed: 2 });
+  const ups = [];
+  simulate(g, { maxTime: 900, onTick: () => { if (g.kaiju.level > ups.length + 1) ups.push(g.time); } });
+  const early = ups.filter((t) => t < 180).length;
+  const late = ups.filter((t) => t >= g.time - 180).length;
+  assert.ok(early >= 8, `${early} picks in the first three minutes`);
+  assert.ok(late <= early / 2, `${late} picks in the last three minutes vs ${early} early`);
+  const h = new Game({ seed: 3 });
+  h.addBiomass(1e9);
+  assert.equal(h.kaiju.level, 2);
+  assert.equal(h.pendingPicks, 1);
 });
 
 test('first run guarantees Laser Eyes on the first pick, and the first offer leans on moves', () => {

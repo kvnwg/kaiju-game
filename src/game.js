@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext,
+  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -800,9 +800,10 @@ export class Game {
     const k = this.kaiju;
     k.biomass += amount;
     this.stats.biomass += amount;
-    k.xp += amount * (1 + 0.1 * this.level('appetite'));
-    while (k.xp >= xpToNext(k.level)) {
-      k.xp -= xpToNext(k.level);
+    k.xp += xpFor(amount, k.stage) * (1 + 0.1 * this.level('appetite'));
+    // One level per gain at most: a huge blast tops the bar up, it never chains picks.
+    if (k.xp >= xpToNext(k.level)) {
+      k.xp = Math.min(k.xp - xpToNext(k.level), xpToNext(k.level + 1) * XP.carry);
       k.level++;
       this.pendingPicks++;
       this.emit('levelUp', { level: k.level });
@@ -810,7 +811,8 @@ export class Game {
   }
 
   debugLevel() {
-    this.addBiomass((xpToNext(this.kaiju.level) - this.kaiju.xp) / (1 + 0.1 * this.level('appetite')) + 1e-6);
+    const k = this.kaiju;
+    this.addBiomass(((xpToNext(k.level) - k.xp) / (1 + 0.1 * this.level('appetite'))) * Math.pow(4, k.stage - 1) + 1e-6);
   }
 
   // ---------------------------------------------------------------- destruction
