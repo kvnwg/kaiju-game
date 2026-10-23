@@ -154,17 +154,25 @@ export class UI {
     this.show('revive');
   }
 
-  showPause({ onResume, onQuit }) {
+  showPause({ quality, onQuality, onResume, onQuit }) {
     const el = this.modals.pause;
+    const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
     el.innerHTML = `<div class="panel small">
         <h2>Paused</h2>
         <div class="col">
           <button class="btn primary" id="resume">Resume</button>
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
+        <h3>Graphics</h3>
+        <div class="segs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
+        <p class="tiny">Low turns off shadows, bloom and tilt-shift for older phones.</p>
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);
+    el.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
+      onQuality(b.dataset.q);
+      el.querySelectorAll('.seg').forEach((x) => x.classList.toggle('on', x === b));
+    }));
     this.show('pause');
   }
 
@@ -180,8 +188,8 @@ export class UI {
           ${stat('Score', fmtNum(r.score))}
           ${stat('Time', fmtTime(r.time))}
           ${stat('Buildings', fmtNum(r.buildings))}
+          ${stat('People eaten', fmtNum(r.people || 0))}
           ${stat('Military eaten', fmtNum(r.units))}
-          ${stat('Biomass', fmtNum(r.biomass))}
           ${stat('Rare materials', r.rareMaterials)}
         </div>
         <div class="loot">
@@ -242,7 +250,7 @@ export class UI {
       const best = profile.best[`harbor:${difficulty}`];
       el.innerHTML = `<div class="panel menu-panel">
           <h1 class="logo">Kaiju Rampage</h1>
-          <p class="muted">Grow from car-sized to skyline-sized in one run. Smash, eat, pick augments, beat the boss.</p>
+          <p class="muted">Start human-sized in a backyard and grow to skyline-sized in one run. Smash, eat, pick augments, beat the boss.</p>
           <h3>Kaiju</h3>
           <div class="kaiju-grid">${kaijuCards}</div>
           <h3>City</h3>

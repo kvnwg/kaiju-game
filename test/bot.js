@@ -50,7 +50,24 @@ export function botStep(game) {
     game.setInput(chase.x - k.x, chase.y - k.y);
     return;
   }
-  const reach = Math.max(600, game.viewSpan() * 0.7);
+  // Small kaiju hunt people and cars before buildings are worth it.
+  const prey = [];
+  if (k.stage === 1) prey.push(...game.people.filter((p) => p.state !== 'flung'));
+  if (k.stage <= 2) prey.push(...game.traffic.filter((c) => !c.dead));
+  let best0 = null;
+  let bestD0 = game.viewSpan() * 0.6;
+  for (const p of prey) {
+    const d = Math.hypot(p.x - k.x, p.y - k.y);
+    if (d < bestD0) {
+      best0 = p;
+      bestD0 = d;
+    }
+  }
+  if (best0) {
+    game.setInput(best0.x - k.x, best0.y - k.y);
+    return;
+  }
+  const reach = Math.max(60, game.viewSpan() * 0.7);
   let best = null;
   let bestScore = -Infinity;
   for (const o of game.objectsNear(k.x, k.y, reach)) {

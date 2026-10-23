@@ -1,10 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
-import { STAGES } from '../src/config.js';
+import { STAGES, MAX_STAGE } from '../src/config.js';
 import { simulate } from './bot.js';
 
-test('crushing small objects grows the kaiju and opens an augment pick', () => {
+test('a human-sized kaiju starts among people and grows by eating them', () => {
+  const g = new Game({ seed: 5 });
+  assert.equal(g.kaiju.stage, 1);
+  assert.ok(g.people.length > 20, 'crowd around the drop-in point');
+  const before = g.kaiju.biomass;
+  g.flingPerson(g.people[0], false);
+  assert.ok(g.kaiju.biomass > before);
+  assert.equal(g.stats.people, 1);
+});
+
+test('growing opens an augment pick', () => {
   const g = new Game({ seed: 5 });
   g.addBiomass(STAGES[1].biomassToNext);
   g.update(1 / 60);
@@ -56,37 +66,47 @@ test('Thick Hide reduces bullet and shell damage only', () => {
   assert.equal(g.kaiju.maxHp - g.kaiju.hp, 10);
 });
 
-test('Domino Effect topples neighbours in the fall direction', () => {
-  const g = new Game({ seed: 6 });
-  g.kaiju.stage = 3;
-  const apartments = g.objects.filter((o) => o.kind === 'apartment');
-  // Find an apartment with another building right next to it and topple it that way.
-  let pair = null;
-  for (const a of apartments) {
-    const n = g.objects.find((o) => o !== a && o.structure && o.tier <= 3 && Math.abs(o.y - a.y) < 30 && o.x > a.x && o.x - a.x < 200);
-    if (n) {
-      pair = [a, n];
-      break;
-    }
+test('hits on buildings report an impact point for the voxel chipping', () => {
+  const g = new Game({ seed: 4 });
+  g.kaiju.stage = 4;
+  const b = g.objects.find((o) => o.kind === 'building' && o.tier === 4);
+  g.damageObject(b, 50, { x: 1, y: 0 }, 'hit', { x: b.x - b.w / 2, y: b.y });
+  const hit = g.drainVfx().find((e) => e.t === 'hit');
+  assert.ok(hit && hit.obj === b && hit.x === b.x - b.w / 2 && hit.frac > 0);
+});
+
+function neighbourPair(g, tier) {
+  for (const a of g.objects) {
+    if (a.kind !== 'building' || a.tier !== tier || a.walkable) continue;
+    const n = g.objects.find((o) => o !== a && o.kind === 'building' && !o.walkable && o.tier <= tier && Math.abs(o.y - a.y) < 30 && o.x > a.x && o.x - a.x < a.w / 2 + o.w / 2 + 60);
+    if (n) return [a, n];
   }
+  return null;
+}
+
+test('Domino Effect topples neighbours in the fall direction', () => {
+  const g = new Game({ seed: 6, freshCity: true });
+  g.kaiju.stage = 4;
+  const pair = neighbourPair(g, 4);
   assert.ok(pair, 'found neighbouring buildings');
   const [a, n] = pair;
-  const without = new Game({ seed: 6 });
-  without.kaiju.stage = 3;
-  without.destroyObject(without.objects[a.id], { x: 1, y: 0 }, 'hit');
-  for (let i = 0; i < 30; i++) without.update(1 / 30);
-  assert.equal(without.objects[n.id].hp, n.maxHp, 'no damage without the augment');
-
-  g.held.set('dominoEffect', 1);
   g.destroyObject(a, { x: 1, y: 0 }, 'hit');
   for (let i = 0; i < 30; i++) g.update(1 / 30);
-  assert.ok(n.hp < n.maxHp, 'neighbour took collapse damage');
+  assert.equal(n.hp, n.maxHp, 'no damage without the augment');
+
+  const g2 = new Game({ seed: 6, freshCity: true });
+  g2.kaiju.stage = 4;
+  const [a2, n2] = neighbourPair(g2, 4);
+  g2.held.set('dominoEffect', 1);
+  g2.destroyObject(a2, { x: 1, y: 0 }, 'hit');
+  for (let i = 0; i < 30; i++) g2.update(1 / 30);
+  assert.ok(n2.hp < n2.maxHp, 'neighbour took collapse damage');
 });
 
 test('chain collapses drop biomass only with the Demolition Crew set', () => {
-  const g = new Game({ seed: 7 });
-  g.kaiju.stage = 3;
-  const [a, b] = g.objects.filter((o) => o.kind === 'apartment');
+  const g = new Game({ seed: 7, freshCity: true });
+  g.kaiju.stage = 4;
+  const [a, b] = g.objects.filter((o) => o.kind === 'building' && o.tier === 4);
   const bio0 = g.stats.biomass;
   g.destroyObject(a, { x: 1, y: 0 }, 'chain');
   assert.equal(g.stats.biomass, bio0);
@@ -95,17 +115,19 @@ test('chain collapses drop biomass only with the Demolition Crew set', () => {
   assert.ok(g.stats.biomass > bio0);
 });
 
-test('autopiloted runs reach Apex, fight the boss and mostly win', () => {
-  const runs = [1, 2, 3].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true }), { maxTime: 1500 }));
+test('autopiloted runs grow through all six stages, fight the boss and mostly win', () => {
+  const runs = [1, 2, 3].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true, freshCity: true }), { maxTime: 1500 }));
   for (const g of runs) {
     assert.ok(g.state === 'won' || g.state === 'lost', `run ended (state ${g.state})`);
-    assert.ok(g.results.buildings > 50);
+    assert.ok(g.results.buildings > 30);
+    assert.ok(g.stats.people > 10, 'ate people early on');
   }
   const wins = runs.filter((g) => g.state === 'won');
   assert.ok(wins.length >= 2, `won ${wins.length}/3`);
   for (const g of wins) {
+    assert.equal(g.kaiju.stage, MAX_STAGE);
     assert.ok(g.stats.bossDefeated);
     // Pacing guard: the boss arrives inside the 10 to 15 minute session budget.
-    assert.ok(g.stats.stageTimes[5] < 15 * 60);
+    assert.ok(g.stats.stageTimes[MAX_STAGE] < 15 * 60);
   }
 });

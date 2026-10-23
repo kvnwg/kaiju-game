@@ -1,18 +1,19 @@
 import { Game } from './game.js';
-import { Renderer } from './render.js';
+import { Renderer3D } from './render3d.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { loadProfile, saveProfile, recordRun } from './storage.js';
 import { KAIJU } from './config.js';
 
 const canvas = document.getElementById('game');
-const renderer = new Renderer(canvas);
 const input = new Input(canvas, document.getElementById('stick'));
 const ui = new UI();
 const params = new URLSearchParams(location.search);
 const debug = params.has('debug');
+const loading = document.getElementById('loading');
 
 let profile = loadProfile();
+let renderer = null;
 let game = null;
 let paused = false;
 let lastSettings = { kaijuId: 'rex', difficulty: 'normal' };
@@ -20,23 +21,33 @@ let hintUntil = 0;
 let movedFor = 0;
 let pendingGrowBanner = null;
 
+function defaultQuality() {
+  const saved = profile.quality;
+  if (saved) return saved;
+  const mobile = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  return params.get('q') || (mobile ? 'medium' : 'high');
+}
+
 function startRun({ kaijuId, difficulty, firstRun = false }) {
   lastSettings = { kaijuId, difficulty };
   game = new Game({ kaijuId, difficulty, firstRun, seed: Number(params.get('seed')) || Date.now() });
-  renderer.snapCamera(game);
+  renderer.startRun(game);
   paused = false;
   ui.hideModals();
   ui.show('hud');
   ui.augSig = null;
   movedFor = 0;
-  hintUntil = firstRun || profile.runs < 2 ? performance.now() + 9000 : 0;
-  ui.hint(hintUntil ? 'Drag anywhere to move (or WASD). Attacks are automatic.' : '');
+  pendingGrowBanner = null;
+  hintUntil = firstRun || profile.runs < 2 ? performance.now() + 10000 : 0;
+  ui.hint(hintUntil ? 'You are human-sized. Drag (or WASD) to move; you attack automatically. Eat people to grow.' : '');
 }
 
 function showMenu() {
-  // Keep a city on screen behind the menu.
-  if (!game || game.state === 'playing') game = new Game({ seed: 1 });
-  renderer.snapCamera(game);
+  // Keep the city on screen behind the menu.
+  if (!game || game.state === 'playing') {
+    game = new Game({ seed: 1 });
+    renderer.startRun(game);
+  }
   ui.show('hud', false);
   ui.hint('');
   ui.hideModals();
@@ -54,10 +65,7 @@ function handleEvents(events) {
         if (game.state !== 'picking') break;
         hintUntil = 0;
         ui.hint('');
-        ui.showPick(game, {
-          onChoose: (id) => game.choose(id),
-          onReroll: (ad) => game.reroll(ad),
-        });
+        ui.showPick(game, { onChoose: (id) => game.choose(id), onReroll: (ad) => game.reroll(ad) });
         break;
       case 'picked':
         ui.show('pick', false);
@@ -113,12 +121,20 @@ function onRunEnd(results) {
   showIt();
 }
 
+function setQuality(q) {
+  renderer.setQuality(q);
+  profile.quality = q;
+  saveProfile(profile);
+}
+
 function togglePause(force) {
-  if (!game || game.state !== 'playing') return;
+  if (!game || game.state !== 'playing' || ui.hud.classList.contains('hidden')) return;
   paused = force ?? !paused;
   if (paused) {
     input.release();
     ui.showPause({
+      quality: renderer.qualityName,
+      onQuality: (q) => setQuality(q),
       onResume: () => togglePause(false),
       onQuit: () => {
         paused = false;
@@ -145,31 +161,48 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (game) {
+  if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
     if (inRun && !paused) {
       const v = input.get();
-      game.setInput(v.x, v.y);
+      const w = renderer.worldDir(v.x, v.y);
+      game.setInput(w.x, w.y);
       if (v.x || v.y) movedFor += dt;
       game.update(dt);
       handleEvents(game.drainEvents());
-      if (hintUntil && (now > hintUntil || movedFor > 2.5)) {
+      if (hintUntil && (now > hintUntil || movedFor > 3)) {
         hintUntil = 0;
         ui.hint('');
       }
     }
-    renderer.render(game, dt);
+    renderer.render(game, inRun && !paused ? dt : dt * 0.25);
     if (inRun) ui.updateHud(game);
   }
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', () => renderer.resize());
+function boot() {
+  try {
+    if (!window.THREE) throw new Error('three.js did not load');
+    renderer = new Renderer3D(canvas, { quality: defaultQuality(), floaterLayer: document.getElementById('floaters') });
+    renderer.onQualityChange = (q) => {
+      profile.quality = q;
+      saveProfile(profile);
+    };
+  } catch (err) {
+    loading.innerHTML = `<div class="panel small"><h2>3D isn't available</h2><p class="muted">This browser couldn't start WebGL (${err.message}). Try a recent Chrome, Safari or Firefox.</p></div>`;
+    return;
+  }
+  // The very first session drops straight into the suburbs as Rex: no login, no menus.
+  if (!profile.tutorialDone || params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', difficulty: 'normal', firstRun: !profile.tutorialDone });
+  else showMenu();
+  loading.classList.add('hidden');
+  requestAnimationFrame(frame);
+}
 
-// The very first session drops straight into Harbor Town as Rex: no login, no menus.
-if (!profile.tutorialDone || params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', difficulty: 'normal', firstRun: !profile.tutorialDone });
-else showMenu();
-requestAnimationFrame(frame);
+window.addEventListener('resize', () => renderer && renderer.resize());
+// Let the loading screen paint before generating the city.
+setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, startRun, showMenu, profile: () => profile };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, startRun, showMenu, profile: () => profile };

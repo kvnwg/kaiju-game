@@ -1,8 +1,8 @@
 # Kaiju Rampage
 
-A playable browser prototype of the **Kaiju Rampage** core run loop, built from the game design doc. You start car-sized at the edge of Harbor Town. You smash and eat your way through 5 growth stages and pick 1 of 3 augments each time you grow. The run ends in a boss fight against the Coast Guard Mech on top of a collapsing skyline.
+A playable browser prototype of the **Kaiju Rampage** core run loop, built from the game design doc. It is rendered as a procedurally generated voxel city. You start human-sized in a suburban backyard, eating people your own size. You grow through backyards, houses, apartment blocks and towers until you are skyline-sized. The run ends in a boss fight against the Coast Guard Mech. The light goes from golden hour at the start of a run to neon night by the boss.
 
-The GDD recommends prototyping first, and this is that prototype. It tests whether the smash, grow and pick loop is fun before any engine or monetization work. It is plain HTML5 canvas and ES modules: no build step and no dependencies.
+It is plain ES modules with no build step. three.js r147 (with bloom) loads from jsDelivr, so the page needs an internet connection.
 
 ## Run it
 
@@ -11,54 +11,52 @@ npm start            # serves the folder on http://localhost:8080 (or use any st
 npm test             # unit tests + headless autopilot runs (Node 20+)
 ```
 
-Open the page on a phone or a desktop browser.
+- **Move:** drag anywhere for a floating virtual stick, or use WASD / arrow keys. Movement is relative to the tilted camera. Attacks fire automatically at the nearest target.
+- **Pause:** the II button, Esc or P. The pause menu has a graphics setting (High, Medium or Low). The game also steps down on its own if frames run slow.
+- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed, `?q=low` sets quality. `?debug=1` enables G (grow a stage), B (summon the boss early at Apex), K (kill the boss) and H (heal).
 
-- **Move:** drag anywhere for a floating virtual stick, or use WASD / arrow keys. Attacks fire automatically at the nearest target. Aimed augments (Atomic Breath) fire along your movement direction.
-- **Pause:** the II button, Esc or P.
-- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed. `?debug=1` enables G (grow a stage), B (summon the boss early at Apex), K (kill the boss) and H (heal).
+## What's in it
 
-As the doc specifies, the first session drops straight into Harbor Town as Rex with no menus. After that, a menu lets you pick a kaiju and a difficulty.
-
-## What's in the prototype
-
-| GDD area | Built here |
+| Area | Built here |
 | --- | --- |
-| Core run loop | Drop in, smash and eat, grow, augment pick, escalation, boss, results, one revive per run (rewarded-ad placeholder) |
-| Growth stages | All 5 stages: size doubles, the camera pulls back, and each stage opens a new class of destructible targets and a new military response |
-| Size rules | Smaller things break in one hit (and get crushed underfoot). One size up takes several hits and pays 3x scrap. Two sizes up is out of reach. The landmark (Lighthouse) only breaks at stage 5 and drops a rare material |
-| Augments | 14 of the MVP's 16 (8 silver, 5 gold, 1 prismatic), with upgradable `+` augments, same-tier offers, 1 free reroll per pick plus 1 ad reroll per run, and synergy-set tags on the pick cards |
-| Synergy sets | Demolition Crew (chain collapses drop biomass) and Unkillable (shield regenerates while standing still), with a run title on the results screen |
-| Kaiju roster | MVP four: Rex (Bite), Gorilla Grunt (Ground Pound), Ember Lizard (Fire Trail), Volt Beetle (Chain Zap). Gorilla Grunt unlocks by beating Harbor Town. Ember and Volt come from eggs in the full game, and are open for testing here |
-| Military | Police, SWAT, dogs and roadblocks, then tanks, rocket infantry and helicopters, then jets, artillery and mini-mechs, then the boss with elite support. Big hits are telegraphed so you can dodge them |
-| Boss | Coast Guard Mech: missile barrage, laser sweep and a charge that tramples the skyline, plus a phase 2 at 50% health |
-| Difficulty | Normal, Hard and Nightmare. Each tier unlocks by beating the one below |
-| Destruction tech | Buildings go through intact, damaged and rubble states. Collapses are scripted and directional. Physics debris is capped at 40 pieces and collapse animations at 3 at once. Also includes screen shake, dust, and a rationed slow-motion beat on big collapses |
-| Economy | Scrap and biomass during the run. A loss keeps 50% of scrap. The results screen has a 2x-scrap rewarded-ad placeholder |
-| Social | Local best scores per city and difficulty (the MVP's "local best scores") |
+| Growth | 6 stages, roughly doubling in size each time: Human, Backyard, House, Apartment block, Office tower, Apex. Each stage opens a new class of things to break and a new military response |
+| World | One procedural map with seven district styles: suburbs with fenced backyards, a pastel old town, a red-brick industrial district, garden midtown with green roofs, neon downtown, a second neon city (Neon Heights) beyond a forest belt, and harbor docks. A lake with a river runs through it, crossed by a long suspension bridge |
+| Buildings | 69 procedural voxel building types in 3 variants each (65 are placed by the generator). Examples: houses, sheds, playhouses, ramen bars, arcades, tenements with fire escapes, megablocks, ring towers, stepped towers, twin towers, an arcology, a TV tower, a stadium, a power plant, cabins, ranger towers and the lighthouse landmark |
+| Small assets | 57 voxel props: cars, taxis, buses, trucks, lampposts, neon poles, vending machines, food carts, barriers, power poles, billboards, swing sets, pools, trampolines, BBQs, gnomes, and pine, birch, blossom and autumn trees |
+| Life | Voxel crowds that walk the streets and flee from you, plus traffic driving the road network |
+| Destruction | Buildings are pre-fractured into Voronoi chunks. Hits knock off the chunks nearest the impact, shoving into a building chips it where you push, and collapses tip toward the hit direction, then break into physics debris and leave a rubble pile. Small things shatter into voxels |
+| Lighting | Golden afternoon to sunset to neon night, following run progress. Windows light up after dark, neon glows, street lights pool on the ground, and the effects include soft shadows, bloom and tilt-shift |
+| Kaiju | Rex, Gorilla Grunt, Ember Lizard and Volt Beetle, each with its own animated voxel rig (walk cycle, tail, jaw, punches) |
+| Run loop | 14 augments with 2 synergy sets, rerolls, escalating military, the boss, revive, results, difficulty tiers and local best scores (unchanged from the first prototype, retuned for 6 stages) |
 
-Not built yet: the lair, eggs, gems, the shop, live ops, Neo Tokyo and the other cities, and real ad or IAP SDKs. Those sit after Gate 1 in the roadmap.
+Not built yet: the lair, eggs, gems, the shop, live ops, the other cities, and real ad or IAP SDKs.
 
 ## Code map
 
 ```
-src/config.js    tuning tables: stages, size rules, kaiju, enemies, escalation, boss
-src/augments.js  augment pool, synergy sets, offer and reroll rules
-src/world.js     Harbor Town generator + spatial grid
-src/game.js      simulation (no DOM): movement, combat, destruction, augments, military, boss, results
-src/render.js    canvas renderer (2.5D buildings, units, kaiju, effects)
-src/ui.js        HUD, augment pick, revive, results, menu
-src/input.js     virtual stick + keyboard
-src/main.js      bootstrap and game loop
-test/            node:test suites + an autopilot bot used for balance checks
+src/config.js     tuning: stages, size rules, kaiju, enemies, escalation, boss
+src/voxel.js      voxel grid + building toolkit (windows, cornices, signs, neon, vines, roofs)
+src/buildings.js  69 procedural building types
+src/props.js      57 street and nature props
+src/models.js     kaiju rigs, people, military units, boss
+src/mesher.js     voxel meshing with face culling and ambient occlusion; Voronoi pre-fracture
+src/world.js      districts, roads, lake, bridge, lots, backyards, forest
+src/game.js       simulation (no DOM): movement, size rules, crowds, traffic, combat, augments, boss
+src/render3d.js   three.js scene: camera, day/night, ground, water, building streaming, chipping, collapses
+src/actors3d.js   animated kaiju/boss rigs, units, crowd and traffic instancing
+src/fx3d.js       debris physics, dust and glow particles, rings, beams, telegraphs
+src/ui.js, input.js, storage.js, main.js
+test/             node:test suites + an autopilot bot used for balance checks
 ```
 
-The simulation in `src/game.js` never touches the DOM. Tests and balance passes can therefore run full games headlessly with `test/bot.js`. With the current numbers, the bot reaches Apex in about 4 to 9 minutes, and first-session runs win about 7 times in 8.
+The simulation and the voxel generators never touch the DOM, so tests can build every building and run full games headlessly. With the current numbers, the bot reaches the boss in about 5 to 12 minutes and wins most runs.
 
 ## Gaps in the design doc
 
 These came up while building. Each one is handled one way in the prototype and still needs a decision in the doc:
 
-1. **First pick tier.** The stage 2 pick is Silver, but the first session guarantees Domino Effect (Gold) on the first pick. The prototype makes the first-ever pick a Gold pick.
+0. **Starting size.** The doc starts the kaiju car-sized with 5 stages. This prototype starts it human-sized and adds a stage, so there are 6 stages and 5 augment picks per run.
+1. **First pick tier.** The first pick is meant to be Silver, but the first session guarantees Domino Effect (Gold) on it. The prototype makes the first-ever pick a Gold pick.
 2. **MVP augment count.** The MVP calls for 10 silver augments, but the doc names only 8. The prototype ships those 8, leaving 2 silver slots open.
 3. **Prismatic offers.** The MVP has a single prismatic augment, so a prismatic roll at stage 5 can't fill 3 slots. The prototype offers Meteor Call plus 2 golds.
 4. **First-session timing.** The doc grows the player at 0:30 but shows the first pick at 1:30. In the prototype, growing opens the pick immediately.
