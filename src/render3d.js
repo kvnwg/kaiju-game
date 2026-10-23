@@ -282,7 +282,13 @@ export class Renderer3D {
     for (const rec of this.bld.values()) {
       if (!rec.mesh) continue;
       const o = rec.obj;
-      rec.mesh.material = o.flash > 0 && o.state === 'intact' ? this.flashMat : this.voxelMat;
+      const flashing = o.flash > 0 && o.state === 'intact';
+      rec.mesh.material = flashing ? this.flashMat : this.voxelMat;
+      // Squash on impact: the building gives a little and springs back.
+      if (o.state === 'intact') {
+        const f = flashing ? Math.sin((1 - o.flash / 0.13) * Math.PI) : 0;
+        rec.mesh.scale.set(1 + f * 0.035, 1 - f * 0.05, 1 + f * 0.035);
+      }
     }
     let n = 0;
     for (const o of game.active) {
@@ -1148,8 +1154,14 @@ export class Renderer3D {
   }
 
   handleVfx(game) {
-    for (const e of game.drainVfx()) {
+    const list = game.drainVfx();
+    if (this.onVfx) this.onVfx(list, game);
+    for (const e of list) {
       switch (e.t) {
+        case 'step':
+          // Footfalls kick up dust once the kaiju outgrows the backyard.
+          if (e.stage >= 2) this.fx.dustCloud(e.x, 0, e.y, e.r * (0.35 + e.stage * 0.06), e.stage >= 4 ? 4 : 2);
+          break;
         case 'hit':
           this.chip(e);
           break;
@@ -1327,7 +1339,8 @@ export class Renderer3D {
     this.target.y += (elev + k.r * 0.6 - this.target.y) * Math.min(1, dt * 4);
     // Shake scales with how much of the city is on screen, so a thump reads the same at every size.
     const shake = game.shake * span * 0.022;
-    const d = this.camDist;
+    // Zoom punch: big kills kick the camera in a touch, then it eases back out.
+    const d = this.camDist * (1 - game.punch * 0.06);
     this.camera.position.set(
       this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
       this.target.y + Math.sin(PITCH) * d + (Math.random() - 0.5) * shake,

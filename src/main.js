@@ -4,6 +4,7 @@ import { Input } from './input.js';
 import { UI } from './ui.js';
 import { loadProfile, saveProfile, recordRun } from './storage.js';
 import { KAIJU } from './config.js';
+import { Sfx } from './audio.js';
 
 const canvas = document.getElementById('game');
 const input = new Input(canvas, document.getElementById('stick'));
@@ -13,6 +14,10 @@ const debug = params.has('debug');
 const loading = document.getElementById('loading');
 
 let profile = loadProfile();
+const sfx = new Sfx();
+sfx.setMuted(profile.sound === false);
+// Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
+for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
 let renderer = null;
 let game = null;
 let paused = false;
@@ -54,10 +59,17 @@ function showMenu() {
   ui.showMenu(profile, { onStart: (s) => startRun(s) });
 }
 
+const CALLOUTS = ['Smashing!', 'Rampage!', 'Unstoppable!', 'Kaiju-geddon!', 'Extinction event!'];
+
 function handleEvents(events) {
   for (const e of events) {
+    sfx.handleEvent(e);
     switch (e.type) {
+      case 'comboTier':
+        ui.callout(CALLOUTS[Math.min(CALLOUTS.length, e.tier) - 1], e.tier);
+        break;
       case 'grow':
+        ui.flash(1);
         // Every grow opens a pick; announce the new stage once the pick is made.
         pendingGrowBanner = e.stage;
         hintUntil = 0;
@@ -137,6 +149,12 @@ function togglePause(force) {
     ui.showPause({
       quality: renderer.qualityName,
       pixelArt: renderer.pixelArt,
+      sound: !sfx.muted,
+      onSound: (on) => {
+        sfx.setMuted(!on);
+        profile.sound = on;
+        saveProfile(profile);
+      },
       onQuality: (q) => setQuality(q),
       onPixelArt: (on) => {
         renderer.setPixelArt(on);
@@ -216,6 +234,7 @@ function boot() {
   try {
     if (!window.THREE) throw new Error('three.js did not load');
     renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || profile.pixelArt === true, floaterLayer: document.getElementById('floaters') });
+    renderer.onVfx = (list, g) => sfx.handleVfx(list, g);
     renderer.onQualityChange = (q) => {
       profile.quality = q;
       saveProfile(profile);

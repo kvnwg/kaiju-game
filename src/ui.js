@@ -53,6 +53,16 @@ export class UI {
       pick: $('#pick'), revive: $('#revive'), results: $('#results'), menu: $('#menu'), pause: $('#pause'),
     };
     this.augSig = '';
+    this.comboEl = $('#combo');
+    this.comboNum = $('#combo b');
+    this.comboBar = $('#combo i');
+    this.calloutEl = $('#callout');
+    this.flashEl = $('#screenFlash');
+    this.growthEl = $('#growth');
+    this.scrapPill = this.scrapEl.parentElement;
+    this.lastCombo = 0;
+    this.lastBio = 0;
+    this.lastScrap = 0;
     this.bannerTimer = null;
   }
 
@@ -78,6 +88,23 @@ export class UI {
     this.growthPct.textContent = k.stage >= MAX_STAGE ? 'MAX' : `${Math.floor(growth * 100)}%`;
     this.stageNum.textContent = k.stage;
     this.scrapEl.textContent = fmtNum(game.stats.scrap);
+    // Little pops when things go up: the growth bar glows, the coin pill bumps.
+    if (k.biomass > this.lastBio + 1e-6) this.retrigger(this.growthEl, 'gain');
+    this.lastBio = k.biomass;
+    if (Math.floor(game.stats.scrap) > this.lastScrap) this.retrigger(this.scrapPill, 'bump');
+    this.lastScrap = Math.floor(game.stats.scrap);
+    const c = game.combo;
+    const showCombo = c.n >= 3;
+    this.comboEl.classList.toggle('on', showCombo);
+    if (showCombo) {
+      if (c.n !== this.lastCombo) {
+        this.comboNum.textContent = `x${c.n}`;
+        this.comboEl.dataset.tier = String(c.tier);
+        this.retrigger(this.comboEl, 'hit');
+      }
+      this.comboBar.style.width = `${Math.max(0, c.t / 2.2) * 100}%`;
+    }
+    this.lastCombo = c.n;
     this.timerEl.textContent = fmtTime(game.time);
 
     const b = game.boss;
@@ -114,6 +141,33 @@ export class UI {
       }
       t.last = r;
     }
+  }
+
+  retrigger(el, cls) {
+    const now = performance.now();
+    if (el._last && now - el._last < 90) return;
+    el._last = now;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
+  // Big stamped word for combo milestones.
+  callout(text, tier = 1) {
+    const el = this.calloutEl;
+    el.textContent = text;
+    el.dataset.tier = String(tier);
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  }
+
+  flash(strength = 1) {
+    const el = this.flashEl;
+    el.style.setProperty('--a', String(0.55 * strength));
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
   }
 
   banner(title, sub = '', kind = '') {
@@ -195,7 +249,7 @@ export class UI {
     this.show('revive');
   }
 
-  showPause({ quality, pixelArt, onQuality, onPixelArt, onResume, onQuit }) {
+  showPause({ quality, pixelArt, sound, onQuality, onPixelArt, onSound, onResume, onQuit }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
     el.innerHTML = `<div class="panel small">
@@ -204,6 +258,8 @@ export class UI {
           <button class="btn primary" id="resume">Resume</button>
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
+        <h3>Sound</h3>
+        <div class="segs" id="soundSegs"><button class="seg ${sound ? 'on' : ''}" data-s="1">On</button><button class="seg ${sound ? '' : 'on'}" data-s="0">Off</button></div>
         <h3>Look</h3>
         <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Voxel</button><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Retro pixel</button></div>
         <h3>Graphics</h3>
@@ -215,6 +271,10 @@ export class UI {
     el.querySelectorAll('#qualSegs .seg').forEach((b) => b.addEventListener('click', () => {
       onQuality(b.dataset.q);
       el.querySelectorAll('#qualSegs .seg').forEach((x) => x.classList.toggle('on', x === b));
+    }));
+    el.querySelectorAll('#soundSegs .seg').forEach((b) => b.addEventListener('click', () => {
+      onSound(b.dataset.s === '1');
+      el.querySelectorAll('#soundSegs .seg').forEach((x) => x.classList.toggle('on', x === b));
     }));
     el.querySelectorAll('#lookSegs .seg').forEach((b) => b.addEventListener('click', () => {
       onPixelArt(b.dataset.px === '1');

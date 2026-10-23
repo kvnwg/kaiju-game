@@ -199,3 +199,34 @@ test('autopiloted runs grow through all six stages, fight the boss and mostly wi
     assert.ok(g.stats.stageTimes[MAX_STAGE] < 15 * 60);
   }
 });
+
+test('chained kills build a combo that pays a scrap bonus when it lapses', () => {
+  const g = new Game({ seed: 5 });
+  g.kaiju.stage = 3;
+  const k = g.kaiju;
+  const props = g.objects.filter((o) => o.kind === 'prop' && o.tier === 3 && o.state === 'intact').slice(0, 12);
+  for (const o of props) g.destroyObject(o, { x: 1, y: 0 }, 'hit');
+  assert.equal(g.combo.n, props.length);
+  const events = g.drainEvents();
+  assert.ok(events.some((e) => e.type === 'comboTier' && e.tier === 1), 'x10 milestone');
+  const scrap = g.stats.scrap;
+  // Park out at sea so nothing keeps the combo alive.
+  k.x = 150;
+  k.y = 1500;
+  k.invuln = 99;
+  for (let i = 0; i < 30 * 3; i++) g.update(1 / 30);
+  assert.equal(g.combo.n, 0);
+  assert.ok(g.stats.scrap > scrap, 'combo bonus paid');
+  assert.ok(k.hp > 0);
+});
+
+test('smashing something your size freezes time for a moment (hitstop)', () => {
+  const g = new Game({ seed: 5 });
+  g.kaiju.stage = 3;
+  const house = g.objects.find((o) => o.kind === 'building' && o.tier === 3 && o.state === 'intact');
+  g.destroyObject(house, { x: 1, y: 0 }, 'hit');
+  assert.ok(g.hitstop > 0 && g.punch > 0);
+  const t0 = g.time;
+  g.update(1 / 60);
+  assert.ok(g.time - t0 < 0.005, 'simulation barely moves during hitstop');
+});

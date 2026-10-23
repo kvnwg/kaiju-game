@@ -44,7 +44,8 @@ export class MoveSystem {
       if (this.cast(m.id, false)) {
         this.timers[m.id] = this.cooldown(m.id);
         g.stats.moves = (g.stats.moves || 0) + 1;
-        if (g.has('echo')) g.schedule(0.5, () => this.cast(m.id, true));
+        g.fxEvent({ t: 'move', id: m.id });
+        if (g.has('echo')) g.schedule(0.5, () => this.cast(m.id, true) && g.fxEvent({ t: 'move', id: m.id, echo: true }));
       } else this.timers[m.id] = 0.3;
     }
     for (const a of this.active) a.update(dt);

@@ -649,3 +649,64 @@ html, body {
 @media (min-width: 900px) and (min-height: 600px) {
   #hud .top, #bossbar, #augbar, #hint { zoom: 1.5; }
 }
+
+/* ---------- juice: combo meter, callouts, pops, screen flash ---------- */
+.combo {
+  position: relative;
+  display: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 5px 7px 7px;
+  min-width: 64px;
+  background: rgba(20, 22, 33, 0.88);
+  border: var(--p) solid var(--ink);
+  clip-path: var(--notch);
+  --cc: var(--scrap);
+}
+.combo.on { display: flex; }
+.combo b { font-family: var(--display); font-size: 16px; font-weight: 400; line-height: 1; color: var(--cc); text-shadow: 2px 2px 0 var(--ink); }
+.combo small { font-family: var(--display); font-size: 6px; line-height: 1; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.combo i { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--cc); }
+.combo[data-tier='1'] { --cc: #ffb13b; }
+.combo[data-tier='2'] { --cc: #ff6a3d; }
+.combo[data-tier='3'] { --cc: #ff3b6b; }
+.combo[data-tier='4'], .combo[data-tier='5'] { --cc: #c58bff; }
+.combo.hit b { animation: comboHit 0.18s steps(3); }
+@keyframes comboHit { 0% { transform: scale(1.5) rotate(-6deg); } 100% { transform: none; } }
+
+.callout {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 19%;
+  text-align: center;
+  pointer-events: none;
+  font-family: var(--display);
+  font-size: clamp(18px, 6vw, 40px);
+  line-height: 1;
+  color: #ffb13b;
+  text-shadow: var(--outline-big), 4px 5px 0 var(--ink);
+  opacity: 0;
+}
+.callout[data-tier='2'] { color: #ff6a3d; }
+.callout[data-tier='3'] { color: #ff3b6b; }
+.callout[data-tier='4'], .callout[data-tier='5'] { color: #c58bff; }
+.callout.show { animation: stamp 1.3s steps(1, end) forwards, stampIn 0.24s steps(3) both; }
+@keyframes stamp { 0%, 80% { opacity: 1; } 85% { opacity: 0; } 90% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes stampIn { 0% { transform: scale(2.2) rotate(-8deg); } 100% { transform: scale(1) rotate(-3deg); } }
+
+#growth.gain { box-shadow: inset 0 var(--p) 0 rgba(0, 0, 0, 0.45), 0 0 0 2px #b4ff95; }
+#growth.gain .fill { animation: gain 0.25s steps(2); }
+@keyframes gain { 0% { filter: brightness(1.8); } 100% { filter: none; } }
+.pill.bump #scrap { display: inline-block; animation: bump 0.2s steps(2); }
+@keyframes bump { 0% { transform: translateY(-3px); color: var(--scrap); } 100% { transform: none; } }
+
+#screenFlash { position: absolute; inset: 0; pointer-events: none; background: #fff; opacity: 0; }
+#screenFlash.show { animation: sflash 0.35s steps(4) forwards; }
+@keyframes sflash { 0% { opacity: var(--a, 0.5); } 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .callout.show, .combo.hit b, #screenFlash.show { animation-duration: 0.01s; }
+}

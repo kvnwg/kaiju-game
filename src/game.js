@@ -69,6 +69,11 @@ export class Game {
     this.collapsing = 0;
     this.active = new Set();
     this.shake = 0;
+    this.hitstop = 0; // brief freeze on heavy impacts
+    this.punch = 0; // camera zoom kick, read by the renderer
+    this.clock = 0; // real time, for rationing freezes
+    this.lastFreeze = -1;
+    this.combo = { n: 0, t: 0, best: 0, tier: 0 };
     this.slowmo = 0;
     this.slowmoReadyAt = 0;
     this.time = 0;
@@ -350,8 +355,12 @@ export class Game {
   // ---------------------------------------------------------------- main loop
   update(realDt) {
     if (this.state !== 'playing') return;
-    const dt = realDt * (this.slowmo > 0 ? 0.35 : 1);
+    this.clock += realDt;
+    const dt = realDt * (this.hitstop > 0 ? 0.04 : this.slowmo > 0 ? 0.35 : 1);
+    this.hitstop = Math.max(0, this.hitstop - realDt);
     this.slowmo = Math.max(0, this.slowmo - realDt);
+    this.punch = Math.max(0, this.punch - realDt * 3);
+    this.updateCombo(realDt);
     this.time += dt;
 
     this.checkGrowth();
@@ -378,6 +387,47 @@ export class Game {
     this.shake = Math.max(0, this.shake - realDt * 2.5);
   }
 
+  // ---------------------------------------------------------------- game feel
+  // A short freeze on heavy impacts (rationed so a rampage never stutters) plus a camera kick.
+  impact(freeze, punch = 0) {
+    if (this.clock - this.lastFreeze > 0.22) {
+      this.hitstop = Math.max(this.hitstop, freeze);
+      this.lastFreeze = this.clock;
+    }
+    this.punch = Math.max(this.punch, punch);
+  }
+
+  // Chain kills within a couple of seconds of each other; milestones get a callout and the
+  // combo pays out a scrap bonus when it ends.
+  bumpCombo() {
+    const c = this.combo;
+    c.n++;
+    c.t = 2.2;
+    c.best = Math.max(c.best, c.n);
+    const tiers = [10, 25, 50, 100, 200];
+    const tier = tiers.filter((n) => c.n >= n).length;
+    if (tier > c.tier) {
+      c.tier = tier;
+      this.emit('comboTier', { tier, n: c.n });
+    }
+  }
+
+  updateCombo(dt) {
+    const c = this.combo;
+    if (c.n === 0) return;
+    c.t -= dt;
+    if (c.t > 0) return;
+    if (c.n >= 10) {
+      const bonus = Math.round(c.n * (1 + c.n / 25) * this.kaiju.stage);
+      this.stats.scrap += bonus;
+      this.emit('comboEnd', { n: c.n, bonus });
+      const k = this.kaiju;
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.4, text: `x${c.n} combo +${bonus}`, color: '#ffb13b', life: 1.6, max: 1.6 });
+    }
+    c.n = 0;
+    c.tier = 0;
+  }
+
   // ---------------------------------------------------------------- kaiju
   updateKaiju(dt) {
     const k = this.kaiju;
@@ -395,7 +445,14 @@ export class Game {
     if (k.moving) {
       k.facing = norm(this.input.x, this.input.y);
       k.stillTime = 0;
+      const before = Math.floor(k.walkPhase / Math.PI);
       k.walkPhase += (dt * speed) / Math.max(1, k.r) * 1.6;
+      // A footfall every half stride: dust and, once big, a rumble.
+      if (Math.floor(k.walkPhase / Math.PI) !== before && k.hopT <= 0 && !k.inWater) {
+        const side = Math.floor(k.walkPhase / Math.PI) % 2 ? 1 : -1;
+        this.fxEvent({ t: 'step', x: k.x - k.facing.y * k.r * 0.4 * side, y: k.y + k.facing.x * k.r * 0.4 * side, r: k.r, stage: k.stage });
+        if (k.stage >= 4) this.shake = Math.max(this.shake, 0.06 + (k.stage - 4) * 0.04);
+      }
     } else {
       k.stillTime += dt;
     }
@@ -633,6 +690,7 @@ export class Game {
     if (dmg <= 0) return;
     k.hp -= dmg;
     k.hitFlash = 0.12;
+    this.fxEvent({ t: 'hurt', amount: dmg / k.maxHp });
     if (k.hp <= 0) {
       k.hp = 0;
       this.die();
@@ -795,6 +853,10 @@ export class Game {
     const rel = o.tier - k.stage;
     const thump = o.landmark ? 1 : o.structure ? (rel >= -1 ? 0.32 + (rel + 1) * 0.16 : 0.2) : rel >= 0 ? 0.16 : 0.1;
     this.shake = Math.max(this.shake, Math.min(1, thump));
+    if (o.landmark) this.impact(0.2, 1);
+    else if (o.structure && rel >= -1) this.impact(0.05 + 0.03 * (rel + 1), 0.35 + 0.2 * (rel + 1));
+    else if (rel >= 0) this.impact(0.035, 0.15);
+    if (cause !== 'crush' || rel >= -1) this.bumpCombo();
     // Slow-motion beat on a big collapse, rationed so a rampage at Apex stays full speed.
     if (o.landmark || (o.tier >= 4 && o.tier >= k.stage && cause !== 'crush' && cause !== 'boss' && this.time >= this.slowmoReadyAt)) {
       this.slowmo = Math.max(this.slowmo, o.landmark ? 0.6 : 0.25);
@@ -980,6 +1042,8 @@ export class Game {
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     this.fxEvent({ t: 'poof', x: p.x, y: p.y, small: crushed });
+    this.fxEvent({ t: 'eat', x: p.x, y: p.y });
+    if (k.stage <= 2) this.bumpCombo();
     return true;
   }
 
@@ -1037,6 +1101,8 @@ export class Game {
     c.dead = true;
     const k = this.kaiju;
     if (!c.silent) this.shake = Math.max(this.shake, k.stage <= 2 ? 0.2 : 0.1);
+    if (k.stage <= 2) this.impact(0.04, 0.2);
+    this.bumpCombo();
     const loot = lootFor(2, k.stage, 1);
     this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
     this.stats.scrap += loot.scrap * this.diff.loot;
@@ -1358,6 +1424,7 @@ export class Game {
   }
 
   unitFire(u, dist) {
+    this.fxEvent({ t: 'shot', kind: u.def.attack, x: u.x, y: u.y });
     const k = this.kaiju;
     const def = u.def;
     const lead = Math.min(0.6, dist / (def.proj || 600));
@@ -1421,6 +1488,8 @@ export class Game {
     u.dead = true;
     const k = this.kaiju;
     this.shake = Math.max(this.shake, u.tier >= k.stage ? 0.3 : 0.14);
+    if (u.tier >= k.stage) this.impact(0.06, 0.4);
+    this.bumpCombo();
     const loot = lootFor(u.tier, k.stage);
     this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
     this.stats.scrap += loot.scrap * this.diff.loot * (this.has('scavenger') ? 1.2 : 1);
@@ -1707,7 +1776,10 @@ export class Game {
       o.vy *= 1 - dt * 3;
       o.x += o.vx * dt;
       o.y += o.vy * dt;
-      if (Math.hypot(k.x - o.x, k.y - o.y) < k.r * 0.6 || o.t > 2) o.t = 99;
+      if (Math.hypot(k.x - o.x, k.y - o.y) < k.r * 0.6 || o.t > 2) {
+        o.t = 99;
+        this.fxEvent({ t: 'orb', combo: this.combo.n });
+      }
     }
     for (const f of floaters) f.life -= dt;
     for (const r of rings) r.life -= dt;
