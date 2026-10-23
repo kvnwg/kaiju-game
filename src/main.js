@@ -70,10 +70,14 @@ function handleEvents(events) {
         break;
       case 'grow':
         ui.flash(1);
-        // Every grow opens a pick; announce the new stage once the pick is made.
-        pendingGrowBanner = e.stage;
         hintUntil = 0;
         ui.hint('');
+        // If a pick is on screen, announce the new size once it closes.
+        if (game.state === 'picking') pendingGrowBanner = e.stage;
+        else ui.growBanner(e.stage);
+        break;
+      case 'levelUp':
+        ui.levelUp(e.level);
         break;
       case 'pick':
         if (game.state !== 'picking') break;
@@ -175,6 +179,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' || e.key === 'p') togglePause();
   if (!debug || !game) return;
   if (e.key === 'g') game.debugGrow();
+  if (e.key === 'l') game.debugLevel();
   if (e.key === 'b' && game.bossTimer !== null) game.bossTimer = 0.1;
   if (e.key === 'k' && game.boss) game.damageBoss(game.boss.hp + 1);
   if (e.key === 'h') game.kaiju.hp = game.kaiju.maxHp;

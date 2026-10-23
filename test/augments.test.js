@@ -1,89 +1,87 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AUGMENTS, AUGMENT_BY_ID, MOVES, SYNERGY_SETS, offerAugments, applyPick, completedSets, rollTier } from '../src/augments.js';
+import {
+  AUGMENTS, AUGMENT_BY_ID, MOVES, PASSIVES, SYNERGY_SETS, MOVE_SLOTS, PASSIVE_SLOTS,
+  offerAugments, applyPick, completedSets, maxLevel, moveStats, levelText,
+} from '../src/augments.js';
 import { createRng } from '../src/rng.js';
 
-test('pool: unique ids, plenty of moves and mods, every mod points at a real move', () => {
+test('pool: moves level to 8 with short texts, passives to 3-5, sets reference real augments', () => {
   const ids = new Set(AUGMENTS.map((a) => a.id));
   assert.equal(ids.size, AUGMENTS.length);
   assert.ok(MOVES.length >= 8);
-  const mods = AUGMENTS.filter((a) => a.kind === 'mod');
-  assert.ok(mods.length >= 15);
-  for (const m of mods) assert.ok(m.requires === 'any' || AUGMENT_BY_ID[m.requires]?.kind === 'move', m.id);
-  // Every move can be upgraded by at least one mod.
-  for (const mv of MOVES) assert.ok(mods.some((m) => m.requires === mv.id), mv.id);
-  for (const tier of ['silver', 'gold', 'prismatic']) assert.ok(MOVES.some((m) => m.tier === tier), tier);
+  assert.ok(PASSIVES.length >= 12);
+  for (const m of MOVES) {
+    assert.equal(maxLevel(m), 8, m.id);
+    for (let l = 1; l < 8; l++) {
+      const t = levelText(m.id, l);
+      assert.ok(t.length > 0 && t.length <= 30, `${m.id} L${l + 1}: "${t}"`);
+    }
+  }
+  for (const a of AUGMENTS) assert.ok(a.text.length <= 32, `${a.id}: "${a.text}"`);
+  for (const p of PASSIVES) assert.ok(maxLevel(p) >= 3 && maxLevel(p) <= 5, p.id);
   for (const s of SYNERGY_SETS) for (const id of s.augments) assert.ok(AUGMENT_BY_ID[id], id);
 });
 
-test('with no move yet, every option is a move', () => {
+test('move levels stack: Claw strikes twice at Lv3, Spines gain missiles, Laser splits at Lv5', () => {
+  assert.ok(!moveStats('clawStrike', 2).twice);
+  assert.ok(moveStats('clawStrike', 3).twice);
+  assert.equal(moveStats('spineMissiles', 1).count, 4);
+  assert.equal(moveStats('spineMissiles', 8).count, 12);
+  assert.ok(moveStats('laserEyes', 5).split);
+  assert.ok(Math.abs(moveStats('clawStrike', 8).dmg - 1.7) < 1e-9);
+});
+
+test('with no move yet, the offer leans on moves', () => {
   const rng = createRng(3);
-  for (const tier of ['silver', 'gold', 'prismatic']) {
-    for (let i = 0; i < 30; i++) {
-      const offer = offerAugments({ held: new Map(), tier, rng });
-      assert.equal(offer.length, 3);
-      assert.equal(new Set(offer).size, 3);
-      assert.ok(offer.every((id) => AUGMENT_BY_ID[id].kind === 'move'), offer.join());
-    }
+  for (let i = 0; i < 50; i++) {
+    const offer = offerAugments({ held: new Map(), rng });
+    assert.equal(offer.length, 3);
+    assert.equal(new Set(offer).size, 3);
+    assert.ok(offer.filter((id) => AUGMENT_BY_ID[id].kind === 'move').length >= 2, offer.join());
   }
 });
 
-test('mods only show up for moves you own, and one slot prefers them', () => {
-  const rng = createRng(9);
-  const held = new Map([['clawStrike', 1]]);
+test('slots: with 6 moves and 6 passives, only upgrades are offered', () => {
+  const held = new Map();
+  MOVES.slice(0, MOVE_SLOTS).forEach((m) => held.set(m.id, 1));
+  PASSIVES.slice(0, PASSIVE_SLOTS).forEach((p) => held.set(p.id, 1));
+  const rng = createRng(7);
   for (let i = 0; i < 60; i++) {
-    const offer = offerAugments({ held, tier: 'silver', rng });
-    for (const id of offer) {
-      const a = AUGMENT_BY_ID[id];
-      if (a.kind === 'mod') assert.ok(a.requires === 'any' || a.requires === 'clawStrike', id);
-    }
-    assert.ok(offer.some((id) => AUGMENT_BY_ID[id].requires === 'clawStrike'), offer.join());
+    for (const id of offerAugments({ held, rng })) assert.ok(held.has(id), id);
   }
 });
 
-test('held augments are not offered again unless upgradable', () => {
-  const rng = createRng(5);
-  const held = new Map([['clawStrike', 1], ['hairTrigger', 1], ['quickGrowth', 1]]);
-  let sawHair = false;
-  for (let i = 0; i < 80; i++) {
-    const offer = offerAugments({ held, tier: 'silver', rng });
-    assert.ok(!offer.includes('clawStrike'));
-    assert.ok(!offer.includes('quickGrowth'));
-    if (offer.includes('hairTrigger')) sawHair = true;
-  }
-  assert.ok(sawHair, 'upgradable mod comes back');
-});
-
-test('a dry tier falls back to the next tier down', () => {
-  const offer = offerAugments({ held: new Map(), tier: 'prismatic', rng: createRng(1) });
-  assert.equal(offer.length, 3);
-  assert.ok(offer.includes('meteorCall'));
-  assert.equal(offer.filter((id) => AUGMENT_BY_ID[id].tier === 'gold').length, 2);
+test('maxed augments are not offered; everything maxed falls back to Feast and Scrap Pile', () => {
+  const held = new Map();
+  MOVES.slice(0, MOVE_SLOTS).forEach((m) => held.set(m.id, maxLevel(m)));
+  PASSIVES.slice(0, PASSIVE_SLOTS).forEach((p) => held.set(p.id, maxLevel(p)));
+  const offer = offerAugments({ held, rng: createRng(1) });
+  assert.ok(offer.includes('feast') && offer.includes('scrapPile'));
 });
 
 test('guaranteed option is always offered (first-session Laser Eyes)', () => {
   for (let seed = 0; seed < 30; seed++) {
-    const offer = offerAugments({ held: new Map(), tier: 'gold', rng: createRng(seed), guarantee: 'laserEyes' });
+    const offer = offerAugments({ held: new Map(), rng: createRng(seed), guarantee: 'laserEyes' });
     assert.ok(offer.includes('laserEyes'));
   }
 });
 
 test('reroll excludes the current options when it can', () => {
   const rng = createRng(4);
-  const held = new Map([['tailSpin', 1]]);
-  const first = offerAugments({ held, tier: 'silver', rng });
-  const second = offerAugments({ held, tier: 'silver', rng, exclude: first });
+  const held = new Map([['tailSpin', 2]]);
+  const first = offerAugments({ held, rng });
+  const second = offerAugments({ held, rng, exclude: first });
   assert.equal(second.filter((id) => first.includes(id)).length, 0);
 });
 
-test('applyPick levels upgradable augments and caps them', () => {
+test('applyPick levels augments and caps them', () => {
   const held = new Map();
-  assert.equal(applyPick(held, 'thickHide'), 1);
-  assert.equal(applyPick(held, 'thickHide'), 2);
-  assert.equal(applyPick(held, 'thickHide'), 3);
+  for (let l = 1; l <= 5; l++) assert.equal(applyPick(held, 'thickHide'), l);
   assert.throws(() => applyPick(held, 'thickHide'));
-  applyPick(held, 'laserEyes');
+  for (let l = 1; l <= 8; l++) applyPick(held, 'laserEyes');
   assert.throws(() => applyPick(held, 'laserEyes'));
+  assert.equal(applyPick(held, 'feast'), 0);
 });
 
 test('completedSets detects a full set', () => {
@@ -91,11 +89,4 @@ test('completedSets detects a full set', () => {
   assert.equal(completedSets(held).length, 0);
   held.set('seismicSlam', 1);
   assert.deepEqual(completedSets(held).map((s) => s.id), ['demolition']);
-});
-
-test('rollTier respects the stage odds', () => {
-  const rng = createRng(11);
-  const counts = { gold: 0, prismatic: 0 };
-  for (let i = 0; i < 2000; i++) counts[rollTier({ gold: 0.7, prismatic: 0.3 }, rng)]++;
-  assert.ok(counts.prismatic > 450 && counts.prismatic < 750, JSON.stringify(counts));
 });

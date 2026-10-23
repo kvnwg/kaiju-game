@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect } from '../src/game.js';
 import { STAGES, MAX_STAGE } from '../src/config.js';
-import { AUGMENTS, AUGMENT_BY_ID, MOVES } from '../src/augments.js';
+import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 
 test('a human-sized kaiju starts among people and grows by eating them', () => {
@@ -15,32 +15,48 @@ test('a human-sized kaiju starts among people and grows by eating them', () => {
   assert.equal(g.stats.people, 1);
 });
 
-test('growing opens an augment pick', () => {
+test('levelling up opens an augment pick; growing in size does not', () => {
   const g = new Game({ seed: 5 });
+  g.debugLevel();
+  g.update(1 / 60);
+  assert.equal(g.kaiju.level, 2);
+  assert.equal(g.state, 'picking');
+  assert.equal(g.pick.options.length, 3);
+  assert.ok(g.choose(g.pick.options[0]));
+  assert.equal(g.state, 'playing');
+  // A big chunk of biomass grows the kaiju and queues several picks, one after another.
   g.addBiomass(STAGES[1].biomassToNext);
   g.update(1 / 60);
   assert.equal(g.kaiju.stage, 2);
-  assert.equal(g.state, 'picking');
-  assert.equal(g.pick.options.length, 3);
-  assert.ok(g.drainEvents().some((e) => e.type === 'grow'));
-  assert.ok(g.choose(g.pick.options[0]));
-  assert.equal(g.state, 'playing');
+  assert.ok(g.pendingPicks >= 1 && g.state === 'picking');
+  const queued = g.pendingPicks;
+  g.choose(g.pick.options[0]);
+  g.update(1 / 60);
+  assert.equal(g.pendingPicks, queued - 1);
 });
 
-test('first run guarantees Laser Eyes on the first pick, and the first offer is all moves', () => {
+test('levels come quickly: many picks in the first five minutes, size grows slower', () => {
+  const g = new Game({ seed: 1 });
+  let ups = 0;
+  let last = 1;
+  simulate(g, { maxTime: 300, onTick: () => { if (g.kaiju.level !== last) { last = g.kaiju.level; ups++; } } });
+  assert.ok(ups >= 8, `${ups} level-ups in 5 minutes`);
+  assert.ok(g.kaiju.stage <= 4, 'size grows slower than levels');
+});
+
+test('first run guarantees Laser Eyes on the first pick, and the first offer leans on moves', () => {
   const g = new Game({ seed: 8, firstRun: true });
-  g.debugGrow();
+  g.debugLevel();
   g.update(1 / 60);
   assert.ok(g.pick.options.includes('laserEyes'));
-  assert.ok(g.pick.options.every((id) => AUGMENT_BY_ID[id].kind === 'move'));
+  assert.ok(g.pick.options.filter((id) => AUGMENT_BY_ID[id].kind === 'move').length >= 2);
 });
 
 test('every move fires, hits things and shows its effect', () => {
   for (const m of MOVES) {
     const g = new Game({ seed: 5 });
     g.kaiju.invuln = 999;
-    g.held.set(m.id, 1);
-    for (const a of AUGMENTS) if (a.kind === 'mod' && a.requires === m.id) g.held.set(a.id, 1);
+    g.held.set(m.id, m.levels.length + 1); // max level: every signature upgrade on
     // Stand in the suburbs at house size so there is plenty in reach.
     g.kaiju.stage = 3;
     g.kaiju.r = 14;
@@ -55,13 +71,13 @@ test('every move fires, hits things and shows its effect', () => {
   }
 });
 
-test('mods change their move: Double Strike slashes twice, Barrage fires 8 spines', () => {
-  const count = (id, mods) => {
+test('levels change their move: Claw Lv3 slashes twice, Spines gain missiles', () => {
+  const count = (id, level) => {
     const g = new Game({ seed: 5 });
     g.kaiju.stage = 3;
     g.kaiju.r = 14;
-    g.held.set(id, 1);
-    for (const m of mods) g.held.set(m, 1);
+    g.kaiju.level = 200; // no level-up picks interrupting the count
+    g.held.set(id, level);
     let slashes = 0;
     let spines = 0;
     for (let i = 0; i < 30 * 3; i++) {
@@ -71,23 +87,40 @@ test('mods change their move: Double Strike slashes twice, Barrage fires 8 spine
     }
     return { slashes, spines, moves: g.stats.moves };
   };
-  const one = count('clawStrike', []);
-  const two = count('clawStrike', ['doubleStrike']);
+  const one = count('clawStrike', 1);
+  const two = count('clawStrike', 3);
   assert.equal(two.slashes / two.moves, 2 * (one.slashes / one.moves));
-  const s4 = count('spineMissiles', []);
-  const s8 = count('spineMissiles', ['barrage']);
-  assert.equal(s4.spines / s4.moves, 4);
-  assert.equal(s8.spines / s8.moves, 8);
+  const s1 = count('spineMissiles', 1);
+  const s2 = count('spineMissiles', 2);
+  assert.equal(s1.spines / s1.moves, 4);
+  assert.equal(s2.spines / s2.moves, 6);
 });
 
-test('one free reroll per pick, then one ad reroll per run', () => {
+test('three rerolls per run, then one ad reroll', () => {
   const g = new Game({ seed: 2 });
-  g.debugGrow();
+  g.debugLevel();
   g.update(1 / 60);
+  assert.ok(g.reroll(false));
+  assert.ok(g.reroll(false));
   assert.ok(g.reroll(false));
   assert.equal(g.reroll(false), false);
   assert.ok(g.reroll(true));
   assert.equal(g.reroll(true), false);
+});
+
+test('stat passives change the kaiju: Might, Toughness, Long Legs', () => {
+  const g = new Game({ seed: 2 });
+  const dmg = g.baseDamage();
+  const hp = g.kaiju.maxHp;
+  const sp = g.kaijuSpeed();
+  for (const id of ['might', 'toughness', 'longLegs']) {
+    g.state = 'picking';
+    g.pick = { options: [id], level: 2 };
+    assert.ok(g.choose(id));
+  }
+  assert.ok(Math.abs(g.baseDamage() - dmg * 1.1) < 1e-9);
+  assert.ok(Math.abs(g.kaiju.maxHp - hp * 1.15) < 1e-9);
+  assert.ok(Math.abs(g.kaijuSpeed() - sp * 1.08) < 1e-9);
 });
 
 test('death offers one revive, then ends the run keeping 50% scrap', () => {
@@ -105,9 +138,9 @@ test('death offers one revive, then ends the run keeping 50% scrap', () => {
 
 test('Thick Hide reduces bullet and shell damage only', () => {
   const g = new Game({ seed: 4 });
-  g.held.set('thickHide', 1);
+  g.held.set('thickHide', 2);
   g.takeDamage(10, 'bullet');
-  assert.equal(g.kaiju.maxHp - g.kaiju.hp, 8.5);
+  assert.ok(Math.abs(g.kaiju.maxHp - g.kaiju.hp - 8.4) < 1e-9);
   g.kaiju.hp = g.kaiju.maxHp;
   g.takeDamage(10, 'explosive');
   assert.equal(g.kaiju.maxHp - g.kaiju.hp, 10);
@@ -145,6 +178,7 @@ test('Domino Effect topples neighbours in the fall direction', () => {
   g2.kaiju.stage = 4;
   const [a2, n2] = neighbourPair(g2, 4);
   g2.held.set('dominoEffect', 1);
+  g2.kaiju.level = 200;
   g2.destroyObject(a2, { x: 1, y: 0 }, 'hit');
   for (let i = 0; i < 30; i++) g2.update(1 / 30);
   assert.ok(n2.hp < n2.maxHp, 'neighbour took collapse damage');
@@ -204,6 +238,7 @@ test('chained kills build a combo that pays a scrap bonus when it lapses', () =>
   const g = new Game({ seed: 5 });
   g.kaiju.stage = 3;
   const k = g.kaiju;
+  k.level = 200; // keep level-up picks from pausing the clock
   const props = g.objects.filter((o) => o.kind === 'prop' && o.tier === 3 && o.state === 'intact').slice(0, 12);
   for (const o of props) g.destroyObject(o, { x: 1, y: 0 }, 'hit');
   assert.equal(g.combo.n, props.length);

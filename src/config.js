@@ -12,15 +12,14 @@ WORLD.width = WORLD.cols * WORLD.cell + WORLD.seaWidth;
 WORLD.height = WORLD.rows * WORLD.cell;
 
 // 6 growth stages, from human-sized to skyline-sized. Size roughly doubles each stage.
-// pickOdds is the augment tier roll used when the kaiju grows INTO that stage.
 export const STAGES = [
   null,
-  { n: 1, name: 'Hatchling', size: 'Human', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 24, pickOdds: null },
-  { n: 2, name: 'Prowler', size: 'Backyard', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 420, pickOdds: { silver: 1 } },
-  { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 2500, pickOdds: { silver: 1 } },
-  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 12500, pickOdds: { silver: 0.5, gold: 0.5 } },
-  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 50000, pickOdds: { gold: 1 } },
-  { n: 6, name: 'Apex', size: 'Skyline', radius: 135, maxHp: 3200, damage: 5120, speed: 520, biomassToNext: Infinity, pickOdds: { gold: 0.7, prismatic: 0.3 } },
+  { n: 1, name: 'Hatchling', size: 'Human', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 45 },
+  { n: 2, name: 'Prowler', size: 'Backyard', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 1100 },
+  { n: 3, name: 'Brute', size: 'House', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 7000 },
+  { n: 4, name: 'Titan', size: 'Apartment block', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 30000 },
+  { n: 5, name: 'Colossus', size: 'Office tower', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 60000 },
+  { n: 6, name: 'Apex', size: 'Skyline', radius: 135, maxHp: 3200, damage: 5120, speed: 520, biomassToNext: Infinity },
 ];
 export const MAX_STAGE = 6;
 
@@ -137,7 +136,7 @@ export const ESCALATION = [
 
 export const BOSS = {
   name: 'Coast Guard Mech',
-  hp: 900000,
+  hp: 4500000,
   r: 150,
   speed: 150,
   contactDmg: 30,
@@ -163,3 +162,10 @@ export const CROWD = { people: 55, traffic: 22, personHp: 4, carHp: 30 };
 
 // How long eating one person takes: snatch, toss, chomp, gulp (seconds).
 export const EAT_TIME = 0.8;
+
+// Experience: biomass also fills a separate XP bar. Each level-up is an augment pick; the
+// cost of a level grows geometrically so picks come every ~20-40 s at every size.
+export const XP = { base: 8, growth: 1.24 };
+export function xpToNext(level) {
+  return XP.base * Math.pow(XP.growth, level - 1);
+}

@@ -1,8 +1,8 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME,
+  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext,
 } from './config.js';
-import { AUGMENT_BY_ID, offerAugments, applyPick, rollTier, completedSets } from './augments.js';
+import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
 import { generateCity, isWater, useCity } from './world.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
@@ -46,7 +46,7 @@ export class Game {
     const s1 = STAGES[1];
     this.kaiju = {
       x: this.city.spawn.x, y: this.city.spawn.y, r: s1.radius, stage: 1,
-      maxHp: s1.maxHp * this.def.hpMult, hp: s1.maxHp * this.def.hpMult,
+      maxHp: s1.maxHp * this.def.hpMult, hp: s1.maxHp * this.def.hpMult, xp: 0, level: 1,
       biomass: 0, facing: { x: -1, y: 0 }, vx: 0, vy: 0, moving: false, stillTime: 0,
       attackCd: 0.5, attackCount: 0, shield: 0, hitFlash: 0, invuln: 0, trailT: 0, stompT: 0,
       walkPhase: 0, lastAttack: null, inWater: false, contactT: 0, hopT: 0, hopMax: 0.5, hopH: 0, z: 0,
@@ -80,6 +80,8 @@ export class Game {
     this.state = 'playing';
     this.pick = null;
     this.picksMade = 0;
+    this.pendingPicks = 0; // level-ups waiting for their augment pick
+    this.rerolls = 3; // per run, Vampire Survivors style
     this.reviveAvailable = true;
     this.adRerollAvailable = true;
     this.director = { spawnT: ESCALATION[1].firstDelay, jetT: 4, crowdT: 0 };
@@ -178,7 +180,7 @@ export class Game {
 
   // 0 = golden afternoon, 1 = neon night. Follows run progress so the boss fight is at night.
   kaijuSpeed() {
-    return this.stage.speed * this.def.speedMult;
+    return this.stage.speed * this.def.speedMult * (1 + 0.08 * this.level('longLegs'));
   }
 
   get dusk() {
@@ -227,9 +229,18 @@ export class Game {
   }
 
   baseDamage() {
-    let m = this.stage.damage;
-    if (this.has('rageMode')) m *= 1 + 0.6 * (1 - this.kaiju.hp / this.kaiju.maxHp);
+    let m = this.stage.damage * (1 + 0.1 * this.level('might'));
+    if (this.has('rageMode')) m *= 1 + (0.2 + 0.2 * this.level('rageMode')) * (1 - this.kaiju.hp / this.kaiju.maxHp);
     return m;
+  }
+
+  // ---- stats from passives
+  maxHpFor(stage = this.kaiju.stage) {
+    return STAGES[stage].maxHp * this.def.hpMult * (1 + 0.15 * this.level('toughness'));
+  }
+
+  scrapMult() {
+    return 1 + 0.2 * this.level('scavenger');
   }
 
   setInput(x, y) {
@@ -364,7 +375,9 @@ export class Game {
     this.time += dt;
 
     this.checkGrowth();
+    if (this.pendingPicks > 0) this.openPick();
     if (this.state !== 'playing') return;
+    if (this.has('regen')) this.heal(0.004 * this.level('regen') * dt);
     this.updateKaiju(dt);
     this.updateAugments(dt);
     this.updateDirector(dt);
@@ -383,6 +396,14 @@ export class Game {
     if (this.preyT <= 0) {
       this.preyT = 1;
       this.prey = this.findPrey();
+      // Nothing your size left anywhere: you have outgrown the city, so grow anyway.
+      const k = this.kaiju;
+      this.starve = !this.prey && k.stage < MAX_STAGE ? (this.starve || 0) + 1 : 0;
+      if (this.starve >= 15) {
+        this.starve = 0;
+        k.biomass = Math.max(k.biomass, this.stage.biomassToNext);
+        this.emit('banner', { text: 'Outgrew the city!' });
+      }
     }
     this.shake = Math.max(0, this.shake - realDt * 2.5);
   }
@@ -437,7 +458,7 @@ export class Game {
 
     const mag = Math.hypot(this.input.x, this.input.y);
     k.moving = mag > 0.05;
-    let speed = this.stage.speed * this.def.speedMult;
+    let speed = this.stage.speed * this.def.speedMult * (1 + 0.08 * this.level('longLegs'));
     k.inWater = isWater(k.x, k.y) && !this.onDeck(k);
     if (k.inWater) speed *= 0.6;
     k.vx = this.input.x * speed;
@@ -684,7 +705,7 @@ export class Game {
     if (this.state !== 'playing' || k.invuln > 0) return;
     // The first session is tuned so almost everyone sees the boss go down.
     let dmg = amount * this.diff.enemyDmg * (this.firstRun ? 0.8 : 1);
-    if ((type === 'bullet' || type === 'shell') && this.has('thickHide')) dmg *= 1 - (0.15 + 0.1 * (this.level('thickHide') - 1));
+    if ((type === 'bullet' || type === 'shell') && this.has('thickHide')) dmg *= 1 - 0.08 * this.level('thickHide');
     if (k.shield > 0) {
       const absorbed = Math.min(k.shield, dmg);
       k.shield -= absorbed;
@@ -743,7 +764,7 @@ export class Game {
     const frac = k.hp / k.maxHp;
     k.stage++;
     const s = this.stage;
-    k.maxHp = s.maxHp * this.def.hpMult;
+    k.maxHp = this.maxHpFor();
     k.hp = Math.min(k.maxHp, k.maxHp * frac + k.maxHp * 0.15);
     k.shield = Math.min(k.shield * 2, k.maxHp * 0.3);
     this.stats.stageTimes[k.stage] = this.time;
@@ -751,20 +772,16 @@ export class Game {
     this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: s.radius * 2.5, life: 0.8, max: 0.8, color: 0x9cff7a, width: s.radius * 0.25 });
     this.shake = Math.max(this.shake, 0.5);
     this.emit('grow', { stage: k.stage, name: s.name, size: s.size });
-    if (s.pickOdds) this.openPick();
     if (k.stage === MAX_STAGE) this.bossTimer = BOSS.arriveDelay;
   }
 
   openPick() {
-    let tier;
+    if (this.state !== 'playing') return;
     let guarantee = null;
-    if (this.firstRun && this.picksMade === 0) {
-      // First session: Laser Eyes is guaranteed on the first pick so the player sees a big move early.
-      tier = 'gold';
-      guarantee = 'laserEyes';
-    } else tier = rollTier(this.stage.pickOdds, this.rng);
-    const options = offerAugments({ held: this.held, tier, rng: this.rng, guarantee });
-    this.pick = { tier, options, freeRerolls: 1 };
+    // First session: Laser Eyes is guaranteed on the first pick so the player sees a big move early.
+    if (this.firstRun && this.picksMade === 0) guarantee = 'laserEyes';
+    const options = offerAugments({ held: this.held, rng: this.rng, guarantee });
+    this.pick = { level: this.kaiju.level - this.pendingPicks + 1, options };
     this.state = 'picking';
     this.emit('pick', { pick: this.pick });
   }
@@ -772,19 +789,28 @@ export class Game {
   reroll(useAd = false) {
     const p = this.pick;
     if (!p || this.state !== 'picking') return false;
-    if (p.freeRerolls > 0) p.freeRerolls--;
+    if (this.rerolls > 0) this.rerolls--;
     else if (useAd && this.adRerollAvailable) this.adRerollAvailable = false;
     else return false;
-    p.options = offerAugments({ held: this.held, tier: p.tier, rng: this.rng, exclude: p.options });
+    p.options = offerAugments({ held: this.held, rng: this.rng, exclude: p.options });
     this.emit('pick', { pick: p });
     return true;
   }
 
   choose(id) {
     if (this.state !== 'picking' || !this.pick.options.includes(id)) return false;
+    const k = this.kaiju;
     const before = completedSets(this.held).map((s) => s.id);
     const level = applyPick(this.held, id);
+    if (id === 'feast') this.heal(0.3);
+    if (id === 'scrapPile') this.stats.scrap += 25 * k.stage * k.stage;
+    if (id === 'toughness') {
+      const frac = k.hp / k.maxHp;
+      k.maxHp = this.maxHpFor();
+      k.hp = k.maxHp * frac;
+    }
     this.picksMade++;
+    this.pendingPicks = Math.max(0, this.pendingPicks - 1);
     this.pick = null;
     this.state = 'playing';
     this.emit('picked', { id, level, name: AUGMENT_BY_ID[id].name });
@@ -792,9 +818,22 @@ export class Game {
     return true;
   }
 
+  // Biomass grows the kaiju (slowly) and fills the XP bar (quickly); each level is a pick.
   addBiomass(amount) {
-    this.kaiju.biomass += amount;
+    const k = this.kaiju;
+    k.biomass += amount;
     this.stats.biomass += amount;
+    k.xp += amount * (1 + 0.1 * this.level('appetite'));
+    while (k.xp >= xpToNext(k.level)) {
+      k.xp -= xpToNext(k.level);
+      k.level++;
+      this.pendingPicks++;
+      this.emit('levelUp', { level: k.level });
+    }
+  }
+
+  debugLevel() {
+    this.addBiomass((xpToNext(this.kaiju.level) - this.kaiju.xp) / (1 + 0.1 * this.level('appetite')) + 1e-6);
   }
 
   // ---------------------------------------------------------------- destruction
@@ -829,9 +868,9 @@ export class Game {
 
     if (cause !== 'boss') {
       const loot = lootFor(o.tier, k.stage, o.value);
-      let biomass = loot.biomass * (this.has('quickGrowth') ? 1.15 : 1);
+      let biomass = loot.biomass;
       if (cause === 'chain' && !completedSets(this.held).some((s) => s.id === 'demolition')) biomass = 0;
-      let scrap = loot.scrap * this.diff.loot * (this.has('scavenger') ? 1.2 : 1);
+      let scrap = loot.scrap * this.diff.loot * this.scrapMult();
       if (o.landmark) {
         scrap *= 4;
         this.stats.landmark = true;
@@ -847,9 +886,9 @@ export class Game {
       if (o.structure && o.tier >= k.stage) {
         this.fx.floaters.push({ x: o.x, y: o.y, h: o.height * 0.8, text: `+${Math.round(scrap)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
       }
-      if (o.vehicle && this.has('snackAttack')) this.heal(0.03);
-      if (this.has('magneticHide') && (o.vehicle || o.structure)) this.addShield(o.vehicle ? 0.02 : 0.03);
-      if (o.structure && this.has('buildingEater')) this.heal(0.05);
+      if (o.vehicle && this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
+      if (this.has('magneticHide') && (o.vehicle || o.structure)) this.addShield((o.vehicle ? 0.02 : 0.03) * (0.5 + 0.5 * this.level('magneticHide')));
+      if (o.structure && this.has('buildingEater')) this.heal(0.02 + 0.01 * this.level('buildingEater'));
     }
 
     // Every kill thumps the camera a little; the bigger it is next to you, the harder.
@@ -867,11 +906,12 @@ export class Game {
     }
     if (o.structure && o.tier >= 3) {
       if (this.has('dominoEffect')) this.schedule(0.25, () => this.domino(o));
-      if (this.has('gasMain') && this.rng.chance(0.2)) this.schedule(0.35, () => this.explode(o));
+      if (this.has('gasMain') && this.rng.chance(0.1 + 0.1 * this.level('gasMain'))) this.schedule(0.35, () => this.explode(o));
     }
   }
 
   domino(o) {
+    const dmgK = 0.5 + 0.25 * this.level('dominoEffect');
     const size = Math.max(o.w, o.h);
     const len = Math.max(size * 1.3, o.height * 0.8);
     const d = o.fallDir;
@@ -884,11 +924,11 @@ export class Game {
     for (const n of found) {
       if (n === o || n.state !== 'intact') continue;
       if (distToSegment(n.x, n.y, x1, y1, x2, y2) > width / 2 + Math.max(n.w, n.h) / 2) continue;
-      this.damageObject(n, o.maxHp * 0.75, d, 'chain', closestPoint(x1, y1, n));
+      this.damageObject(n, o.maxHp * dmgK, d, 'chain', closestPoint(x1, y1, n));
     }
-    for (const u of this.units) if (!u.dead && !u.flying && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, o.maxHp * 0.75);
+    for (const u of this.units) if (!u.dead && !u.flying && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, o.maxHp * dmgK);
     const b = this.boss;
-    if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(o.maxHp * 0.75);
+    if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(o.maxHp * dmgK);
     this.fxEvent({ t: 'dust', x: (x1 + x2) / 2, y: (y1 + y2) / 2, r: len * 0.5 });
   }
 
@@ -1053,7 +1093,7 @@ export class Game {
     p.chomped = false;
     this.stats.people++;
     const loot = lootFor(1, k.stage, 1);
-    this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
+    this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     if (!k.anim || k.anim.kind === 'eat') k.anim = { kind: 'eat', t: EAT_TIME, max: EAT_TIME };
@@ -1078,7 +1118,7 @@ export class Game {
     p.vz = 14 + k.r * 2;
     this.stats.people++;
     const loot = lootFor(1, k.stage, 1);
-    this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
+    this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     this.fxEvent({ t: 'poof', x: p.x, y: p.y, small: crushed });
@@ -1143,11 +1183,11 @@ export class Game {
     if (k.stage <= 2) this.impact(0.04, 0.2);
     this.bumpCombo();
     const loot = lootFor(2, k.stage, 1);
-    this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
+    this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
     this.stats.destroyed++;
-    if (this.has('snackAttack')) this.heal(0.03);
-    if (this.has('magneticHide')) this.addShield(0.02);
+    if (this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
+    if (this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'carDie', car: c, dir: norm(c.x - k.x, c.y - k.y) });
     this.spawnOrbs(c.x, c.y, 3, true);
   }
@@ -1530,12 +1570,12 @@ export class Game {
     if (u.tier >= k.stage) this.impact(0.06, 0.4);
     this.bumpCombo();
     const loot = lootFor(u.tier, k.stage);
-    this.addBiomass(loot.biomass * (this.has('quickGrowth') ? 1.15 : 1));
-    this.stats.scrap += loot.scrap * this.diff.loot * (this.has('scavenger') ? 1.2 : 1);
+    this.addBiomass(loot.biomass);
+    this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
     this.stats.units++;
     this.heal(UNIT_HEAL);
-    if (u.def.vehicle && this.has('snackAttack')) this.heal(0.03);
-    if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.02);
+    if (u.def.vehicle && this.has('snackAttack')) this.heal(0.01 + 0.01 * this.level('snackAttack'));
+    if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'unitDie', u, dir: norm(u.x - k.x, u.y - k.y) });
     if (!u.def.human) this.spawnExplosion(u.x, u.y, u.r * 2.2);
     this.spawnOrbs(u.x, u.y, 2 + u.tier, true);

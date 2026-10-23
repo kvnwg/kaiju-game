@@ -1,5 +1,5 @@
-import { STAGES, MAX_STAGE, STAGE_INFO, KAIJU, CITIES, DIFFICULTIES } from './config.js';
-import { AUGMENT_BY_ID, setsFor, SYNERGY_SETS } from './augments.js';
+import { STAGES, MAX_STAGE, STAGE_INFO, KAIJU, CITIES, DIFFICULTIES, xpToNext } from './config.js';
+import { AUGMENT_BY_ID, setsFor, SYNERGY_SETS, levelText, maxLevel, movesHeld, passivesHeld, MOVE_SLOTS, PASSIVE_SLOTS } from './augments.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -10,19 +10,11 @@ function fmtTime(t) {
 }
 
 function iconFor(a) {
-  if (a.kind === 'move') return a.id;
-  if (a.kind === 'mod') return a.requires === 'any' ? 'any' : a.requires;
-  return 'passive';
-}
-
-function kindLabel(a) {
-  if (a.kind === 'move') return 'Move';
-  if (a.kind === 'mod') return a.requires === 'any' ? 'Boosts all moves' : `Boosts ${AUGMENT_BY_ID[a.requires].name}`;
-  return 'Passive';
+  return a.id;
 }
 
 function icon(a) {
-  return `<i class="aug-ico ico-${iconFor(a)}">${a.kind === 'mod' ? '<b>+</b>' : ''}</i>`;
+  return `<i class="aug-ico ico-${iconFor(a)}"></i>`;
 }
 
 function fmtNum(n) {
@@ -53,6 +45,8 @@ export class UI {
       pick: $('#pick'), revive: $('#revive'), results: $('#results'), menu: $('#menu'), pause: $('#pause'),
     };
     this.augSig = '';
+    this.xpFill = $('#xpbar .fill');
+    this.xpText = $('#xpbar span');
     this.comboEl = $('#combo');
     this.comboNum = $('#combo b');
     this.comboBar = $('#combo i');
@@ -84,9 +78,11 @@ export class UI {
     const s = STAGES[k.stage];
     const growth = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / s.biomassToNext);
     this.growthFill.style.width = `${growth * 100}%`;
-    this.growthText.textContent = s.name;
+    this.growthText.textContent = `Size ${k.stage} · ${s.name}`;
     this.growthPct.textContent = k.stage >= MAX_STAGE ? 'MAX' : `${Math.floor(growth * 100)}%`;
-    this.stageNum.textContent = k.stage;
+    this.stageNum.textContent = k.level;
+    this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
+    this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';
     this.scrapEl.textContent = fmtNum(game.stats.scrap);
     // Little pops when things go up: the growth bar glows, the coin pill bumps.
     if (k.biomass > this.lastBio + 1e-6) this.retrigger(this.growthEl, 'gain');
@@ -118,16 +114,15 @@ export class UI {
     const sig = [...game.held.entries()].map(([id, l]) => `${id}${l}`).join(',');
     if (sig !== this.augSig) {
       this.augSig = sig;
-      // Moves first (with a cooldown meter), then their upgrades and passives.
-      const order = { move: 0, mod: 1, passive: 2 };
-      this.augbar.innerHTML = [...game.held.entries()]
-        .sort((x, y) => order[AUGMENT_BY_ID[x[0]].kind] - order[AUGMENT_BY_ID[y[0]].kind])
-        .map(([id, level]) => {
+      // Moves on top (with a cooldown meter), passives in a smaller row below.
+      const tile = ([id, level]) => {
           const a = AUGMENT_BY_ID[id];
           return `<div class="tile tier-${a.tier} kind-${a.kind}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${a.name}: ${a.text}">
-            ${icon(a)}${a.kind === 'move' ? '<span class="cd"></span>' : ''}${level > 1 ? `<b class="lvl">${level}</b>` : ''}</div>`;
-        })
-        .join('');
+            ${icon(a)}${a.kind === 'move' ? '<span class="cd"></span>' : ''}<b class="lvl${level >= maxLevel(a) ? ' max' : ''}">${level}</b></div>`;
+      };
+      const held = [...game.held.entries()].filter(([id]) => AUGMENT_BY_ID[id]);
+      const row = (kind) => held.filter(([id]) => AUGMENT_BY_ID[id].kind === kind).map(tile).join('');
+      this.augbar.innerHTML = `<div class="aug-row">${row('move')}</div><div class="aug-row">${row('passive')}</div>`;
       this.moveTiles = [...this.augbar.querySelectorAll('[data-move]')].map((el) => ({ el, id: el.dataset.move, cd: el.querySelector('.cd'), last: 1 }));
     }
     for (const t of this.moveTiles || []) {
@@ -150,6 +145,11 @@ export class UI {
     el.classList.remove(cls);
     void el.offsetWidth;
     el.classList.add(cls);
+  }
+
+  levelUp() {
+    this.retrigger($('#xpbar'), 'ding');
+    this.retrigger($('#stageBadge'), 'ding');
   }
 
   // Big stamped word for combo milestones.
@@ -195,36 +195,39 @@ export class UI {
   showPick(game, { onChoose, onReroll }) {
     const p = game.pick;
     const el = this.modals.pick;
-    const tierName = { silver: 'Silver', gold: 'Gold', prismatic: 'Prismatic' }[p.tier];
     const cards = p.options
       .map((id, i) => {
         const a = AUGMENT_BY_ID[id];
         const level = game.level(id);
+        const max = a.kind === 'filler' ? 0 : maxLevel(a);
+        const next = level + 1;
+        const tag = a.kind === 'filler' ? 'Bonus' : level ? `Lv ${level} → ${next}${next === max ? ' · Max' : ''}` : 'New';
         const sets = setsFor(id)
-          .map((s) => {
-            const have = s.augments.filter((x) => game.has(x) || x === id).length;
-            return `<span class="set" title="${s.bonus}">${s.name} ${have}/3</span>`;
+          .map((st) => {
+            const have = st.augments.filter((x) => game.has(x) || x === id).length;
+            return `<span class="set" title="${st.bonus}">${st.name} ${have}/3</span>`;
           })
           .join('');
-        return `<button class="card tier-${a.tier} kind-${a.kind}" data-id="${id}" style="--i:${i}">
-          <div class="card-top"><span class="tier">${a.tier}</span><span class="cat">${kindLabel(a)}</span></div>
-          <div class="card-main">${icon(a)}<div class="name">${a.name}${a.upgradable ? ' +' : ''}</div></div>
-          ${level ? `<div class="lvl">Level ${level} → ${level + 1}: ${a.levelText}</div>` : ''}
-          <div class="text">${a.text}</div>
-          <div class="sets">${sets}</div>
+        const pips = max > 1 ? `<div class="pips">${Array.from({ length: max }, (_, j) => `<i class="${j < level ? 'on' : j === level ? 'next' : ''}"></i>`).join('')}</div>` : '';
+        return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}" data-id="${id}" style="--i:${i}">
+          <div class="card-top"><span class="tier">${a.kind === 'filler' ? 'Bonus' : a.kind}</span><span class="cat">${tag}</span></div>
+          <div class="card-main">${icon(a)}<div class="name">${a.name}</div></div>
+          <div class="text">${level ? levelText(id, level) : a.text}</div>
+          ${pips}
+          ${sets ? `<div class="sets">${sets}</div>` : ''}
         </button>`;
       })
       .join('');
-    const freeLabel = p.freeRerolls > 0 ? 'Reroll (free)' : 'Reroll used';
+    const more = game.pendingPicks > 1 ? `+${game.pendingPicks - 1} queued` : '';
     el.innerHTML = `<div class="panel pick-panel">
         <div class="pick-head">
-          <h2>Size up!</h2>
-          <p><span class="tier-chip tier-${p.tier}">${tierName} pick</span>Lasts the rest of the run</p>
+          <h2>Level ${p.level}!</h2>
+          <p><span class="tier-chip tier-silver">Moves ${movesHeld(game.held)}/${MOVE_SLOTS}</span><span class="tier-chip tier-gold">Passives ${passivesHeld(game.held)}/${PASSIVE_SLOTS}</span>${more}</p>
         </div>
         <div class="cards">${cards}</div>
         <div class="row">
-          <button class="btn ghost" id="rerollFree" ${p.freeRerolls > 0 ? '' : 'disabled'}>${freeLabel}</button>
-          <button class="btn ghost ad" id="rerollAd" ${p.freeRerolls === 0 && game.adRerollAvailable ? '' : 'disabled'}>Reroll · watch ad</button>
+          <button class="btn ghost" id="rerollFree" ${game.rerolls > 0 ? '' : 'disabled'}>Reroll (${game.rerolls} left)</button>
+          <button class="btn ghost ad" id="rerollAd" ${game.rerolls === 0 && game.adRerollAvailable ? '' : 'disabled'}>Reroll · watch ad</button>
         </div>
       </div>`;
     el.querySelectorAll('.card').forEach((c) => c.addEventListener('click', () => onChoose(c.dataset.id)));

@@ -1,8 +1,9 @@
-// Attack moves granted by augments, and the mods that change them. Each move fires on its
-// own cooldown when something is in reach; the visuals are described through game.fx
+// Attack moves granted by augments. Each move's level (1-8) sets its stats and unlocks its
+// signature upgrades (see moveStats in augments.js). Each move fires on its own cooldown
+// when something is in reach; the visuals are described through game.fx
 // (slashes, beams, rings, swirls, cracks) and the kaiju's animation state (kaiju.anim).
 import { canDamage } from './config.js';
-import { MOVES } from './augments.js';
+import { MOVES, moveStats } from './augments.js';
 import { norm, distToRect, closestPoint, angleDiff } from './geom.js';
 
 const GHOST = 0xc58bff; // tint for Echo repeats
@@ -18,13 +19,18 @@ export class MoveSystem {
     return this.g.kaiju;
   }
 
+  // Global area from the Kaiju-Sized passive.
   size() {
-    return this.g.has('kaijuSized') ? 1.35 : 1;
+    return 1 + 0.1 * this.g.level('area');
+  }
+
+  st(id) {
+    return moveStats(id, this.g.level(id));
   }
 
   cooldown(id) {
     const m = MOVES.find((mv) => mv.id === id);
-    return m.cd / (1 + 0.2 * this.g.level('hairTrigger'));
+    return m.cd * Math.max(0.3, this.st(id).cd) * (1 - 0.08 * this.g.level('adrenaline'));
   }
 
   // 0..1 charge for the HUD.
@@ -45,7 +51,7 @@ export class MoveSystem {
         this.timers[m.id] = this.cooldown(m.id);
         g.stats.moves = (g.stats.moves || 0) + 1;
         g.fxEvent({ t: 'move', id: m.id });
-        if (g.has('echo')) g.schedule(0.5, () => this.cast(m.id, true) && g.fxEvent({ t: 'move', id: m.id, echo: true }));
+        if (g.rng.chance(0.3 * g.level('echo'))) g.schedule(0.5, () => this.cast(m.id, true) && g.fxEvent({ t: 'move', id: m.id, echo: true }));
       } else this.timers[m.id] = 0.3;
     }
     for (const a of this.active) a.update(dt);
@@ -128,19 +134,21 @@ export class MoveSystem {
   clawStrike(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
-    const wide = g.has('crescentSweep');
-    const reach = k.r * 2.6 * S * (wide ? 1.4 : 1);
+    const s = this.st('clawStrike');
+    const S = this.size() * s.area;
+    const wide = s.full;
+    const reach = k.r * 2.6 * S;
+    const D = this.base() * s.dmg;
     const [t] = this.targets(reach + k.r * 0.5);
     if (!t) return false;
     const ang = Math.atan2(t.y - k.y, t.x - k.x);
     const slash = (side) => {
       const arc = wide ? Math.PI * 1.9 : 2.3;
-      this.hitArc(k.x, k.y, ang, arc, reach, this.base() * 3.2);
+      this.hitArc(k.x, k.y, ang, arc, reach, D * 3.2);
       g.fx.slashes.push({ x: k.x, y: k.y, ang, arc, r: reach, side, life: 0.34, max: 0.34, color: echo ? GHOST : 0xfff3c4, h: k.r * 0.75 });
       this.anim('claw', 0.26, { side });
       g.shake = Math.max(g.shake, 0.14);
-      if (g.has('moltenClaws')) {
+      if (s.molten) {
         for (let i = -1; i <= 1; i++) {
           const a = ang + i * arc * 0.3;
           g.fires.push({ x: k.x + Math.cos(a) * reach * 0.7, y: k.y + Math.sin(a) * reach * 0.7, r: k.r * 0.7 * S, t: 3.5, max: 3.5, tick: 0 });
@@ -148,7 +156,7 @@ export class MoveSystem {
       }
     };
     slash(1);
-    if (g.has('doubleStrike')) g.schedule(0.2, () => slash(-1));
+    if (s.twice) g.schedule(0.2, () => slash(-1));
     return true;
   }
 
@@ -156,12 +164,14 @@ export class MoveSystem {
   tailSpin(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
+    const s = this.st('tailSpin');
+    const S = this.size() * s.area;
     const reach = k.r * 3.1 * S;
     if (!this.targets(reach).length) return false;
-    const spins = g.has('doubleSpin') ? 2 : 1;
-    const cyclone = g.has('cyclone');
-    const dur = cyclone ? 2 : 0.42 * spins;
+    const spins = s.spins;
+    const cyclone = Boolean(s.cyclone);
+    const D = s.dmg;
+    const dur = cyclone ? 2 * s.duration : 0.42 * spins;
     const turns = cyclone ? 5 * spins : spins;
     this.anim('spin', dur, { turns });
     let hitT = 0;
@@ -197,7 +207,7 @@ export class MoveSystem {
         if (hitT <= 0 && hits < totalHits) {
           hitT = cyclone ? 0.25 : 0.42;
           hits++;
-          g.areaDamage(k.x, k.y, reach, g.baseDamage() * (cyclone ? 1.3 : 2.6), 'hit');
+          g.areaDamage(k.x, k.y, reach, g.baseDamage() * D * (cyclone ? 1.3 : 2.6), 'hit');
           g.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: reach * 1.1, life: 0.35, max: 0.35, color, width: k.r * 0.25 });
           g.fxEvent({ t: 'dust', x: k.x, y: k.y, r: reach * 0.8 });
           g.shake = Math.max(g.shake, 0.2);
@@ -212,14 +222,15 @@ export class MoveSystem {
   spineMissiles(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
-    const n = g.has('barrage') ? 8 : 4;
+    const s = this.st('spineMissiles');
+    const S = this.size() * s.area;
+    const n = s.count;
     const targets = this.targets(k.r * 12 * S, n);
     if (!targets.length) return false;
     this.anim('spines', 0.5);
     for (let i = 0; i < n; i++) {
       const t = targets[i % targets.length];
-      g.schedule(i * 0.07, () => this.launchSpine(k.x - k.facing.x * k.r * 0.3, k.y - k.facing.y * k.r * 0.3, t, 1, echo, i));
+      g.schedule(i * 0.06, () => this.launchSpine(k.x - k.facing.x * k.r * 0.3, k.y - k.facing.y * k.r * 0.3, t, 1, echo, i));
     }
     return true;
   }
@@ -233,14 +244,14 @@ export class MoveSystem {
     const d = norm(target.x - x, target.y - y);
     g.projectiles.push({
       friendly: true, kind: 'spine', x, y, x0: x, y0: y, vx: (d.x - d.y * spread) * sp, vy: (d.y + d.x * spread) * sp, speed: sp,
-      r: k.r * 0.2 * scale, size: k.r * 0.22 * scale * S, arc: k.r * 2.6 * scale, h0: k.r * 1.4, dmg: this.base() * 1.7 * scale, life: 3, target,
+      r: k.r * 0.2 * scale, size: k.r * 0.22 * scale * S, arc: k.r * 2.6 * scale, h0: k.r * 1.4, dmg: this.base() * this.st('spineMissiles').dmg * 1.7 * scale, life: 3, target,
       color: echo ? GHOST : 0x8affd2, age: 0,
       onHit: (p) => {
         const r = k.r * 0.7 * scale * S;
         g.areaDamage(p.x, p.y, r, p.dmg * 0.6, 'hit');
         g.fx.rings.push({ x: p.x, y: p.y, r0: r * 0.2, r1: r, life: 0.25, max: 0.25, color: p.color, width: r * 0.3 });
         g.fxEvent({ t: 'sparks', x: p.x, y: p.y, h: k.r * 0.3, color: p.color });
-        if (scale === 1 && g.has('clusterSpines')) {
+        if (scale === 1 && this.st('spineMissiles').cluster) {
           const near = this.targets(k.r * 14, 6).filter((t) => t !== target && Math.hypot(t.x - p.x, t.y - p.y) < k.r * 5);
           for (let j = 0; j < 3; j++) {
             const nt = near[j] || { x: p.x + Math.cos(j * 2.1) * k.r * 2, y: p.y + Math.sin(j * 2.1) * k.r * 2 };
@@ -255,8 +266,9 @@ export class MoveSystem {
   carToss(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
-    const count = g.has('juggler') ? 3 : 1;
+    const s = this.st('carToss');
+    const S = this.size() * s.area;
+    const count = s.count;
     const targets = this.targets(k.r * 11 * S, count);
     if (!targets.length) return false;
     this.anim('throw', 0.35);
@@ -271,7 +283,7 @@ export class MoveSystem {
         model = grab.model;
         variant = grab.variant;
       }
-      g.schedule(i * 0.12, () => this.throwCar(k.x, k.y, targets[i % targets.length], model, variant, g.has('ricochet') ? 2 : 0, echo));
+      g.schedule(i * 0.12, () => this.throwCar(k.x, k.y, targets[i % targets.length], model, variant, s.bounce, echo));
     }
     return true;
   }
@@ -279,12 +291,13 @@ export class MoveSystem {
   throwCar(x, y, target, model, variant, bounces, echo, hit = []) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
+    const cs = this.st('carToss');
+    const S = this.size() * cs.area;
     const sp = g.stage.speed * 2.6 + 30;
     const d = norm(target.x - x, target.y - y);
     g.projectiles.push({
       friendly: true, kind: 'car', model, variant, x, y, x0: x, y0: y, vx: d.x * sp, vy: d.y * sp, speed: sp,
-      r: k.r * 0.4, scale: Math.max(1, k.r / 10) * S, arc: k.r * 2.2, h0: k.r * 1.6, dmg: this.base() * 3, life: 3, target, age: 0,
+      r: k.r * 0.4, scale: Math.max(1, k.r / 10) * Math.min(1.5, S), arc: k.r * 2.2, h0: k.r * 1.6, dmg: this.base() * cs.dmg * 3, life: 3, target, age: 0,
       spin: g.rng.range(4, 9), color: echo ? GHOST : 0xff9a3c,
       onHit: (p) => {
         const r = k.r * 1.3 * S;
@@ -303,19 +316,20 @@ export class MoveSystem {
   roar(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
+    const s = this.st('roar');
+    const S = this.size() * s.area;
     const radius = k.r * 8 * S;
     if (!this.targets(radius).length) return false;
     this.anim('roar', 0.9);
     const color = echo ? GHOST : 0xffe9a8;
     for (let i = 0; i < 3; i++) g.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: radius * (0.7 + i * 0.15), life: 0.6 + i * 0.15, max: 0.6 + i * 0.15, color, width: k.r * (0.35 - i * 0.08) });
-    for (const u of g.units) if (!u.dead && u.def.soft && Math.hypot(u.x - k.x, u.y - k.y) < radius) u.fear = 3;
+    for (const u of g.units) if (!u.dead && u.def.soft && Math.hypot(u.x - k.x, u.y - k.y) < radius) u.fear = s.fear;
     for (const p of g.people) if (!p.taken && Math.hypot(p.x - k.x, p.y - k.y) < radius * 0.6) g.flingPerson(p, false, k);
     // Shatter the windows nearby: every building in range gets chipped.
     for (const o of g.objectsNear(k.x, k.y, radius * 0.7)) {
-      if (o.structure && o.state === 'intact') g.damageObject(o, this.base() * (g.has('sonicRoar') ? 4 : 0.5), norm(o.x - k.x, o.y - k.y), 'hit', closestPoint(k.x, k.y, o));
+      if (o.structure && o.state === 'intact') g.damageObject(o, this.base() * s.dmg * (s.sonic ? 4 : 0.5), norm(o.x - k.x, o.y - k.y), 'hit', closestPoint(k.x, k.y, o));
     }
-    if (g.has('sonicRoar')) g.areaDamage(k.x, k.y, radius * 0.7, this.base() * 2, 'hit');
+    if (s.sonic) g.areaDamage(k.x, k.y, radius * 0.7, this.base() * s.dmg * 2, 'hit');
     g.shake = Math.max(g.shake, 0.35);
     g.emit('roar');
     return true;
@@ -325,16 +339,18 @@ export class MoveSystem {
   laserEyes(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
-    const over = g.has('overcharge');
-    const len = k.r * 9 * S * (over ? 1.6 : 1);
+    const s = this.st('laserEyes');
+    const S = this.size() * s.area;
+    const over = Boolean(s.sweepBack);
+    const len = k.r * 9 * S * s.length;
+    const D = s.dmg;
     const [t] = this.targets(len * 0.9);
     if (!t) return false;
     const center = Math.atan2(t.y - k.y, t.x - k.x);
     const sweep = 0.95;
     const dur = over ? 1.6 : 0.9;
-    const width = k.r * 0.3 * S * (over ? 1.5 : 1);
-    const fan = g.has('prismSplit') ? [-0.22, 0, 0.22] : [0];
+    const width = k.r * 0.3 * S * s.width;
+    const fan = s.split ? [-0.22, 0, 0.22] : [0];
     const color = echo ? GHOST : 0xff3b6b;
     this.anim('laser', dur + 0.1);
     let tick = 0;
@@ -360,7 +376,7 @@ export class MoveSystem {
             const x2 = ex + Math.cos(b) * len;
             const y2 = ey + Math.sin(b) * len;
             g.fx.beams.push({ x1: ex, y1: ey, x2, y2, width, life: 0.06, max: 0.06, color, h: k.r * 1.55, h2: 0.6, noFlash: true, spark: true, core: true });
-            if (hit) g.lineDamage(ex, ey, x2, y2, width * 1.6, g.baseDamage() * 0.55);
+            if (hit) g.lineDamage(ex, ey, x2, y2, width * 1.6, g.baseDamage() * D * 0.55);
           }
         }
         if (this.t >= dur) this.done = true;
@@ -373,29 +389,30 @@ export class MoveSystem {
   seismicSlam(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
+    const s = this.st('seismicSlam');
+    const S = this.size() * s.area;
     const radius = k.r * 4.6 * S;
     if (!this.targets(radius * 1.2).length) return false;
     const up = 0.42;
     this.anim('slam', up + 0.25);
     const color = echo ? GHOST : 0xffc36b;
     const land = () => {
-      g.areaDamage(k.x, k.y, radius, this.base() * 4.5, 'hit');
+      g.areaDamage(k.x, k.y, radius, this.base() * s.dmg * 4.5, 'hit');
       g.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.6, r1: radius, life: 0.5, max: 0.5, color, width: k.r * 0.45 });
       g.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.3, r1: radius * 0.6, life: 0.35, max: 0.35, color: 0xffffff, width: k.r * 0.3 });
       g.fxEvent({ t: 'dust', x: k.x, y: k.y, r: radius });
       g.fx.cracks.push({ x: k.x, y: k.y, r: radius * 0.8, life: 2.5, max: 2.5, seed: Math.random() * 100 });
       g.shake = Math.max(g.shake, 0.7);
       g.emit('slam');
-      if (g.has('aftershock')) {
-        g.schedule(0.55, () => {
-          g.areaDamage(k.x, k.y, radius * 1.45, this.base() * 3, 'hit');
+      for (let i = 0; i < s.aftershock; i++) {
+        g.schedule(0.55 * (i + 1), () => {
+          g.areaDamage(k.x, k.y, radius * 1.45, this.base() * s.dmg * 3, 'hit');
           g.fx.rings.push({ x: k.x, y: k.y, r0: radius * 0.5, r1: radius * 1.45, life: 0.6, max: 0.6, color, width: k.r * 0.5 });
           g.fxEvent({ t: 'dust', x: k.x, y: k.y, r: radius * 1.2 });
           g.shake = Math.max(g.shake, 0.5);
         });
       }
-      if (g.has('faultLines')) {
+      if (s.faults) {
         const base = Math.atan2(k.facing.y, k.facing.x) + Math.PI / 4;
         for (let i = 0; i < 4; i++) this.faultLine(k.x, k.y, base + (i * Math.PI) / 2, radius * 2.4, echo);
       }
@@ -442,13 +459,14 @@ export class MoveSystem {
   atomicBreath(echo) {
     const g = this.g;
     const k = this.k;
-    const S = this.size();
-    const long = g.has('longBreath');
-    const len = k.r * 13 * S * (long ? 1.5 : 1);
+    const s = this.st('atomicBreath');
+    const S = this.size() * s.area;
+    const len = k.r * 13 * S * s.length;
+    const D = s.dmg;
     if (!this.targets(len * 0.8).length) return false;
     const charge = 0.55;
-    const dur = long ? 2.4 : 1.2;
-    const width = k.r * 0.95 * S;
+    const dur = 1.2 * s.duration;
+    const width = k.r * 0.95 * S * s.width;
     const color = echo ? GHOST : 0x7df9ff;
     this.anim('breath', charge + dur, { charge });
     let tick = 0;
@@ -468,9 +486,9 @@ export class MoveSystem {
         tick -= dt;
         if (tick <= 0) {
           tick = 0.12;
-          g.lineDamage(x1, y1, x2, y2, width, g.baseDamage() * 1.5);
+          g.lineDamage(x1, y1, x2, y2, width, g.baseDamage() * D * 1.5);
         }
-        if (g.has('napalm')) {
+        if (s.napalm) {
           fireT -= dt;
           if (fireT <= 0) {
             fireT = 0.15;
@@ -491,18 +509,19 @@ export class MoveSystem {
     const ok = g.callMeteor();
     if (!ok) return false;
     this.anim('roar', 0.8);
-    if (g.has('meteorShower')) {
+    const s = this.st('meteorCall');
+    if (s.count > 1) {
       const span = g.viewSpan() * 0.35;
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < s.count - 1; i++) {
         const a = Math.random() * Math.PI * 2;
         const d = span * (0.3 + Math.random() * 0.7);
         const x = k.x + Math.cos(a) * d;
         const y = k.y + Math.sin(a) * d;
-        const r = k.r * 2.2 * this.size();
+        const r = k.r * 2.2 * this.size() * s.area;
         g.hazards.push({
-          friendly: true, kind: 'circle', x, y, r, t: 0, delay: 1.4 + i * 0.3, meteor: true, ghost: echo,
+          friendly: true, kind: 'circle', x, y, r, t: 0, delay: 1.4 + i * 0.22, meteor: true, ghost: echo,
           onHit: () => {
-            g.areaDamage(x, y, r * 1.4, g.baseDamage() * 5, 'hit');
+            g.areaDamage(x, y, r * 1.4, g.baseDamage() * s.dmg * 5, 'hit');
             g.spawnExplosion(x, y, r * 1.3);
             g.shake = Math.max(g.shake, 0.6);
           },

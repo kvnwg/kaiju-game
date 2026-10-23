@@ -28,7 +28,7 @@ npm test             # unit tests + headless autopilot runs (Node 20+)
 | Destruction | Buildings are pre-fractured into Voronoi chunks. Hits knock off the chunks nearest the impact, shoving into a building chips it where you push, and collapses tip toward the hit direction, then break into physics debris and leave a rubble pile. Small things shatter into voxels |
 | Lighting | Golden afternoon to sunset to neon night, following run progress. Windows light up after dark, neon glows, street lights pool on the ground, and the effects include soft shadows and bloom. The world renders as crisp full-resolution voxels with tilt-shift, while the HUD is pixel art. An optional Retro pixel look (pause menu) renders a small upscaled frame with 1px outlines, a limited palette and ordered dithering |
 | Kaiju | Rex, Gorilla Grunt, Ember Lizard and Volt Beetle, each with its own animated voxel rig (walk cycle, tail, jaw, punches) |
-| Augments | 38 augments in three kinds. **Moves** are attacks that fire on their own cooldown, each with its own animation and effects: Claw Strike, Tail Spin, Spine Missiles, Car Toss, Roar, Laser Eyes, Seismic Slam, Atomic Breath and Meteor Call. **Mods** upgrade one move (Double Strike, Crescent Sweep, Molten Claws, Cyclone, Barrage, Cluster Spines, Juggler, Ricochet, Prism Split, Overcharge, Aftershock, Fault Lines, Napalm, Long Breath, Meteor Shower...) or all of them (Hair Trigger, Kaiju-Sized, Echo), and are only offered once you own their move. **Passives** cover destruction chains, defence and growth. Your first offer is always three moves |
+| Augments | Vampire Survivors-style levelling. Eating and smashing fill an **XP bar** (separate from size); every level-up is a pick of 3, about every 10-20 seconds, ~40 per run. Hold up to **6 moves and 6 passives**. **Moves** (Claw Strike, Tail Spin, Spine Missiles, Car Toss, Roar, Laser Eyes, Seismic Slam, Atomic Breath, Meteor Call) level 1-8: most levels are stat bumps, key levels add the signature upgrade (Claw Lv3 strikes twice, Laser Lv5 splits in 3, Tail Spin Lv6 becomes a cyclone...). **Passives** level 1-5: stat passives (Might, Kaiju-Sized area, Adrenaline cooldown, Long Legs speed, Toughness, Regeneration, Appetite XP, Scavenger scrap, Thick Hide) and perks (Domino Effect, Gas Main, Building Eater, Magnetic Hide, Snack Attack, Rage Mode, Echo). When everything is maxed, picks offer a heal or scrap. 3 rerolls per run |
 | Run loop | 2 synergy sets, rerolls, escalating military, the boss, revive, results, difficulty tiers and local best scores |
 
 Not built yet: the lair, eggs, gems, the shop, live ops, the other cities, and real ad or IAP SDKs.
@@ -43,8 +43,8 @@ src/props.js      57 street and nature props
 src/models.js     kaiju rigs, people, military units, boss
 src/mesher.js     voxel meshing with face culling and ambient occlusion; Voronoi pre-fracture
 src/world.js      districts, roads, lake, bridge, lots, backyards, forest
-src/augments.js   augment catalogue (moves, mods, passives) and offer rules
-src/moves.js      the attack moves and how their mods change them
+src/augments.js   augment catalogue, move level tables, slots and offer rules
+src/moves.js      the attack moves and how their levels change them
 src/game.js       simulation (no DOM): movement, size rules, crowds, traffic, combat, boss
 src/render3d.js   three.js scene: camera, day/night, ground, water, building streaming, chipping, collapses
 src/actors3d.js   animated kaiju/boss rigs, units, crowd and traffic instancing
@@ -53,7 +53,7 @@ src/ui.js, input.js, storage.js, main.js
 test/             node:test suites + an autopilot bot used for balance checks
 ```
 
-The simulation and the voxel generators never touch the DOM, so tests can build every building and run full games headlessly. With the current numbers, the bot finishes a run in about 6 to 13 minutes and wins most of them.
+The simulation and the voxel generators never touch the DOM, so tests can build every building and run full games headlessly. With the current numbers, the bot finishes a run in about 7.5 to 12.5 minutes with ~40 level-ups and wins most of them.
 
 ## Gaps in the design doc
 
@@ -61,6 +61,6 @@ These came up while building. Each one is handled one way in the prototype and s
 
 0. **Starting size.** The doc starts the kaiju car-sized with 5 stages. This prototype starts it human-sized and adds a stage, so there are 6 stages and 5 augment picks per run.
 1. **First pick tier.** The first pick is meant to be Silver, but the first session guarantees a Gold move on it (Laser Eyes, so the first pick is showy). The prototype makes the first-ever pick a Gold pick.
-2. **Augment pool.** The doc's MVP pool (16 mostly passive augments) was replaced by a larger pool built around moves and mods, so the doc's augment list needs updating.
+2. **Augment pool and pacing.** The doc's MVP pool (16 mostly passive augments, one pick per size stage) was replaced by Vampire Survivors-style levelling: an XP bar with frequent picks, levelled moves and passives, and 6 + 6 slots. The doc's augment section needs updating.
 3. **Prismatic offers.** There are only a few prismatic augments, so a prismatic roll can come up short. The prototype tops it up from Gold.
 4. **First-session timing.** The doc grows the player at 0:30 but shows the first pick at 1:30. In the prototype, growing opens the pick immediately.

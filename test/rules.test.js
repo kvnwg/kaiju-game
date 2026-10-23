@@ -10,9 +10,7 @@ test('six growth stages from human to skyline, each roughly doubling', () => {
   for (let s = 2; s <= 6; s++) {
     const ratio = STAGES[s].radius / STAGES[s - 1].radius;
     assert.ok(ratio >= 2 && ratio <= 2.5, `stage ${s} ratio ${ratio}`);
-    assert.ok(STAGES[s].pickOdds, `stage ${s} grants a pick`);
   }
-  assert.equal(STAGES[1].pickOdds, null);
 });
 
 test('size rules: snacks break in one hit, one size up takes several, two up is out of reach', () => {
