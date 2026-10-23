@@ -10,6 +10,7 @@ import { isWater, SpatialGrid } from './world.js';
 import { VoxelGrid, hash3, shade } from './voxel.js';
 import { FX } from './fx3d.js';
 import { Actors, toGeometry } from './actors3d.js';
+import { Ambient } from './ambient3d.js';
 
 export const QUALITY = {
   high: { name: 'High', pixelRatio: 1.5, shadows: 2048, bloom: true, tilt: true, lights: 8 },
@@ -68,15 +69,17 @@ const TILT_SHIFT = {
     }`,
 };
 
-export function makeVoxelMaterial(uniforms) {
+// selfLit: how much of its own colour a surface shows regardless of light (keeps the kaiju readable at dusk).
+export function makeVoxelMaterial(uniforms, selfLit = 0) {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true });
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
+    shader.uniforms.uSelf = { value: selfLit };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aFlags;\nvarying float vFlags;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFlags = aFlags;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying float vFlags;')
+      .replace('#include <common>', '#include <common>\nuniform float uNight;\nuniform float uSelf;\nvarying float vFlags;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         float fE = mod(vFlags, 2.0);
         float fW = step(1.5, mod(vFlags, 4.0));
@@ -85,7 +88,10 @@ export function makeVoxelMaterial(uniforms) {
           diffuseColor.rgb = mix(vec3(0.26, 0.36, 0.48), baseCol * 0.35, uNight);
           totalEmissiveRadiance += baseCol * uNight * 1.45;
         }
-        if (fE > 0.5) totalEmissiveRadiance += baseCol * mix(0.55, 1.75, uNight);`);
+        if (fE > 0.5) totalEmissiveRadiance += baseCol * mix(0.55, 1.75, uNight);
+        totalEmissiveRadiance += baseCol * uSelf;`);
+    // Separate program per self-lit level.
+    m.customProgramCacheKey = () => `voxel-${selfLit}`;
   };
   return m;
 }
@@ -122,7 +128,8 @@ export class Renderer3D {
     this.scene.background = new THREE.Color(0xf0d6b8);
 
     this.fx = new FX(this.scene);
-    this.actors = new Actors(this.scene, () => makeVoxelMaterial(this.uniforms));
+    this.actors = new Actors(this.scene, (selfLit = 0) => makeVoxelMaterial(this.uniforms, selfLit));
+    this.ambient = new Ambient(this.scene, this.voxelMat);
     this.variants = new Map();
     this.propCache = new Map();
     this.bld = new Map();
@@ -206,6 +213,7 @@ export class Renderer3D {
     this.buildWater(city);
     this.buildProps(city);
     this.buildBridge(city);
+    this.ambient.build(city);
     for (const o of city.objects) if (o.kind === 'building') this.variantCounts.set(`${o.type}:${o.variant}`, (this.variantCounts.get(`${o.type}:${o.variant}`) || 0) + 1);
     this.lightGrid = new SpatialGrid(WORLD.width, WORLD.height, 256);
     for (const l of city.lights) {
@@ -225,6 +233,7 @@ export class Renderer3D {
     this.fx.clear();
     this.actors.clear();
     this.actors.setKaiju(game.def.id);
+    this.ambient.reset();
     for (const [, f] of this.floaters) f.el.remove();
     this.floaters.clear();
     this.propsDirty = true;
@@ -322,6 +331,76 @@ export class Renderer3D {
     const p = city.pier;
     ctx.fillStyle = '#7a5a3c';
     ctx.fillRect((p.x - 30) / S, (p.y - p.h / 2) / S, p.w / S, p.h / S);
+    // Painted ground details: paths, ponds, courts, plazas, parking bays, manholes, towels.
+    const R = (x, y, w, h, c) => {
+      ctx.fillStyle = c;
+      ctx.fillRect((x - w / 2) / S, (y - h / 2) / S, w / S, h / S);
+    };
+    for (const d of city.decals || []) {
+      switch (d.kind) {
+        case 'path':
+          R(d.x, d.y, d.w, d.h, '#cdbb94');
+          break;
+        case 'plaza':
+          R(d.x, d.y, d.w, d.h, '#c4c0b8');
+          ctx.fillStyle = '#b2ada3';
+          for (let x = d.x - d.w / 2; x < d.x + d.w / 2; x += 8) for (let y = d.y - d.h / 2; y < d.y + d.h / 2; y += 8) if (((x + y) / 8) % 2 < 1) ctx.fillRect(x / S, y / S, 4 / S + 0.5, 4 / S + 0.5);
+          break;
+        case 'pond':
+          ctx.fillStyle = '#b8a27a';
+          ctx.beginPath();
+          ctx.ellipse(d.x / S, d.y / S, (d.w / 2 + 5) / S, (d.h / 2 + 5) / S, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#2f6f9a';
+          ctx.beginPath();
+          ctx.ellipse(d.x / S, d.y / S, d.w / 2 / S, d.h / 2 / S, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#4f8fba';
+          ctx.beginPath();
+          ctx.ellipse((d.x - d.w * 0.12) / S, (d.y - d.h * 0.12) / S, d.w * 0.22 / S, d.h * 0.14 / S, 0, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        case 'sandbox':
+          R(d.x, d.y, d.w + 4, d.h + 4, '#8a6a48');
+          R(d.x, d.y, d.w, d.h, '#e0cc8e');
+          break;
+        case 'basketball':
+        case 'tennis': {
+          const ball = d.kind === 'basketball';
+          R(d.x, d.y, d.w + 8, d.h + 8, ball ? '#5a5d63' : '#3a7a5a');
+          R(d.x, d.y, d.w, d.h, ball ? '#c86a3a' : '#3a6aa8');
+          ctx.strokeStyle = '#f2f2f2';
+          ctx.lineWidth = 1;
+          ctx.strokeRect((d.x - d.w / 2) / S, (d.y - d.h / 2) / S, d.w / S, d.h / S);
+          ctx.beginPath();
+          ctx.moveTo(d.x / S, (d.y - d.h / 2) / S);
+          ctx.lineTo(d.x / S, (d.y + d.h / 2) / S);
+          ctx.stroke();
+          if (ball) {
+            ctx.beginPath();
+            ctx.arc(d.x / S, d.y / S, 5 / S * 1.5, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          break;
+        }
+        case 'parking':
+          R(d.x, d.y, d.w, d.h, '#45474d');
+          ctx.fillStyle = 'rgba(240,240,235,0.8)';
+          for (let x = d.x - d.w / 2 + 4; x < d.x + d.w / 2; x += 9) for (let y = d.y - d.h / 2 + 2; y < d.y + d.h / 2 - 10; y += 16) ctx.fillRect(x / S, y / S, 1, 12 / S);
+          break;
+        case 'manhole':
+          ctx.fillStyle = '#26272b';
+          ctx.beginPath();
+          ctx.arc(d.x / S, d.y / S, 3 / S + 0.6, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        case 'towel':
+          R(d.x, d.y, d.w, d.h, ['#d94f4f', '#3b6fd1', '#f2c12e', '#2f9e8f', '#d94f8a'][Math.floor(d.y) % 5]);
+          break;
+        default:
+          break;
+      }
+    }
     // Contact shadows under buildings and trees.
     for (const o of city.objects) {
       if (o.kind === 'building' && !o.walkable) {
@@ -987,6 +1066,16 @@ export class Renderer3D {
           this.propBreak({ type: c.model, variant: c.variant, x: c.x, y: c.y, rot: 0, height: 8, w: 12, h: 6 }, e.dir);
           break;
         }
+        case 'trainDie': {
+          const tr = e.train;
+          const deck = game.city.metro.deck + 4;
+          this.fx.fireBurst(tr.x, deck, tr.y, 24, 10);
+          for (let i = 0; i < 3; i++) {
+            const p = game.metroAt(tr.s - tr.dir * i * 36);
+            this.fx.addDebris({ x: p.x, y: deck, z: p.y, vx: e.dir.x * 40 + (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 30, vz: e.dir.y * 40 + (Math.random() - 0.5) * 30, sx: 34, sy: 12, sz: 12, size: 34, color: 0xc8ccd2, life: 12 });
+          }
+          break;
+        }
         case 'bossDie':
           this.fx.fireBurst(e.b.x, e.b.r, e.b.y, e.b.r, 30);
           break;
@@ -1159,6 +1248,7 @@ export class Renderer3D {
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
+    this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Footsteps and wading
     if (k.moving && k.r >= 6) {
       const step = Math.floor(k.walkPhase / Math.PI);

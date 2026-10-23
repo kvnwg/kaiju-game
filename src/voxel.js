@@ -112,47 +112,148 @@ export function eachWall(x0, z0, x1, z1, y0, y1, fn) {
   }
 }
 
-// A solid building body: dark interior, walls with a window grid.
-// win: { w, h, gap, sill, glass, lit: [colours], litChance, frame?, arch? }
+// A solid building body: dark interior, walls with a facade pattern.
+// win: { style, w, h, gap, sill, glass, lit: [colours], litChance, frame?, arch?, accent? }
+// Facade styles: punched (window grid), ribbon (horizontal glass bands), curtain (all glass
+// with mullions), grid (concrete frame with glass infill), tiles (two-colour panels),
+// stripes (alternating floor colours).
 export function body(g, rng, b) {
   const { x0, z0, x1, z1, y0, y1 } = b;
   const floorH = b.floorH || 4;
   const interior = b.interior ?? 0x1b1c22;
   g.box(x0 + 1, y0, z0 + 1, x1 - 1, y1, z1 - 1, (x, y, z) => ((y - y0) % floorH === 0 ? 0x2a2a30 : interior));
-  // Some lit rooms behind the glass, visible when walls break.
-  const roomLit = b.win ? b.win.lit : null;
+  const w = b.win;
+  const roomLit = w ? w.lit : null;
   const litSeed = rng.int(0, 1e6);
+  const style = (w && w.style) || 'punched';
+  const glassAt = (cell, floor, side) => {
+    if (hash3(cell + side * 101, floor, litSeed) < (w.litChance ?? 0.55)) return [roomLit[Math.floor(hash3(cell, floor * 7, side) * roomLit.length)], W];
+    return [w.glass, 0];
+  };
   eachWall(x0, z0, x1, z1, y0, y1, (x, y, z, side, u, len) => {
     const wall = typeof b.wall === 'function' ? b.wall(x, y, z, side, u) : b.wall;
-    const w = b.win;
     const fy = (y - y0) % floorH;
     const floor = Math.floor((y - y0) / floorH);
-    if (w && y >= y0 + (b.groundFloor ? floorH : 0) && u > 0 && u < len - 1) {
-      const period = w.w + w.gap;
-      // Centre the window pattern on the facade: gap, window, gap, window, ..., gap.
-      const n = Math.max(1, Math.floor((len - w.gap) / period));
-      const margin = Math.floor((len - n * period - w.gap) / 2);
-      const pu = (u - margin + period * 10) % period;
-      const inWin = pu >= w.gap && fy >= w.sill && fy < w.sill + w.h;
-      if (inWin) {
-        const top = fy === w.sill + w.h - 1;
-        if (w.arch && top && (pu === w.gap || pu === period - 1)) {
-          g.set(x, y, z, wall);
+    const above = y >= y0 + (b.groundFloor ? floorH : 0);
+    const edge = u === 0 || u === len - 1;
+    if (!w || !above || edge) {
+      g.set(x, y, z, wall);
+      return;
+    }
+    const frame = w.frame ?? wall;
+    const accent = w.accent ?? frame;
+    if (style === 'curtain' || style === 'grid') {
+      const mull = w.w + 1;
+      const thick = style === 'grid' ? 1 : 0;
+      if (fy <= thick - (style === 'curtain' ? 1 : 0) || (u % mull) === 0) {
+        g.set(x, y, z, style === 'grid' ? wall : frame);
+        return;
+      }
+      const [c, f] = glassAt(Math.floor(u / mull), floor, side);
+      g.set(x, y, z, c, f);
+      return;
+    }
+    if (style === 'ribbon') {
+      if (fy >= w.sill && fy < w.sill + w.h) {
+        if (u % (w.w + w.gap) === 0) {
+          g.set(x, y, z, frame);
           return;
         }
-        const winIndex = Math.floor((u + period * 10) / period);
-        const lit = hash3(winIndex + side * 101, floor, litSeed) < (w.litChance ?? 0.55);
-        if (lit) g.set(x, y, z, roomLit[Math.floor(hash3(winIndex, floor * 7, side) * roomLit.length)], W);
-        else g.set(x, y, z, w.glass);
+        const [c, f] = glassAt(Math.floor(u / (w.w + w.gap)), floor, side);
+        g.set(x, y, z, c, f);
         return;
       }
-      if (w.frame && pu >= w.gap - 1 && fy >= w.sill - 1 && fy <= w.sill + w.h && (pu === w.gap - 1 || fy === w.sill - 1)) {
-        g.set(x, y, z, w.frame);
+      g.set(x, y, z, wall);
+      return;
+    }
+    const period = w.w + w.gap;
+    // Centre the window pattern on the facade: gap, window, gap, window, ..., gap.
+    const n = Math.max(1, Math.floor((len - w.gap) / period));
+    const margin = Math.floor((len - n * period - w.gap) / 2);
+    const pu = (u - margin + period * 10) % period;
+    const inWin = pu >= w.gap && fy >= w.sill && fy < w.sill + w.h;
+    let base = wall;
+    if (style === 'stripes' && floor % 2) base = accent;
+    if (style === 'tiles' && (Math.floor(u / 2) + floor) % 2) base = accent;
+    if (inWin) {
+      const top = fy === w.sill + w.h - 1;
+      if (w.arch && top && (pu === w.gap || pu === period - 1)) {
+        g.set(x, y, z, base);
         return;
+      }
+      const [c, f] = glassAt(Math.floor((u + period * 10) / period), floor, side);
+      g.set(x, y, z, c, f);
+      return;
+    }
+    if (w.frame && pu >= w.gap - 1 && fy >= w.sill - 1 && fy <= w.sill + w.h && (pu === w.gap - 1 || fy === w.sill - 1)) {
+      g.set(x, y, z, w.frame);
+      return;
+    }
+    g.set(x, y, z, base);
+  });
+}
+
+// Vertical fins/piers standing one voxel proud of every facade.
+export function fins(g, x0, z0, x1, z1, y0, y1, every, c) {
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x += every) {
+      g.set(x, y, z1, c);
+      g.set(x, y, z0 - 1, c);
+    }
+    for (let z = z0; z < z1; z += every) {
+      g.set(x1, y, z, c);
+      g.set(x0 - 1, y, z, c);
+    }
+  }
+}
+
+// Classical portico: a row of columns in front of the facade with a beam on top.
+export function portico(g, x0, x1, z, y0, y1, c, spacing = 3) {
+  for (let x = x0; x < x1; x += spacing) {
+    g.box(x, y0, z, x + 1, y1, z + 2, c);
+    g.set(x, y0, z, shade(c, 0.85));
+  }
+  g.box(x0 - 1, y1, z - 1, x1 + 1, y1 + 2, z + 3, c);
+}
+
+// Triangular pediment over a front face, stepped in voxels.
+export function pediment(g, x0, x1, z0, z1, y, c) {
+  const steps = Math.ceil((x1 - x0) / 4);
+  for (let s = 0; s < steps; s++) g.box(x0 + s * 2, y + s, z0, x1 - s * 2, y + s + 1, z1, c);
+}
+
+// Half-ellipsoid dome.
+export function dome(g, cx, cz, r, y, h, c, f = 0) {
+  for (let yy = 0; yy < h; yy++) {
+    const rr = r * Math.sqrt(1 - (yy / h) ** 2);
+    g.cylinder(cx, cz, rr, y + yy, y + yy + 1, typeof c === 'function' ? c : (x, Y, z) => (Math.floor(Math.atan2(z - cz, x - cx) * 3) % 2 ? c : shade(c, 0.88)), f);
+  }
+}
+
+// Steel scaffolding: poles and planks around a footprint.
+export function scaffold(g, x0, z0, x1, z1, y0, y1) {
+  const pole = 0xe0a020;
+  const plank = 0x8a6a3a;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0 - 1; x <= x1; x += 3) {
+      g.set(x, y, z0 - 2, pole);
+      g.set(x, y, z1 + 1, pole);
+    }
+    for (let z = z0 - 1; z <= z1; z += 3) {
+      g.set(x0 - 2, y, z, pole);
+      g.set(x1 + 1, y, z, pole);
+    }
+    if ((y - y0) % 4 === 3) {
+      for (let x = x0 - 2; x <= x1 + 1; x++) {
+        g.set(x, y, z0 - 2, plank);
+        g.set(x, y, z1 + 1, plank);
+      }
+      for (let z = z0 - 2; z <= z1 + 1; z++) {
+        g.set(x0 - 2, y, z, plank);
+        g.set(x1 + 1, y, z, plank);
       }
     }
-    g.set(x, y, z, wall);
-  });
+  }
 }
 
 // One-voxel outset band around the footprint at height y.

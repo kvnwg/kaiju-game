@@ -407,3 +407,44 @@ export function bossModel() {
     ],
   };
 }
+
+// Elevated metro car: silver with a blue stripe and lit windows.
+export function trainCarModel(front = false) {
+  const g = new VoxelGrid(14, 6, 5);
+  g.box(0, 0, 0, 14, 5, 5, 0xc8ccd2);
+  g.box(0, 1, 0, 14, 2, 5, 0x2a5bd9);
+  for (let x = 1; x < 13; x++) if (x % 3) {
+    g.set(x, 3, 0, 0xfff2d8, E);
+    g.set(x, 3, 4, 0xfff2d8, E);
+  }
+  g.box(0, 5, 1, 14, 6, 4, 0x9aa0a8);
+  if (front) {
+    g.box(13, 2, 1, 14, 4, 4, 0x22303d);
+    g.set(13, 1, 1, 0xfff6d8, E);
+    g.set(13, 1, 3, 0xfff6d8, E);
+  }
+  return { grid: g, origin: { x: 7, z: 2.5 }, v: 2.5 };
+}
+
+// A small bird for flocks.
+export function birdModel() {
+  const g = new VoxelGrid(3, 1, 3);
+  g.set(1, 0, 1, 0x2a2a2a);
+  g.set(0, 0, 1, 0x3a3a3a);
+  g.set(2, 0, 1, 0x3a3a3a);
+  g.set(1, 0, 0, 0x4a4a4a);
+  return { grid: g, origin: { x: 1.5, z: 1.5 }, v: 0.8 };
+}
+
+// Advertising blimp.
+export function blimpModel() {
+  const g = new VoxelGrid(30, 10, 10);
+  for (let x = 0; x < 30; x++) {
+    const t = (x - 15) / 15;
+    const r = Math.sqrt(Math.max(0, 1 - t * t)) * 4.8;
+    for (let y = 0; y < 10; y++) for (let z = 0; z < 10; z++) if (Math.hypot(y - 4.5, z - 4.5) < r) g.set(x, y, z, Math.abs(y - 4.5) < 1.2 && x > 8 && x < 22 ? 0xff2bd6 : 0xd8dce2, Math.abs(y - 4.5) < 1.2 && x > 8 && x < 22 ? E : 0);
+  }
+  g.box(12, 0, 4, 18, 1, 6, 0x3a3d44);
+  for (const z of [1, 8]) g.box(0, 4, z, 3, 6, z + 1, 0xd94f4f);
+  return { grid: g, origin: { x: 15, z: 5 }, v: 6 };
+}

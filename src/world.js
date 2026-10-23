@@ -124,6 +124,8 @@ export function generateCity(seed = 1) {
   const lights = [];
   const cells = [];
   const uniquePlaced = new Set();
+  const decals = []; // painted ground: paths, ponds, courts, plazas, parking bays, manholes, beach towels
+  const powerLines = []; // chains of power poles to string cables between
   const add = (o) => {
     o.id = objects.length;
     o.state = 'intact';
@@ -229,10 +231,10 @@ export function generateCity(seed = 1) {
       }
       // Sidewalk furniture
       const furniture = {
-        neon: { vending: 3, neon_pole: 2, food_cart: 2, trash_can: 2, bench: 1, newspaper_box: 1, phone_booth: 1, bus_stop: 0.5 },
-        brick: { trash_can: 2, dumpster: 2, barrier: 3, drums: 2, crates: 2, power_pole: 2, hydrant: 1, cone: 2 },
-        pastel: { bench: 2, planter: 3, food_cart: 1, tree_blossom: 2, palm: 2, flower_bed: 2, mailbox: 1 },
-        garden: { tree_round: 3, bench: 2, planter: 2, bus_stop: 1, hydrant: 1, trash_can: 1, newspaper_box: 1 },
+        neon: { vending: 3, neon_pole: 2, food_cart: 2, trash_can: 2, bench: 1, newspaper_box: 1, phone_booth: 1, bus_stop: 0.5, planter_tree: 2, bike_rack: 1, newsstand: 0.8, bollard: 1.5, parking_meter: 1, cafe_table: 1, recycling: 0.6 },
+        brick: { trash_can: 2, dumpster: 2, barrier: 3, drums: 2, crates: 2, hydrant: 1, cone: 2, bike_rack: 1, parking_meter: 1, recycling: 1, newspaper_box: 0.5 },
+        pastel: { bench: 2, planter: 3, food_cart: 1, tree_blossom: 2, palm: 2, flower_bed: 2, mailbox: 1, cafe_table: 3, bike_rack: 1, ice_cream_cart: 0.8, bollard: 1 },
+        garden: { tree_round: 3, bench: 2, planter: 2, bus_stop: 1, hydrant: 1, trash_can: 1, newspaper_box: 1, cafe_table: 2, bike_rack: 1.5, planter_tree: 1.5, parking_meter: 1, newsstand: 0.5 },
         docks: { container: 3, crates: 2, drums: 2, barrier: 1 },
       }[style] || { hydrant: 1, trash_can: 1, tree_round: 2, mailbox: 1, bench: 1 };
       for (let t = 50; t < w - 20; t += rng.int(25, 55)) {
@@ -242,6 +244,22 @@ export function generateCity(seed = 1) {
       }
     }
     if (isUrban && (style === 'neon' || style === 'garden' || style === 'brick') && roadH(zc.c, zc.r) && roadV(zc.c, zc.r)) addProp('traffic_light', x - 14, y - 14);
+    if (isUrban && roadH(zc.c, zc.r) && roadV(zc.c + 1, zc.r)) addProp('street_sign', x + w + 12, y - 12);
+    // Overhead power lines on poles in the older districts.
+    if (style === 'brick' || style === 'suburb') {
+      for (const e of edges) {
+        if (!e.has || !rng.chance(0.7)) continue;
+        const chain = [];
+        for (let t = 12; t < w; t += 62) {
+          const px = e.horiz ? x + t : e.at + e.out * -3;
+          const py = e.horiz ? e.at + e.out * -3 : y + t;
+          if (!isWater(px, py)) chain.push(addProp('power_pole', px, py, e.horiz ? 0 : 1));
+        }
+        if (chain.length > 1) powerLines.push(chain);
+      }
+    }
+    // Manholes in the road
+    if (isUrban && roadH(zc.c, zc.r)) for (let t = 70; t < w; t += 140) decals.push({ kind: 'manhole', x: x + t, y: y - 30 - 8 * (t % 2 ? 1 : -1), w: 6, h: 6 });
   }
 
   // Pick a type whose street frontage and depth fit, regardless of how it will be rotated.
@@ -338,6 +356,7 @@ export function generateCity(seed = 1) {
     }
     if (style === 'brick' || style === 'docks' || style === 'neon' || rng.chance(0.4)) {
       // Parking lot
+      if (style !== 'docks') decals.push({ kind: 'parking', x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 });
       for (let px = x0 + 8; px < x1 - 6; px += 9) {
         for (let py = y0 + 8; py < y1 - 6; py += 16) {
           if (rng.chance(0.65)) addProp(style === 'docks' ? 'container' : rng.pick(['car', 'hatchback', 'van', 'taxi', 'pickup']), px, py, 1);
@@ -406,15 +425,101 @@ export function generateCity(seed = 1) {
     }
   }
 
+  // Parks: crossing paths, a centrepiece, a pond, a playground, a sports court, trees.
   function fillPark(zc) {
     const { x, y, w } = zc;
-    addProp('fountain', x + w / 2, y + w / 2);
-    for (let i = 0; i < 26; i++) {
-      const px = x + rng.range(10, w - 10);
-      const py = y + rng.range(10, w - 10);
-      if (Math.hypot(px - x - w / 2, py - y - w / 2) < 30 || isWater(px, py)) continue;
-      addProp(rng.weighted({ tree_round: 4, tree_blossom: 2, tree_birch: 2, bush: 3, bench: 2, flower_bed: 2, picnic_table: 1, lamppost: 1 }), px, py, rng.int(0, 3));
+    const cx = x + w / 2;
+    const cy = y + w / 2;
+    decals.push({ kind: 'path', x: cx, y: cy, w: w, h: 12 });
+    decals.push({ kind: 'path', x: cx, y: cy, w: 12, h: w });
+    decals.push({ kind: 'plaza', x: cx, y: cy, w: 56, h: 56 });
+    addProp(rng.chance(0.6) ? 'fountain' : 'statue', cx, cy);
+    const quads = rng.shuffle([[-1, -1], [1, -1], [-1, 1], [1, 1]]);
+    const q = (i) => ({ x: cx + quads[i][0] * w * 0.27, y: cy + quads[i][1] * w * 0.27 });
+    // Pond
+    const pond = q(0);
+    decals.push({ kind: 'pond', x: pond.x, y: pond.y, w: 90, h: 70 });
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      addProp(k % 2 ? 'bush' : 'tree_birch', pond.x + Math.cos(a) * 56, pond.y + Math.sin(a) * 46, rng.int(0, 3));
     }
+    // Playground
+    const pg = q(1);
+    decals.push({ kind: 'sandbox', x: pg.x, y: pg.y, w: 60, h: 50 });
+    addProp('slide', pg.x - 14, pg.y - 10, 0);
+    addProp('climber', pg.x + 12, pg.y - 8);
+    addProp('swing_set', pg.x - 8, pg.y + 12, 0);
+    addProp('seesaw', pg.x + 16, pg.y + 14, 0);
+    addProp('bench', pg.x, pg.y + 30, 0);
+    // Sports court
+    const ct = q(2);
+    if (rng.chance(0.5)) {
+      decals.push({ kind: 'basketball', x: ct.x, y: ct.y, w: 56, h: 32 });
+      addProp('hoop', ct.x - 27, ct.y, 0);
+      addProp('hoop', ct.x + 27, ct.y, 2);
+    } else {
+      decals.push({ kind: 'tennis', x: ct.x, y: ct.y, w: 60, h: 30 });
+      addProp('tennis_net', ct.x, ct.y, 0);
+    }
+    // Gazebo and picnic corner
+    const gz = q(3);
+    addProp('gazebo', gz.x, gz.y);
+    addProp('picnic_table', gz.x + 22, gz.y + 10, 0);
+    addProp('picnic_table', gz.x - 20, gz.y + 14, 0);
+    // Trees and lamps along the paths
+    for (let t = 30; t < w - 20; t += 36) {
+      addProp('lamppost', x + t, cy - 10, 0);
+      addProp('lamppost', cx + 10, y + t, 1);
+      if (Math.abs(x + t - cx) > 40) addProp('bench', x + t + 10, cy + 10, 0);
+    }
+    for (let i = 0; i < 26; i++) {
+      const px = x + rng.range(8, w - 8);
+      const py = y + rng.range(8, w - 8);
+      if (Math.abs(px - cx) < 14 || Math.abs(py - cy) < 14 || isWater(px, py)) continue;
+      if ([0, 1, 2, 3].some((k) => Math.hypot(px - q(k).x, py - q(k).y) < 50)) continue;
+      addProp(rng.weighted({ tree_round: 4, tree_blossom: 2, tree_birch: 2, tree_autumn: 1, bush: 3, flower_bed: 2 }), px, py, rng.int(0, 3));
+    }
+  }
+
+  // Plazas: a paved square with tree rows, flower beds, a centrepiece, a big screen,
+  // food trucks and cafe seating.
+  function fillPlaza(zc) {
+    const { x, y, w, style } = zc;
+    const cx = x + w / 2;
+    const cy = y + w / 2;
+    decals.push({ kind: 'plaza', x: cx, y: cy, w: w - 10, h: w - 10 });
+    addProp(rng.chance(0.5) ? 'statue' : 'fountain', cx, cy);
+    let topY = y + 20;
+    if (!uniquePlaced.has('city_hall') && style !== 'neon') {
+      uniquePlaced.add('city_hall');
+      const d = buildingDims('city_hall', 0);
+      addBuilding('city_hall', cx, y + d.h / 2 + 8, 0, 0);
+      topY = y + d.h + 24;
+    } else {
+      addProp('big_screen', cx, y + 30, 0);
+      topY = y + 50;
+    }
+    // Tree-lined promenade rows down both sides of the central axis.
+    for (let ty = topY; ty < y + w - 40; ty += 32) {
+      for (const dx of [-110, -70, 70, 110]) addProp('planter_tree', cx + dx, ty);
+      addProp('bench', cx - 90, ty + 16, 1);
+      addProp('bench', cx + 90, ty + 16, 1);
+      addProp('lamppost', cx - 40, ty, 0);
+      addProp('lamppost', cx + 40, ty, 2);
+    }
+    // Flower beds around the centrepiece
+    for (let a = 0; a < 8; a++) addProp('flower_bed', cx + Math.cos((a / 8) * Math.PI * 2) * 26, cy + Math.sin((a / 8) * Math.PI * 2) * 26, a % 2);
+    // Cafe corner and food trucks along the bottom edge
+    for (let i = 0; i < 8; i++) addProp('cafe_table', x + 30 + (i % 4) * 14, y + w - 70 + Math.floor(i / 4) * 14, 0);
+    for (let i = 0; i < 3; i++) addProp('food_truck', x + w - 150 + i * 46, y + w - 28, 0);
+    addProp('ice_cream_cart', cx, y + w - 60, 0);
+    // Side wings: lawns with trees
+    for (const side of [-1, 1]) {
+      for (let ty = topY; ty < y + w - 40; ty += 28) addProp(rng.weighted({ tree_round: 2, tree_blossom: style === 'pastel' ? 2 : 0.5, bush: 1 }), cx + side * (w / 2 - 22), ty, rng.int(0, 3));
+    }
+    addProp('flagpole', cx - 22, topY - 6);
+    addProp('flagpole', cx + 22, topY - 6);
+    if (style === 'neon') for (let i = 0; i < 6; i++) addProp('neon_pole', cx + rng.range(-150, 150), cy + rng.range(-150, 150));
   }
 
   function fillForest(zc) {
@@ -443,7 +548,19 @@ export function generateCity(seed = 1) {
     if (zc.style === 'forest') fillForest(zc);
     else if (zc.style === 'park') fillPark(zc);
     else if (zc.style === 'suburb') fillSuburb(zc);
+    else if (zc.style !== 'docks' && zc.density > 0.45 && noise2(zc.c, zc.r, 91) < 0.07) fillPlaza(zc);
     else fillUrban(zc);
+  }
+
+  // Beach along the pastel coast: umbrellas, towels and a lifeguard tower.
+  for (let y = 11 * cell; y < WORLD.height - 60; y += 34) {
+    let bx = seaWidth + 60;
+    while (bx > 0 && isWater(bx, y) === false) bx -= 8;
+    bx += 22;
+    if (isWater(bx, y) || bx > seaWidth + 80) continue;
+    addProp('beach_umbrella', bx + rng.range(-6, 6), y + rng.range(-8, 8), 0);
+    decals.push({ kind: 'towel', x: bx + 10, y: y + 6, w: 6, h: 12 });
+    if (Math.round(y / 34) % 8 === 0) addProp('lifeguard_tower', bx + 18, y);
   }
 
   // ---- the suspension bridge across the lake, on the highway row
@@ -477,6 +594,42 @@ export function generateCity(seed = 1) {
     for (let x = rd.x0; x <= rd.x1; x += 24) if (isWater(x, rd.y0) && x > seaWidth + 200) wet.push(x);
     if (!wet.length || wet.length > 14) continue;
     for (const x of wet) addBuilding('road_bridge', x, rd.y0, 0, 0);
+  }
+
+  // ---- elevated metro: down the brick/neon avenue, then east across the lake
+  const metro = { points: [], segments: [], stations: [] };
+  {
+    const ax = seaWidth + 5 * cell;
+    const route = [[ax, cell], [ax, 11 * cell], [seaWidth + 18 * cell, 11 * cell]];
+    const tr = buildingDims('metro_track', 0);
+    let dist = 0;
+    for (let i = 0; i < route.length - 1; i++) {
+      const [x0, y0] = route[i];
+      const [x1, y1] = route[i + 1];
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      const dx = (x1 - x0) / len;
+      const dy = (y1 - y0) / len;
+      for (let t = tr.w / 2; t < len; t += tr.w) {
+        const px = x0 + dx * t;
+        const py = y0 + dy * t;
+        // Clear street clutter under the viaduct.
+        for (const o of objects) if (o.state === 'intact' && o.kind === 'prop' && Math.abs(o.x - px) < (dx ? tr.w / 2 + 4 : 14) && Math.abs(o.y - py) < (dx ? 14 : tr.w / 2 + 4)) o.state = 'removed';
+        const station = Math.round((dist + t) / tr.w) % 18 === 9;
+        const seg = addBuilding(station ? 'metro_station' : 'metro_track', px, py, dx ? 0 : 1, 0);
+        metro.segments.push(seg);
+        if (station) {
+          metro.stations.push(dist + t);
+          const sx = px + (dx ? 0 : 24);
+          const sy = py + (dx ? 24 : 0);
+          if (!isWater(sx, sy)) addProp('metro_entrance', sx + (dx ? 0 : 6), sy + (dx ? 6 : 0), dx ? 0 : 1);
+        }
+      }
+      dist += len;
+    }
+    metro.points = route;
+    metro.length = dist;
+    metro.segLen = tr.w;
+    metro.deck = (tr.by - 2) * tr.v;
   }
 
   // Harbor Town's landmark: the lighthouse on a pier.
@@ -513,7 +666,8 @@ export function generateCity(seed = 1) {
 
   const grid = new SpatialGrid(WORLD.width, WORLD.height);
   for (const o of live) grid.insert(o);
-  return { objects: live, cells, roads, lights: liveLights, bridges, spawn, grid, landmark, pier, lake: LAKE, highwayRow: HIGHWAY_ROW };
+  const lines = powerLines.map((chain) => chain.filter((o) => o.state !== 'removed')).filter((c) => c.length > 1);
+  return { objects: live, cells, roads, lights: liveLights, bridges, spawn, grid, landmark, pier, lake: LAKE, highwayRow: HIGHWAY_ROW, decals, powerLines: lines, metro };
 }
 
 export const WORLD_LAYOUT = { DISTRICTS, LAKE };

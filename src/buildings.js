@@ -2,7 +2,7 @@
 // so a (type, variant) pair always yields the same building. Pure data, no rendering.
 import {
   VoxelGrid, E, W, body, cornice, parapet, pitchedRoof, roofClutter, garden, vines, sign, awning,
-  neonStrip, brick, shade, hash3, eachWall,
+  neonStrip, brick, shade, hash3, eachWall, fins, portico, pediment, dome, scaffold,
 } from './voxel.js';
 import { createRng } from './rng.js';
 
@@ -13,9 +13,10 @@ const NEON = [0xff2bd6, 0x22e6ff, 0xffd23f, 0x7b5cff, 0xff4d6d, 0x39ff88, 0xff8a
 export const PALETTES = {
   suburb: { walls: [0xe9e2d0, 0xcfe0e8, 0xf1e0b0, 0xd9c2a5, 0xbfd6c0, 0xf3f0ea], roofs: [0x8a3d32, 0x5b4636, 0x4a5d7a, 0x6b6f75], glass: 0x3b5570, lit: WARM },
   pastel: { walls: [0xf2a7a0, 0xf6c1b4, 0xf2cf6b, 0xa8d8c4, 0xf3e3c7, 0xf5b98a, 0xc9b6e4], roofs: [0xc86a4a, 0xb85c3e], glass: 0x4a4a66, lit: WARM, trim: 0xfaf3e8 },
-  garden: { walls: [0xe9e6df, 0xd9573b, 0xb8bcc2, 0xdcd3c0, 0xf0ece4], roofs: [0x8f939a], glass: 0x3d5266, lit: [...WARM, ...COOL] },
-  brick: { walls: [0x8a3b2a, 0xa14a34, 0x6e2f22, 0x7c4a3a], concrete: [0x8d8a83, 0xa8a399, 0x6f6c66], roofs: [0x77736c], glass: 0x2f3a44, lit: WARM },
-  neon: { walls: [0x2a2f3a, 0x1f2430, 0x3a3550, 0x2d3440, 0x403a4a], roofs: [0x22252c], glass: 0x1d2b3d, lit: [...COOL, ...WARM], neon: NEON },
+  garden: { walls: [0xe9e6df, 0xd9573b, 0xb8bcc2, 0xdcd3c0, 0xf0ece4, 0x9fb7c8, 0xc8b89a, 0x7a8a7a], roofs: [0x8f939a], glass: 0x3d5266, glasses: [0x3d5266, 0x2f5a5a, 0x5a4a35, 0x4a5a6a], lit: [...WARM, ...COOL] },
+  brick: { walls: [0x8a3b2a, 0xa14a34, 0x6e2f22, 0x7c4a3a, 0x9a6a4a, 0x5a3a2e], concrete: [0x8d8a83, 0xa8a399, 0x6f6c66, 0xb8ad98], roofs: [0x77736c], glass: 0x2f3a44, glasses: [0x2f3a44, 0x3a3428], lit: WARM },
+  neon: { walls: [0x2a2f3a, 0x1f2430, 0x3a3550, 0x2d3440, 0x403a4a, 0x3a4a5a, 0x4a3438, 0x34463f, 0x6a6a72, 0x8a8478, 0x5a4a3a], roofs: [0x22252c], glass: 0x1d2b3d, glasses: [0x1d2b3d, 0x1d3a36, 0x3a2d1d, 0x2a3340, 0x2d1d3a], lit: [...COOL, ...WARM], neon: NEON },
+  civic: { walls: [0xd8d0c0, 0xcfc4ae, 0xe8e4dc, 0xc0b49a], roofs: [0x5f9a86, 0x4a5d7a, 0xb8a070], glass: 0x2f3a44, lit: WARM, trim: 0xf2eee4 },
   forest: { walls: [0x7a5232, 0x5e3f26, 0x8a6a48], roofs: [0x3f5f34, 0x6b3a2a, 0x4a4a4a], glass: 0x2b3a3a, lit: WARM },
   docks: { walls: [0x8c8f94, 0x6f8fa8, 0xa89a7a, 0x9a5a3a], roofs: [0x5a5d63], glass: 0x334455, lit: WARM },
 };
@@ -29,9 +30,9 @@ function hashStr(s) {
 // ---------------------------------------------------------------- generic block building
 // d: { bx, bz, by, m } in voxels. o: options describing the look.
 function block(g, rng, d, o) {
-  const x0 = d.m;
+  const x0 = o.offsetX ?? d.m;
   const z0 = d.m;
-  const x1 = d.m + d.bx;
+  const x1 = x0 + d.bx;
   const z1 = d.m + d.bz;
   const floorH = o.floorH || 4;
   const top = o.y0 ?? 0;
@@ -447,6 +448,37 @@ function bridgeDeck(g, rng, d) {
   for (let x = m; x < m + d.bx; x++) g.set(x, y - 1, m + d.bz - 2, 0x9a3422);
 }
 
+// Elevated metro: a 16-voxel span on one central pier, rails on top.
+function metroTrack(g, rng, d) {
+  const m = d.m;
+  const deck = d.by - 3;
+  const cz = m + Math.floor(d.bz / 2);
+  g.box(m + Math.floor(d.bx / 2) - 1, 0, cz - 1, m + Math.floor(d.bx / 2) + 1, deck, cz + 1, 0x8a8a86);
+  g.box(m + Math.floor(d.bx / 2) - 2, deck - 2, m + 1, m + Math.floor(d.bx / 2) + 2, deck, m + d.bz - 1, 0x7a7a76);
+  g.box(m, deck, m, m + d.bx, deck + 1, m + d.bz, 0x5a5d63);
+  g.box(m, deck + 1, m, m + d.bx, deck + 2, m + 1, 0x8a8f96);
+  g.box(m, deck + 1, m + d.bz - 1, m + d.bx, deck + 2, m + d.bz, 0x8a8f96);
+  for (let x = m; x < m + d.bx; x++) {
+    if (x % 2 === 0) for (let z = m + 1; z < m + d.bz - 1; z++) g.set(x, deck + 1, z, 0x6a5040);
+    g.set(x, deck + 2, m + 2, 0xb8bcc4);
+    g.set(x, deck + 2, m + d.bz - 3, 0xb8bcc4);
+  }
+}
+
+function metroStation(g, rng, d) {
+  metroTrack(g, rng, { ...d, bz: d.bz });
+  const m = d.m;
+  const deck = d.by - 3;
+  for (const z of [m - 2, m + d.bz]) {
+    g.box(m, deck - 1, z, m + d.bx, deck + 2, z + 2, 0xa8a59e);
+    for (let x = m + 1; x < m + d.bx; x += 5) g.box(x, deck + 2, z, x + 1, deck + 6, z + 1, 0x55585e);
+    g.box(m, deck + 6, z - 1, m + d.bx, deck + 7, z + 3, 0x3a6a8a);
+    for (let x = m + 2; x < m + d.bx; x += 4) g.set(x, deck + 5, z + 1, 0xfff2d8, E);
+  }
+  g.box(m + 6, deck + 2, m + d.bz + 1, m + 10, deck + 4, m + d.bz + 2, 0x2a5bd9);
+  g.box(m + 7, deck + 2, m + d.bz + 1, m + 9, deck + 4, m + d.bz + 2, 0xffffff, E);
+}
+
 function roadBridge(g, rng, d) {
   const m = d.m;
   const y = d.by - 1;
@@ -580,6 +612,458 @@ function bellTower(g, rng, d, P) {
   g.set(Math.floor((b.x0 + b.x1) / 2), b.y1 - 4, b.z1, 0xfff4c2, E);
 }
 
+
+// ---------------------------------------------------------------- varied towers
+// Each building gets its own facade style, glass tint and window light colours.
+function pickLook(rng, P, prefer = {}) {
+  const style = rng.weighted(prefer.styles || { punched: 3, curtain: 2, grid: 2, ribbon: 2, stripes: 1 });
+  const lit = rng.pick([WARM, COOL, [...WARM, ...COOL], [0xffe2a8, 0xfff2d8], [0xbfe6ff, 0xffd38a, 0xff9fd0]]);
+  const glass = rng.pick(P.glasses || [P.glass]);
+  const wall = prefer.wall ?? rng.pick(P.walls);
+  const accent = shade(wall, rng.pick([0.75, 1.25, 0.6]));
+  const narrow = style === 'curtain' || style === 'grid';
+  return {
+    wall,
+    accent,
+    win: {
+      style, w: narrow ? rng.int(2, 3) : rng.int(1, 3), h: style === 'ribbon' ? rng.int(1, 2) : 2, gap: rng.int(1, 2), sill: 1,
+      glass, lit, litChance: rng.range(0.35, 0.7), frame: narrow ? shade(wall, 0.7) : rng.chance(0.4) ? shade(wall, 1.3) : null, accent,
+    },
+  };
+}
+
+const CROWNS = ['spire', 'stepped', 'lit', 'pyramid', 'dome', 'helipad', 'mast', 'watertank', 'garden', 'frame', 'slant'];
+
+function crown(g, rng, x0, z0, x1, z1, y, P, kind, wall) {
+  const cx = Math.floor((x0 + x1) / 2);
+  const cz = Math.floor((z0 + z1) / 2);
+  const w = x1 - x0;
+  const dp = z1 - z0;
+  const neon = rng.pick(P.neon || NEON);
+  const m = Math.min(w, dp);
+  switch (kind) {
+    case 'spire': {
+      const pw = Math.max(2, Math.floor(m * 0.2));
+      g.box(cx - pw, y, cz - pw, cx + pw + 1, y + 4, cz + pw + 1, shade(wall, 0.85));
+      let yy = y + 4;
+      for (let k = pw; k > 0; k--, yy += 2) g.box(cx - k + 1, yy, cz - k + 1, cx + k, yy + 2, cz + k, shade(wall, 0.9));
+      const len = Math.max(8, Math.round(m * 0.6));
+      g.box(cx, yy, cz, cx + 1, yy + len, cz + 1, 0xc8ccd2);
+      g.set(cx, yy + len, cz, 0xff3b3b, E);
+      return;
+    }
+    case 'stepped': {
+      let a = 0;
+      for (let k = 0; k < 3; k++) {
+        a += Math.max(1, Math.floor(m * 0.12));
+        g.box(x0 + a, y + k * 3, z0 + a, x1 - a, y + k * 3 + 3, z1 - a, shade(wall, 0.92 - k * 0.06));
+        for (let x = x0 + a; x < x1 - a; x++) g.set(x, y + k * 3 + 2, z1 - a, neon, rng.chance(0.5) ? E : 0);
+      }
+      return;
+    }
+    case 'lit': {
+      for (let x = x0; x < x1; x++) {
+        g.set(x, y, z0, neon, E);
+        g.set(x, y, z1 - 1, neon, E);
+        g.set(x, y + 1, z0, shade(wall, 0.8));
+        g.set(x, y + 1, z1 - 1, shade(wall, 0.8));
+      }
+      for (let z = z0; z < z1; z++) {
+        g.set(x0, y, z, neon, E);
+        g.set(x1 - 1, y, z, neon, E);
+      }
+      const pw = Math.floor(m * 0.25);
+      g.box(cx - pw, y, cz - pw, cx + pw, y + 4, cz + pw, (xx, yy) => (yy === y + 2 ? neon : shade(wall, 0.8)));
+      return;
+    }
+    case 'pyramid': {
+      const c = rng.pick([0x5f9a86, 0x3d5a78, 0xb8a070, 0x2a3340]);
+      for (let k = 0; k * 2 < m; k++) g.box(x0 + k, y + k, z0 + k, x1 - k, y + k + 1, z1 - k, k % 3 === 2 ? shade(c, 1.2) : c);
+      g.set(cx, y + Math.floor(m / 2), cz, 0xff3b3b, E);
+      return;
+    }
+    case 'dome': {
+      const c = rng.pick([0x5f9a86, 0xd9a83a, 0xb8bcc2]);
+      const r = m / 2 - 1;
+      g.cylinder(cx + 0.5, cz + 0.5, r, y, y + 2, shade(wall, 0.9));
+      dome(g, cx + 0.5, cz + 0.5, r, y + 2, Math.max(3, Math.round(r * 0.8)), c);
+      g.box(cx, y + 2 + Math.round(r * 0.8), cz, cx + 1, y + 6 + Math.round(r * 0.8), cz + 1, 0xd9a83a);
+      return;
+    }
+    case 'helipad': {
+      const pw = Math.floor(m * 0.35);
+      g.box(cx - pw, y, cz - pw, cx + pw, y + 1, cz + pw, 0x3a3d44);
+      for (let k = -2; k <= 2; k++) {
+        g.set(cx - 2, y + 1, cz + k, 0xf2f2f2);
+        g.set(cx + 2, y + 1, cz + k, 0xf2f2f2);
+      }
+      g.set(cx - 1, y + 1, cz, 0xf2f2f2);
+      g.set(cx, y + 1, cz, 0xf2f2f2);
+      g.set(cx + 1, y + 1, cz, 0xf2f2f2);
+      for (const [x, z] of [[cx - pw, cz - pw], [cx + pw - 1, cz - pw], [cx - pw, cz + pw - 1], [cx + pw - 1, cz + pw - 1]]) g.set(x, y + 1, z, 0xff3b3b, E);
+      return;
+    }
+    case 'mast': {
+      const h = Math.max(10, Math.round(m * 0.9));
+      g.box(cx - 1, y, cz - 1, cx + 2, y + 2, cz + 2, 0x55585e);
+      for (let yy = y + 2; yy < y + h; yy++) {
+        g.set(cx, yy, cz, 0xb8bcc4);
+        if (yy % 3 === 0) {
+          g.set(cx - 1, yy, cz, 0x8a8f96);
+          g.set(cx + 1, yy, cz, 0x8a8f96);
+        }
+      }
+      g.set(cx, y + h, cz, 0xff3b3b, E);
+      return;
+    }
+    case 'watertank': {
+      for (const [x, z] of [[cx - 2, cz - 2], [cx + 2, cz - 2], [cx - 2, cz + 2], [cx + 2, cz + 2]]) g.box(x, y, z, x + 1, y + 4, z + 1, 0x4a3a2a);
+      g.cylinder(cx + 0.5, cz + 0.5, 3, y + 4, y + 9, (x, yy) => (yy % 2 ? 0x8b6e4e : 0x7a5e40));
+      for (let k = 0; k < 3; k++) g.cylinder(cx + 0.5, cz + 0.5, 3 - k, y + 9 + k, y + 10 + k, 0x5a4a3a);
+      return;
+    }
+    case 'garden': {
+      garden(g, rng, x0 + 1, z0 + 1, x1 - 1, z1 - 1, y, 0.7);
+      for (let k = 0; k < Math.max(1, Math.floor(m / 6)); k++) {
+        const tx = rng.int(x0 + 2, x1 - 3);
+        const tz = rng.int(z0 + 2, z1 - 3);
+        g.box(tx, y, tz, tx + 1, y + 3, tz + 1, 0x5a3d26);
+        g.box(tx - 1, y + 3, tz - 1, tx + 2, y + 5, tz + 2, 0x3e8e41);
+      }
+      return;
+    }
+    case 'frame': {
+      const h = Math.max(6, Math.round(m * 0.4));
+      for (let yy = y; yy < y + h; yy++) {
+        for (const [x, z] of [[x0, z0], [x1 - 1, z0], [x0, z1 - 1], [x1 - 1, z1 - 1]]) g.set(x, yy, z, neon, E);
+      }
+      for (let x = x0; x < x1; x++) {
+        g.set(x, y + h, z0, neon, E);
+        g.set(x, y + h, z1 - 1, neon, E);
+      }
+      for (let z = z0; z < z1; z++) {
+        g.set(x0, y + h, z, neon, E);
+        g.set(x1 - 1, y + h, z, neon, E);
+      }
+      return;
+    }
+    case 'slant': {
+      for (let x = x0; x < x1; x++) {
+        const h = Math.round(((x - x0) / w) * m * 0.6);
+        for (let yy = 0; yy < h; yy++) for (let z = z0; z < z1; z++) {
+          const surface = yy === h - 1;
+          g.set(x, y + yy, z, surface ? (hash3(x, yy, z) < 0.5 ? 0x3d5a78 : 0x4a6a8a) : wall);
+        }
+      }
+      return;
+    }
+    default:
+      roofClutter(g, rng, x0 + 1, z0 + 1, x1 - 1, z1 - 1, y, {});
+  }
+}
+
+// Cut the vertical corners at 45 degrees, glazing the cut.
+function chamfer(g, x0, z0, x1, z1, y0, y1, c, glass) {
+  for (let y = y0; y < y1; y++) {
+    for (let i = 0; i < c; i++) for (let j = 0; j < c - i; j++) {
+      for (const [x, z] of [[x0 + i, z0 + j], [x1 - 1 - i, z0 + j], [x0 + i, z1 - 1 - j], [x1 - 1 - i, z1 - 1 - j]]) {
+        if (i + j < c - 1) g.clear(x, y, z);
+        else g.set(x, y, z, glass, (y % 3) && hash3(x, y, z) < 0.5 ? W : 0);
+      }
+    }
+  }
+}
+
+// A skyline tower with a random composition: plain, podium + tower, setbacks, chamfered or L-shaped.
+function varTower(g, rng, d, P, o = {}) {
+  const look = pickLook(rng, P, o);
+  const floorH = o.floorH ?? 3;
+  const forms = o.forms || { box: 2, podium: 3, setback: 2, chamfer: 1.5, ell: 1 };
+  const form = rng.weighted(forms);
+  const m = d.m;
+  let x0 = m;
+  let z0 = m;
+  let x1 = m + d.bx;
+  let z1 = m + d.bz;
+  let y = 0;
+  const neonOpts = o.neon ? { colors: P.neon || NEON, ...o.neon } : null;
+  if (form === 'podium') {
+    const ph = floorH * rng.int(3, 5);
+    block(g, rng, { ...d, by: ph }, { wall: look.accent, floorH: floorH + 1, win: { ...look.win, style: 'curtain', litChance: 0.8, lit: WARM }, shop: { sign: rng.chance(0.7), signColors: P.neon || NEON, awning: rng.chance(0.4) ? [0x3a6fb8, 0xffffff] : null, glow: WARM }, clutter: { sparse: true, kinds: ['ac', 'garden', 'vent'] }, roof: 0x55585e });
+    y = ph + 1;
+    const ix = Math.floor(d.bx * rng.range(0.14, 0.24));
+    const iz = Math.floor(d.bz * rng.range(0.14, 0.24));
+    x0 += ix;
+    x1 -= ix;
+    z0 += iz;
+    z1 -= rng.chance(0.5) ? iz : Math.floor(iz / 2);
+  }
+  if (form === 'setback') {
+    const tiers = rng.int(2, 3);
+    let yy = 0;
+    const per = Math.floor(d.by / tiers);
+    for (let t = 0; t < tiers; t++) {
+      const h = t === tiers - 1 ? d.by - yy : per;
+      body(g, rng, { x0, z0, x1, z1, y0: yy, y1: yy + h, floorH, wall: look.wall, win: look.win });
+      cornice(g, x0, z0, x1, z1, yy + h - 1, look.accent);
+      if (o.fins) fins(g, x0, z0, x1, z1, yy, yy + h, o.fins, look.accent);
+      if (neonOpts) neonDress(g, rng, x0, z0, x1, z1, yy, yy + h, floorH, neonOpts);
+      yy += h;
+      g.box(x0, yy, z0, x1, yy + 1, z1, shade(look.wall, 0.7));
+      if (t < tiers - 1) {
+        roofClutter(g, rng, x0 + 1, z0 + 1, x0 + 4, z1 - 1, yy + 1, { sparse: true, kinds: ['garden', 'ac'] });
+        const sx = Math.max(2, Math.floor((x1 - x0) * 0.13));
+        const sz = Math.max(2, Math.floor((z1 - z0) * 0.13));
+        x0 += sx;
+        x1 -= sx;
+        z0 += sz;
+        z1 -= sz;
+      }
+    }
+    crown(g, rng, x0, z0, x1, z1, yy + 1, P, o.crown || rng.pick(CROWNS), look.wall);
+    return;
+  }
+  if (form === 'ell') {
+    const wing = Math.floor(d.bz * rng.range(0.45, 0.6));
+    const h2 = Math.floor(d.by * rng.range(0.55, 0.8));
+    body(g, rng, { x0, z0: z1 - wing, x1, z1, y0: 0, y1: h2, floorH, wall: look.wall, win: look.win });
+    g.box(x0, h2, z1 - wing, x1, h2 + 1, z1, shade(look.wall, 0.7));
+    roofClutter(g, rng, x0 + 1, z1 - wing + 1, x1 - 1, z1 - 1, h2 + 1, { kinds: ['ac', 'garden', 'tank', 'solar'] });
+    x1 = x0 + Math.floor(d.bx * rng.range(0.45, 0.6));
+  }
+  body(g, rng, { x0, z0, x1, z1, y0: y, y1: d.by, floorH, wall: look.wall, win: look.win });
+  if (form === 'chamfer') chamfer(g, x0, z0, x1, z1, y, d.by, Math.max(2, Math.floor((x1 - x0) * 0.15)), look.win.glass);
+  if (o.fins || (rng.chance(0.25) && look.win.style !== 'curtain')) fins(g, x0, z0, x1, z1, y, d.by, o.fins || rng.int(2, 4), look.accent);
+  if (o.balconies) balconies(g, rng, x0, z1, x1, y, d.by, floorH, { width: 4, slab: shade(look.wall, 1.15), rail: 0x3a3c41, laundry: o.balconies === 'laundry', plants: true });
+  if (neonOpts) neonDress(g, rng, x0, z0, x1, z1, y, d.by, floorH, neonOpts);
+  if (rng.chance(0.5)) cornice(g, x0, z0, x1, z1, d.by - 1, look.accent);
+  g.box(x0, d.by, z0, x1, d.by + 1, z1, shade(look.wall, 0.7));
+  crown(g, rng, x0, z0, x1, z1, d.by + 1, P, o.crown || rng.pick(CROWNS), look.wall);
+}
+
+// ---------------------------------------------------------------- civic & special
+function classical(g, rng, d, P, o = {}) {
+  const wall = rng.pick(P.walls);
+  const trim = P.trim;
+  const m = d.m;
+  const b = block(g, rng, d, { wall, floorH: 6, win: { w: 2, h: 4, gap: 3, sill: 1, glass: 0x2f3a44, lit: WARM, litChance: 0.6, arch: true, frame: trim }, parapet: false, clutter: false, cornice: [d.by - 1], corniceColor: trim, roof: 0x8a8478 });
+  // Steps, columns and a pediment across the front.
+  for (let k = 0; k < 3; k++) g.box(b.x0 + 2 - k, k, b.z1 + 2 - k, b.x1 - 2 + k, k + 1, b.z1 + 3, 0xe8e4dc);
+  const cw = Math.min(d.bx - 4, o.porticoW || d.bx - 4);
+  const px0 = Math.floor(m + (d.bx - cw) / 2);
+  portico(g, px0, px0 + cw, b.z1, 0, Math.min(d.by - 2, 10), trim, 3);
+  pediment(g, px0 - 1, px0 + cw + 1, b.z1 - 1, b.z1 + 3, Math.min(d.by - 2, 10) + 2, trim);
+  if (o.dome) {
+    const r = Math.min(d.bx, d.bz) * 0.28;
+    const cx = m + d.bx / 2;
+    const cz = m + d.bz / 2;
+    g.cylinder(cx, cz, r + 1, d.by, d.by + 4, (x, y) => (y % 2 ? trim : wall));
+    for (let a = 0; a < 16; a++) g.set(Math.floor(cx + Math.cos(a / 2.55) * (r + 1)), d.by + 2, Math.floor(cz + Math.sin(a / 2.55) * (r + 1)), 0xffd38a, W);
+    dome(g, cx, cz, r, d.by + 4, Math.round(r), rng.pick([0x5f9a86, 0xd9a83a]));
+    g.box(Math.floor(cx), d.by + 4 + Math.round(r), Math.floor(cz), Math.floor(cx) + 1, d.by + 8 + Math.round(r), Math.floor(cz) + 1, 0xd9a83a);
+  } else {
+    roofClutter(g, rng, b.x0 + 1, b.z0 + 1, b.x1 - 1, b.z1 - 3, b.y1 + 1, { sparse: true, kinds: ['ac', 'vent'] });
+  }
+  if (o.sign) sign(g, rng, 0, Math.floor(m + d.bx / 2), Math.min(d.by - 2, 10) + 1, Math.min(cw - 2, 12), 1, b.z1 + 2, [0xffd38a], { bg: trim, frame: trim, seed: 5 });
+  // Flag
+  g.box(b.x1 - 2, b.y1, b.z1 - 2, b.x1 - 1, b.y1 + 8, b.z1 - 1, 0xd8d8d8);
+  g.box(b.x1 - 1, b.y1 + 5, b.z1 - 2, b.x1 + 3, b.y1 + 8, b.z1 - 1, (x, y) => (y === b.y1 + 7 ? 0x2a4a9a : y === b.y1 + 6 ? 0xf2f2f2 : 0xd93636));
+}
+
+function cathedral(g, rng, d, P) {
+  const m = d.m;
+  const wall = rng.pick([0xc0b49a, 0xa89a80, 0xd8d0c0]);
+  const naveH = Math.floor(d.by * 0.42);
+  const b = block(g, rng, { ...d, by: naveH }, { wall, floorH: naveH, win: { w: 2, h: naveH - 4, gap: 3, sill: 2, glass: 0x4a2f6a, lit: [0xff7fbf, 0x7fbfff, 0xffd38a, 0x9fff9f], litChance: 0.9, arch: true }, parapet: false, clutter: false });
+  pitchedRoof(g, b.x0, b.z0, b.x1, b.z1, naveH, 0x4a5d7a, false, 1);
+  const tw = Math.max(4, Math.floor(d.bx * 0.3));
+  for (const tx of [m, m + d.bx - tw]) {
+    body(g, rng, { x0: tx, z0: b.z1 - tw, x1: tx + tw, z1: b.z1, y0: 0, y1: d.by, floorH: 6, wall, win: { w: 1, h: 4, gap: tw - 2, sill: 1, glass: 0x222233, lit: WARM, litChance: 0.4, arch: true } });
+    for (let s = 0; s * 2 < tw; s++) g.box(tx + s, d.by + s * 2, b.z1 - tw + s, tx + tw - s, d.by + s * 2 + 2, b.z1 - s, 0x4a5d7a);
+  }
+  // Rose window
+  const cx = m + d.bx / 2;
+  for (let a = 0; a < 40; a++) {
+    const r = (a % 4) * 0.9;
+    g.set(Math.floor(cx + Math.cos(a) * r), Math.floor(naveH * 0.75 + Math.sin(a) * r), b.z1 - 1, [0xff7fbf, 0x7fbfff, 0xffd38a][a % 3], W);
+  }
+}
+
+function clockTower(g, rng, d, P) {
+  const m = d.m;
+  const wall = rng.pick([0xc0b49a, 0x8a3b2a, 0xd8d0c0]);
+  body(g, rng, { x0: m, z0: m, x1: m + d.bx, z1: m + d.bz, y0: 0, y1: d.by, floorH: 6, wall, win: { w: 1, h: 3, gap: 3, sill: 2, glass: 0x2f3a44, lit: WARM, litChance: 0.4, arch: true } });
+  const cy = d.by - 6;
+  const cxm = m + Math.floor(d.bx / 2);
+  for (const side of [0, 2]) {
+    for (let a = 0; a < 30; a++) {
+      const r = 3.2;
+      const px = Math.round(Math.cos(a / 4.77) * r);
+      const py = Math.round(Math.sin(a / 4.77) * r);
+      if (side === 0) g.set(cxm + px, cy + py, m + d.bz, 0xfff6d8, E);
+      else g.set(m + d.bx, cy + py, m + Math.floor(d.bz / 2) + px, 0xfff6d8, E);
+    }
+    if (side === 0) {
+      for (let k = 0; k < 3; k++) g.set(cxm, cy + k, m + d.bz, 0x222222);
+      g.set(cxm + 1, cy, m + d.bz, 0x222222);
+    }
+  }
+  cornice(g, m, m, m + d.bx, m + d.bz, d.by - 1, shade(wall, 0.8));
+  for (let s = 0; s * 2 < d.bx; s++) g.box(m + s, d.by + s * 2, m + s, m + d.bx - s, d.by + s * 2 + 2, m + d.bz - s, 0x5f9a86);
+}
+
+function townhouseRow(g, rng, d, P) {
+  const m = d.m;
+  const n = Math.max(3, Math.floor(d.bx / 6));
+  const wPer = Math.floor(d.bx / n);
+  const colors = [0x8a3b2a, 0xa14a34, 0xd9c2a5, 0x5a6a8a, 0x6a8a6a, 0xf2cf6b, 0xc86a8a, 0xe9e2d0, 0x7c4a3a];
+  for (let i = 0; i < n; i++) {
+    const x0 = m + i * wPer;
+    const x1 = i === n - 1 ? m + d.bx : x0 + wPer;
+    const h = d.by - rng.int(0, 4);
+    const wall = rng.pick(colors);
+    body(g, rng, { x0, z0: m, x1, z1: m + d.bz, y0: 0, y1: h, floorH: 4, wall, win: { w: 1, h: 2, gap: 1, sill: 1, glass: 0x2f3a44, lit: WARM, litChance: 0.6, frame: 0xf2eee4 } });
+    cornice(g, x0, m, x1, m + d.bz, h - 1, 0xf2eee4);
+    // Stoop and door
+    g.box(x0 + 1, 0, m + d.bz, x0 + 3, 1, m + d.bz + 2, 0x9a9590);
+    g.box(x0 + 1, 1, m + d.bz - 1, x0 + 2, 3, m + d.bz, rng.pick([0x2a4a2a, 0x5a1a1a, 0x1a2a4a, 0x111111]));
+    if (rng.chance(0.4)) pitchedRoof(g, x0, m, x1, m + d.bz, h, rng.pick([0x5b4636, 0x4a4a4a]), false, 0);
+    else roofClutter(g, rng, x0 + 1, m + 1, x1 - 1, m + d.bz - 1, h, { sparse: true, kinds: ['ac', 'garden', 'antenna'] });
+  }
+}
+
+function shopRow(g, rng, d, P) {
+  const m = d.m;
+  const n = Math.max(2, Math.floor(d.bx / 8));
+  const wPer = Math.floor(d.bx / n);
+  const awnings = [[0xd94f4f, 0xffffff], [0x2f9e8f, 0xffffff], [0xf2c12e, 0x2a2a2a], [0x3b6fd1, 0xffffff], [0x6a3a8a, 0xf2e6a0]];
+  for (let i = 0; i < n; i++) {
+    const x0 = m + i * wPer;
+    const h = d.by - rng.int(0, 3);
+    block(g, rng, { ...d, bx: i === n - 1 ? d.bx - i * wPer : wPer, by: h }, {
+      y0: 0, wall: rng.pick(P.walls), floorH: 4, win: { w: 2, h: 2, gap: 2, sill: 1, glass: P.glass, lit: WARM, litChance: 0.5 },
+      shop: { awning: rng.pick(awnings), sign: true, signColors: [rng.pick([0xff4d6d, 0x22e6ff, 0xffd23f, 0x39ff88])], glow: WARM }, clutter: { sparse: true, kinds: ['ac', 'vent'] },
+      offsetX: x0,
+    });
+  }
+}
+
+function supermarket(g, rng, d, P) {
+  const b = block(g, rng, d, { wall: rng.pick([0xe8e4dc, 0xd8d0c0]), floorH: d.by, win: null, shop: { sign: false, awning: null, glow: [0xfff2d8] }, clutter: { kinds: ['ac', 'ac', 'vent', 'solar'] } });
+  const brand = rng.pick([0xd93636, 0x2a8a3a, 0x3b6fd1, 0xf28a1a]);
+  for (let x = b.x0; x < b.x1; x++) g.set(x, b.y1 - 2, b.z1, brand, rng.chance(0.3) ? 0 : 0);
+  sign(g, rng, 0, Math.floor((b.x0 + b.x1) / 2), b.y1 - 4, Math.min(18, b.x1 - b.x0 - 4), 4, b.z1, [0xffffff], { bg: brand, frame: brand, seed: 9 });
+  // Cart corral
+  g.box(b.x1 - 6, 0, b.z1 + 2, b.x1 - 1, 1, b.z1 + 3, 0xb8bcc2);
+}
+
+function dealership(g, rng, d, P) {
+  const m = d.m;
+  const b = block(g, rng, { ...d, by: 6 }, { wall: 0xe8e8e8, floorH: 6, win: { style: 'curtain', w: 3, h: 4, gap: 1, sill: 1, glass: 0x5a8aa8, lit: [0xfff2d8], litChance: 0.9 }, clutter: { sparse: true, kinds: ['ac'] } });
+  for (let k = 0; k < 3; k++) {
+    const x = m + 3 + k * 6;
+    if (x + 5 > b.x1) break;
+    const c = rng.pick([0xd93636, 0xf2f2f2, 0x2a2a2a, 0x3b6fd1, 0xf2c12e]);
+    g.box(x, 1, b.z1 - 5, x + 5, 2, b.z1 - 2, c);
+    g.box(x + 1, 2, b.z1 - 5, x + 4, 3, b.z1 - 2, 0x22303d);
+  }
+  sign(g, rng, 0, Math.floor((b.x0 + b.x1) / 2), 7, Math.min(14, d.bx - 2), 3, b.z1 - 1, [0x3b6fd1, 0xd93636], { seed: 4 });
+  for (let x = b.x0; x < b.x1; x += 3) g.set(x, 7 + (x % 2), b.z1 + 1, rng.pick([0xd93636, 0xf2c12e, 0x3b6fd1]));
+}
+
+function diner(g, rng, d, P) {
+  const b = block(g, rng, d, { wall: (x, y) => (y === 1 ? 0xd93636 : 0xc8ccd2), floorH: d.by, win: { style: 'ribbon', w: 3, h: 2, gap: 1, sill: 2, glass: 0x5a8aa8, lit: [0xffe2a8], litChance: 0.95 }, clutter: { sparse: true, kinds: ['ac'] }, roof: 0x8a8f96 });
+  const cx = Math.floor((b.x0 + b.x1) / 2);
+  g.box(cx - 1, b.y1 + 1, b.z1 - 2, cx, b.y1 + 6, b.z1 - 1, 0x55585e);
+  sign(g, rng, 0, cx, b.y1 + 4, 9, 4, b.z1 - 1, [0xff4d6d, 0x22e6ff], { seed: 2 });
+}
+
+function constructionSite(g, rng, d, P) {
+  const m = d.m;
+  const built = Math.floor(d.by * rng.range(0.4, 0.75));
+  const floorH = 4;
+  // Concrete frame: slabs and columns, upper floors open.
+  for (let y = 0; y <= built; y += floorH) {
+    g.box(m, y, m, m + d.bx, y + 1, m + d.bz, 0x9a9790);
+    if (y + floorH > built) break;
+    for (let x = m; x < m + d.bx; x += 5) for (let z = m; z < m + d.bz; z += 5) g.box(x, y + 1, z, x + 1, y + floorH, z + 1, 0xa8a59e);
+    if (y < built * 0.5) {
+      body(g, rng, { x0: m, z0: m, x1: m + d.bx, z1: m + d.bz, y0: y + 1, y1: y + floorH, floorH, wall: 0xb8b4aa, win: { style: 'curtain', w: 3, h: 2, gap: 1, sill: 1, glass: 0x5a7a8a, lit: WARM, litChance: 0.1 } });
+    }
+  }
+  scaffold(g, m, m, m + d.bx, m + d.bz, 0, Math.floor(built * 0.7));
+  // Safety netting on one face
+  for (let y = Math.floor(built * 0.5); y < built; y++) for (let x = m; x < m + d.bx; x++) if (hash3(x, y, 1) < 0.6) g.set(x, y, m + d.bz + 1, 0x3a8a4a);
+  // Tower crane
+  const cx = m + d.bx - 3;
+  const cz = m + 2;
+  const top = built + 18;
+  for (let y = 0; y < top; y++) {
+    g.set(cx, y, cz, 0xf2c12e);
+    g.set(cx + 1, y, cz + 1, 0xf2c12e);
+    if (y % 3 === 0) g.set(cx + 1, y, cz, 0xd9a020);
+  }
+  g.box(cx - Math.floor(d.bx * 0.9), top, cz, cx + 8, top + 1, cz + 2, 0xf2c12e);
+  g.box(cx + 4, top - 2, cz, cx + 8, top, cz + 2, 0x6a6a6a);
+  g.box(cx - 2, top - 3, cz, cx + 1, top, cz + 2, 0x3a3d44);
+  g.set(cx - Math.floor(d.bx * 0.9), top + 1, cz, 0xff3b3b, E);
+  for (let y = top - 1; y > built + 2; y--) g.set(cx - Math.floor(d.bx * 0.5), y, cz + 1, 0x333333);
+  g.box(cx - Math.floor(d.bx * 0.5) - 1, built + 1, cz, cx - Math.floor(d.bx * 0.5) + 2, built + 3, cz + 2, 0x8a5a2a);
+}
+
+function trainStation(g, rng, d, P) {
+  const m = d.m;
+  const wall = rng.pick([0xc0b49a, 0x8a3b2a]);
+  const b = block(g, rng, { ...d, by: Math.floor(d.by * 0.55) }, { wall, floorH: 5, win: { w: 2, h: 3, gap: 2, sill: 1, glass: 0x2f3a44, lit: WARM, litChance: 0.7, arch: true }, parapet: false, clutter: false, cornice: true });
+  // Barrel-vaulted glass roof
+  const r = d.bz / 2;
+  for (let x = b.x0; x < b.x1; x++) {
+    for (let z = b.z0; z < b.z1; z++) {
+      const t = (z + 0.5 - (m + r)) / r;
+      const h = Math.round(Math.sqrt(Math.max(0, 1 - t * t)) * r * 0.8);
+      g.set(x, b.y1 + h, z, x % 4 === 0 ? 0x3a3d44 : 0x8ab8d0, x % 4 === 0 ? 0 : W);
+      if (h > 0) g.set(x, b.y1 + h - 1, z, 0x3a3d44);
+    }
+  }
+  // Clock above the entrance
+  const cx = Math.floor((b.x0 + b.x1) / 2);
+  for (let a = 0; a < 20; a++) g.set(cx + Math.round(Math.cos(a / 3.18) * 2.4), b.y1 - 4 + Math.round(Math.sin(a / 3.18) * 2.4), b.z1, 0xfff6d8, E);
+}
+
+function pagoda(g, rng, d, P) {
+  const m = d.m;
+  const tiers = 5;
+  const red = 0xb8322a;
+  const roof = 0x2a3a3a;
+  let a = 0;
+  let y = 0;
+  for (let t = 0; t < tiers; t++) {
+    const h = 4;
+    body(g, rng, { x0: m + a, z0: m + a, x1: m + d.bx - a, z1: m + d.bz - a, y0: y, y1: y + h, floorH: h, wall: red, win: { w: 1, h: 2, gap: 2, sill: 1, glass: 0x3a2a1a, lit: [0xffb35c], litChance: 0.8 } });
+    y += h;
+    // Flared roof
+    g.box(m + a - 2, y, m + a - 2, m + d.bx - a + 2, y + 1, m + d.bz - a + 2, roof);
+    for (const [x, z] of [[m + a - 2, m + a - 2], [m + d.bx - a + 1, m + a - 2], [m + a - 2, m + d.bz - a + 1], [m + d.bx - a + 1, m + d.bz - a + 1]]) {
+      g.set(x, y + 1, z, roof);
+      g.set(x, y, z, 0xffb35c, E);
+    }
+    y += 1;
+    a += 1;
+  }
+  g.box(m + Math.floor(d.bx / 2), y, m + Math.floor(d.bz / 2), m + Math.floor(d.bx / 2) + 1, y + 6, m + Math.floor(d.bz / 2) + 1, 0xd9a83a);
+}
+
+function rooftopPoolHotel(g, rng, d, P) {
+  varTower(g, rng, d, P, { crown: 'garden', forms: { box: 1, podium: 1 }, balconies: true, styles: { punched: 2, ribbon: 2 } });
+  const m = d.m;
+  // Pool deck on the roof
+  const y = d.by + 1;
+  const ix = Math.floor(d.bx * 0.25);
+  const iz = Math.floor(d.bz * 0.3);
+  g.box(m + ix, y - 1, m + iz, m + d.bx - ix, y, m + d.bz - iz, 0xe8e2d0);
+  g.box(m + ix + 1, y - 1, m + iz + 1, m + d.bx - ix - 1, y, m + d.bz - iz - 1, 0x3fc8e8, E);
+}
+
 // ---------------------------------------------------------------- catalog
 const T2 = 2.5;
 const T3 = 3;
@@ -622,9 +1106,9 @@ export const BUILDING_TYPES = [
   def('pastel_hotel', 'Seaside hotel', 4, 'pastel', ['pastel', 'docks'], T3, sz([26, 32], [16, 20], [22, 28]), (g, r, d, P) => block(g, r, d, { wall: r.pick(P.walls), floorH: 4, win: winStd(P, { w: 3, h: 3, gap: 2, sill: 0, frame: P.trim }), balconies: { width: 5, slab: P.trim, rail: 0xffffff, plants: true }, shop: { awning: [0x6fa8c8, 0xffffff], sign: true, signColors: [0xff4d6d] }, roofSign: { colors: [0xff4d6d], bg: 0xfaf3e8, frame: 0xc86a4a, len: 12, h: 4 }, roof: 0xe8d8c0 }), { weight: 0.8 }),
 
   // ---- garden / daytime modern
-  def('green_roof_office', 'Green-roof office', 4, 'garden', ['commercial', 'garden'], T3, sz([22, 30], [20, 26], [14, 22]), (g, r, d, P) => block(g, r, d, { wall: 0xe9e6df, floorH: 4, win: winStd(P, { w: 3, h: 2, gap: 2 }), garden: 0.75, vines: 0.18, shop: { awning: [0xd94f4f], sign: true }, cornice: true }), { weight: 2 }),
+  def('green_roof_office', 'Green-roof office', 4, 'garden', ['commercial', 'garden'], T3, sz([22, 30], [20, 26], [14, 22]), (g, r, d, P) => varTower(g, r, d, P, { floorH: 4, crown: 'garden', styles: { ribbon: 2, grid: 2, curtain: 1 }, forms: { box: 2, setback: 1, ell: 1 } }), { weight: 2 }),
   def('red_walkup', 'Red walk-up', 3, 'garden', ['garden', 'commercial', 'brick'], T2, sz([12, 16], [12, 16], [12, 18]), (g, r, d, P) => block(g, r, d, { wall: 0xd9573b, floorH: 4, win: winStd(P, { frame: 0xf2f0ea }), shop: { awning: [0xd94f4f, 0xffffff] }, garden: 0.55, cornice: true, corniceColor: 0xf2f0ea, clutter: { kinds: ['garden', 'ac', 'tank'] } }), { weight: 2 }),
-  def('glass_lowrise', 'Glass low-rise', 4, 'garden', ['commercial', 'garden'], T3, sz([24, 30], [20, 26], [12, 18]), (g, r, d, P) => block(g, r, d, { wall: 0xb8bcc2, floorH: 4, win: winStd(P, { w: 4, h: 3, gap: 1, sill: 0, glass: 0x3d5a78 }), bands: { every: 1, color: 0xd8dade }, clutter: { kinds: ['ac', 'solar', 'vent'] } }), { weight: 1.5 }),
+  def('glass_lowrise', 'Glass low-rise', 4, 'garden', ['commercial', 'garden'], T3, sz([24, 30], [20, 26], [12, 18]), (g, r, d, P) => varTower(g, r, d, P, { floorH: 4, styles: { curtain: 3, grid: 1 }, forms: { box: 2, chamfer: 1 }, crown: r.pick(['helipad', 'garden', 'lit', 'slant']) }), { weight: 1.5 }),
   def('overgrown_block', 'Overgrown block', 4, 'garden', ['garden', 'commercial'], T3, sz([20, 26], [18, 24], [16, 24]), (g, r, d, P) => block(g, r, d, { wall: 0xc9c2b0, floorH: 4, win: winStd(P, { litChance: 0.35 }), garden: 0.85, vines: 0.4, balconies: { width: 5, alternate: true, plants: true }, clutter: { kinds: ['garden', 'garden', 'tank'] } }), { weight: 1.5 }),
   def('mall', 'Shopping mall', 4, 'garden', ['commercial'], T3, sz([36, 44], [26, 32], [10, 14]), (g, r, d, P) => block(g, r, d, { wall: 0xdcd3c0, floorH: 5, win: winStd(P, { w: 5, h: 2, gap: 3 }), shop: { sign: true, signLen: 16, awning: [0x3b6fd1] }, roofSign: { colors: [0x22e6ff, 0xff4d6d], bg: 0x1a1a24, frame: 0x55585e, len: 18 }, clutter: { kinds: ['ac', 'ac', 'vent', 'solar'] } }), { weight: 0.6 }),
   def('hospital', 'Hospital', 4, 'garden', ['commercial'], T3, sz([30, 36], [22, 28], [18, 24]), (g, r, d, P) => { const b = block(g, r, d, { wall: 0xf0ece4, floorH: 4, win: winStd(P, { w: 3, lit: COOL, litChance: 0.7 }), bands: { every: 2, color: 0x9fc4d8 }, clutter: { kinds: ['ac', 'vent'] } }); const cx = Math.floor((b.x0 + b.x1) / 2); for (let i = -2; i <= 2; i++) { g.set(cx + i, b.y1 - 4, b.z1, 0xff3b3b, E); g.set(cx, b.y1 - 4 + i, b.z1, 0xff3b3b, E); } g.box(b.x0 + 3, b.y1 + 1, b.z0 + 3, b.x0 + 10, b.y1 + 2, b.z0 + 10, (x, y, z) => (x === b.x0 + 6 || (z === b.z0 + 6 && (x === b.x0 + 4 || x === b.x0 + 8)) ? 0xf2f2f2 : 0x4f5a66)); }, { weight: 0.5 }),
@@ -651,19 +1135,45 @@ export const BUILDING_TYPES = [
   def('karaoke', 'Karaoke box', 3, 'neon', ['neon'], T2, sz([12, 16], [12, 15], [12, 16]), (g, r, d, P) => block(g, r, d, { wall: 0x3a2a4a, floorH: 4, win: winStd(P, { lit: [0xff7fbf, 0xb07fff, 0x7fbfff], litChance: 0.8 }), shop: { sign: true, signColors: NEON }, neon: { verticalSign: true, corners: 1, colors: NEON } }), { weight: 1.2 }),
   def('pachinko', 'Pachinko parlor', 4, 'neon', ['neon'], T3, sz([22, 28], [18, 22], [10, 14]), (g, r, d, P) => block(g, r, d, { wall: 0x3a2030, floorH: 5, win: null, shop: { sign: true, signLen: 16, signColors: [0xffd23f, 0xff4d6d], glow: [0xffe28a, 0xff9a5c] }, neon: { bands: 1, billboards: 2, colors: [0xffd23f, 0xff4d6d, 0xff8a1f] }, clutter: { kinds: ['ac', 'ac'] } }), { weight: 1 }),
   def('nightclub', 'Nightclub', 4, 'neon', ['neon'], T3, sz([20, 26], [18, 22], [10, 14]), (g, r, d, P) => block(g, r, d, { wall: 0x1a1622, floorH: 5, win: null, neon: { corners: 2, bands: 1, billboards: 1, colors: [0x7b5cff, 0xff2bd6, 0x22e6ff] }, shop: { sign: true, signColors: [0x7b5cff, 0xff2bd6], glow: [0xb07fff] }, clutter: { sparse: true } }), { weight: 0.8 }),
-  def('neon_apartment', 'Neon apartments', 4, 'neon', ['neon', 'downtown'], T3, sz([18, 24], [16, 22], [24, 34]), (g, r, d, P) => block(g, r, d, { wall: r.pick(P.walls), floorH: 4, win: winStd(P, { w: 2, gap: 1 }), acFacade: 0.2, balconies: { width: 4, alternate: true, laundry: true, rail: 0x22252c }, shop: { sign: true, signColors: NEON }, neon: { verticalSign: true, billboards: 1, colors: NEON }, clutter: { kinds: ['ac', 'tank', 'antenna', 'dish'] } }), { weight: 3 }),
-  def('cyber_skyscraper', 'Glass skyscraper', 5, 'neon', ['downtown'], T4, sz([26, 34], [26, 34], [44, 60]), (g, r, d, P) => block(g, r, d, { wall: r.pick(P.walls), floorH: 3, win: winStd(P, { w: 3, h: 2, gap: 1, sill: 0 }), neon: { corners: 2, colors: P.neon }, shop: { sign: true, signColors: NEON, glow: COOL }, clutter: { kinds: ['antenna', 'ac', 'dish', 'vent'] } }), { weight: 3 }),
+  def('neon_apartment', 'Neon apartments', 4, 'neon', ['neon', 'downtown'], T3, sz([18, 24], [16, 22], [24, 34]), (g, r, d, P) => varTower(g, r, d, P, { floorH: 4, balconies: 'laundry', neon: { verticalSign: true, billboards: 1 }, styles: { punched: 3, stripes: 1, tiles: 1, ribbon: 1 }, forms: { box: 3, ell: 1, podium: 1 }, crown: r.pick(['watertank', 'mast', 'garden', 'lit', 'helipad']) }), { weight: 3 }),
+  def('cyber_skyscraper', 'Glass skyscraper', 5, 'neon', ['downtown'], T4, sz([26, 34], [26, 34], [44, 64]), (g, r, d, P) => varTower(g, r, d, P, { neon: { corners: r.int(0, 2) }, styles: { curtain: 3, grid: 2, ribbon: 1, punched: 1 } }), { weight: 3 }),
   def('ring_tower', 'Ring tower', 5, 'neon', ['downtown'], T4, sz([24, 30], [24, 30], [46, 62]), (g, r, d, P) => { d.bz = d.bx; cylTower(g, r, d, P); }, { weight: 1.5, square: true }),
   def('stepped_tower', 'Stepped tower', 5, 'neon', ['downtown'], T4, sz([30, 38], [30, 38], [44, 58]), (g, r, d, P) => setbackTower(g, r, d, P, { tiers: 3, floorH: 3, win: winStd(P, { w: 2, h: 2, gap: 1, sill: 0 }), neon: { corners: 1, colors: P.neon }, spire: 10 }), { weight: 2 }),
   def('twin_towers', 'Twin towers', 5, 'neon', ['downtown'], T4, sz([34, 40], [20, 24], [48, 62]), (g, r, d, P) => twinTowers(g, r, d, P), { weight: 1 }),
   def('billboard_tower', 'Billboard tower', 5, 'neon', ['downtown', 'neon'], T4, sz([24, 30], [24, 30], [36, 48]), (g, r, d, P) => block(g, r, d, { wall: 0x23262e, floorH: 3, win: winStd(P, { w: 2, gap: 2, litChance: 0.4 }), neon: { billboards: 5, verticalSign: true, corners: 1, colors: NEON }, roofSign: { colors: NEON, bg: 0x110c1a, frame: 0xff2bd6, len: 20, h: 8 } }), { weight: 1.5 }),
   def('corporate_hq', 'Corporate HQ', 5, 'neon', ['downtown'], T4, sz([30, 36], [30, 36], [50, 66]), (g, r, d, P) => setbackTower(g, r, d, P, { tiers: 2, floorH: 3, wall: 0x2d3440, win: winStd(P, { w: 3, h: 2, gap: 1, sill: 0, lit: COOL }), neon: { bands: 3, colors: [0x22e6ff] }, spire: 18 }), { weight: 1 }),
-  def('hotel_tower', 'Hotel tower', 5, 'neon', ['downtown'], T4, sz([28, 34], [22, 28], [40, 54]), (g, r, d, P) => block(g, r, d, { wall: 0x4a4050, floorH: 3, win: winStd(P, { w: 2, gap: 1, lit: WARM, litChance: 0.65 }), balconies: { width: 3, slab: 0x6a6070, rail: 0xb8a070 }, roofSign: { colors: [0xffd23f], bg: 0x1a1218, frame: 0xffd23f, len: 16, h: 5 }, shop: { sign: true, glow: WARM, awning: [0x8a2a2a] } }), { weight: 1.2 }),
-  def('residential_highrise', 'Residential high-rise', 5, 'neon', ['downtown', 'brick'], T4, sz([26, 32], [26, 32], [40, 56]), (g, r, d, P) => block(g, r, d, { wall: 0x6f6c66, floorH: 3, win: winStd(P, { w: 2, gap: 2 }), balconies: { width: 4, laundry: true, plants: true }, acFacade: 0.15, neon: { verticalSign: true, colors: NEON }, clutter: { kinds: ['tank', 'ac', 'antenna', 'garden'] } }), { weight: 2 }),
+  def('hotel_tower', 'Hotel tower', 5, 'neon', ['downtown'], T4, sz([28, 34], [22, 28], [40, 54]), (g, r, d, P) => varTower(g, r, d, P, { balconies: true, styles: { punched: 3, ribbon: 1 }, crown: r.pick(['lit', 'helipad', 'stepped', 'spire']), forms: { podium: 3, box: 1 } }), { weight: 1.2 }),
+  def('residential_highrise', 'Residential high-rise', 5, 'neon', ['downtown', 'brick'], T4, sz([26, 32], [26, 32], [40, 56]), (g, r, d, P) => varTower(g, r, d, P, { balconies: 'laundry', floorH: 3, styles: { punched: 3, stripes: 2, tiles: 1 }, forms: { box: 2, podium: 3, ell: 1 }, neon: { verticalSign: true } }), { weight: 2 }),
   def('pyramid_arcology', 'Arcology', 5, 'neon', ['downtown'], T4, sz([34, 40], [34, 40], [40, 50]), (g, r, d, P) => { d.bz = d.bx; pyramid(g, r, d, P); }, { weight: 0.4, square: true }),
   def('tv_tower', 'TV tower', 5, 'neon', ['downtown', 'commercial'], T4, sz([16, 18], [16, 18], [60, 72]), (g, r, d, P) => { d.bz = d.bx; tvTower(g, r, d, P); }, { weight: 0.3, square: true }),
   def('stadium', 'Stadium', 5, 'garden', ['commercial'], T4, sz([64, 70], [50, 56], [12, 14]), (g, r, d) => stadium(g, r, d), { weight: 0.15, unique: true }),
   def('power_plant', 'Power plant', 5, 'brick', ['brick', 'commercial'], T4, sz([44, 50], [34, 40], [28, 34]), (g, r, d) => powerPlant(g, r, d), { weight: 0.25, power: true }),
+
+  // ---- skyline variety
+  def('art_deco_tower', 'Art deco tower', 5, 'neon', ['downtown'], T4, sz([28, 34], [28, 34], [48, 66]), (g, r, d, P) => varTower(g, r, d, P, { forms: { setback: 1 }, styles: { punched: 1, stripes: 1 }, fins: 2, wall: r.pick([0xc8b89a, 0xb8ad98, 0x8a8478, 0x6a6a72]), crown: r.pick(['spire', 'stepped', 'lit']) }), { weight: 1.5 }),
+  def('modern_tower', 'Modern tower', 5, 'neon', ['downtown', 'garden'], T4, sz([24, 32], [24, 32], [46, 66]), (g, r, d, P) => varTower(g, r, d, P, { forms: { podium: 2, chamfer: 2, box: 1 }, styles: { curtain: 3, grid: 1 }, crown: r.pick(['frame', 'lit', 'slant', 'helipad']) }), { weight: 2 }),
+  def('rooftop_pool_hotel', 'Rooftop-pool hotel', 5, 'neon', ['downtown', 'garden'], T4, sz([26, 32], [24, 30], [36, 50]), (g, r, d, P) => rooftopPoolHotel(g, r, d, P), { weight: 1 }),
+  def('office_ribbon', 'Ribbon-window office', 4, 'garden', ['commercial', 'garden', 'brick'], T3, sz([24, 32], [18, 24], [14, 24]), (g, r, d, P) => varTower(g, r, d, P, { floorH: 4, styles: { ribbon: 1 }, forms: { box: 2, podium: 1, ell: 1 } }), { weight: 1.5 }),
+  def('glass_office', 'Glass office', 4, 'garden', ['commercial', 'garden', 'neon'], T3, sz([22, 30], [20, 26], [16, 28]), (g, r, d, P) => varTower(g, r, d, P, { floorH: 4, styles: { curtain: 2, grid: 1 }, fins: r.chance(0.5) ? 3 : 0 }), { weight: 1.5 }),
+  def('construction_site', 'Construction site', 4, 'neon', ['downtown', 'commercial', 'garden', 'brick'], T3, sz([24, 30], [20, 26], [24, 36]), (g, r, d, P) => constructionSite(g, r, d, P), { weight: 0.5 }),
+
+  // ---- civic landmarks
+  def('city_hall', 'City hall', 5, 'civic', ['garden', 'pastel', 'commercial'], T3, sz([40, 46], [28, 32], [16, 18]), (g, r, d, P) => classical(g, r, d, P, { dome: true, sign: true }), { weight: 0.15, unique: true }),
+  def('museum', 'Museum', 4, 'civic', ['garden', 'pastel'], T3, sz([34, 40], [24, 28], [12, 14]), (g, r, d, P) => classical(g, r, d, P, { porticoW: 20 }), { weight: 0.25 }),
+  def('bank', 'Bank', 4, 'civic', ['neon', 'brick', 'garden', 'commercial'], T3, sz([20, 24], [18, 22], [12, 14]), (g, r, d, P) => classical(g, r, d, P, { porticoW: 14, sign: true }), { weight: 0.4 }),
+  def('library', 'Library', 4, 'civic', ['garden', 'pastel', 'suburb'], T3, sz([28, 34], [20, 24], [12, 14]), (g, r, d, P) => classical(g, r, d, P, {}), { weight: 0.3 }),
+  def('cathedral', 'Cathedral', 5, 'civic', ['pastel', 'brick', 'garden'], T3, sz([26, 30], [40, 46], [44, 52]), (g, r, d, P) => cathedral(g, r, d, P), { weight: 0.12 }),
+  def('clock_tower', 'Clock tower', 4, 'civic', ['pastel', 'garden', 'brick'], T3, sz([10, 12], [10, 12], [36, 44]), (g, r, d, P) => clockTower(g, r, d, P), { weight: 0.2, square: true }),
+  def('train_station', 'Train station', 5, 'civic', ['garden', 'brick', 'commercial'], T3, sz([40, 46], [24, 28], [14, 16]), (g, r, d, P) => trainStation(g, r, d, P), { weight: 0.12, unique: true }),
+  def('pagoda', 'Pagoda temple', 4, 'neon', ['neon', 'brick'], T3, sz([12, 14], [12, 14], [25, 25]), (g, r, d, P) => pagoda(g, r, d, P), { weight: 0.3, square: true }),
+  def('theater', 'Theater', 4, 'neon', ['neon', 'garden'], T3, sz([22, 28], [24, 30], [14, 18]), (g, r, d, P) => { const b = block(g, r, d, { wall: r.pick([0x7a2a3a, 0x3a2a4a, 0x8a6a3a]), floorH: 6, win: { w: 2, h: 3, gap: 3, sill: 2, glass: 0x2a1a2a, lit: [0xffd38a], litChance: 0.7, arch: true }, shop: { sign: true, signLen: 14, signColors: [0xffd23f], glow: WARM }, neon: { verticalSign: true, colors: [0xffd23f, 0xff4d6d] }, clutter: { sparse: true } }); for (let x = b.x0; x < b.x1; x++) { g.set(x, 6, b.z1 + 1, x % 2 ? 0xfff2a8 : 0xffd23f, E); g.set(x, 7, b.z1 + 1, 0x7a2a3a); } }, { weight: 0.5 }),
+
+  // ---- everyday commercial & housing
+  def('supermarket', 'Supermarket', 3, 'garden', ['suburb', 'commercial', 'garden'], T2, sz([30, 38], [20, 26], [7, 8]), (g, r, d, P) => supermarket(g, r, d, P), { weight: 0.6 }),
+  def('car_dealership', 'Car dealership', 3, 'garden', ['suburb', 'commercial'], T2, sz([20, 24], [16, 20], [8, 9]), (g, r, d, P) => dealership(g, r, d, P), { weight: 0.4 }),
+  def('diner', 'Diner', 3, 'suburb', ['suburb', 'commercial', 'brick'], T2, sz([16, 20], [10, 12], [5, 6]), (g, r, d, P) => diner(g, r, d, P), { weight: 0.6 }),
+  def('townhouse_row', 'Townhouse row', 4, 'brick', ['brick', 'garden', 'pastel'], T2, sz([24, 36], [14, 16], [12, 16]), (g, r, d, P) => townhouseRow(g, r, d, P), { weight: 2.5 }),
+  def('shop_row', 'Shop row', 3, 'garden', ['commercial', 'garden', 'pastel', 'brick', 'neon', 'suburb'], T2, sz([20, 32], [12, 16], [7, 10]), (g, r, d, P) => shopRow(g, r, d, P), { weight: 2.5 }),
 
   // ---- docks
   def('crane', 'Harbor crane', 4, 'docks', ['docks'], T3, sz([12, 14], [10, 12], [28, 34]), (g, r, d) => crane(g, r, d), { weight: 1 }),
@@ -679,11 +1189,13 @@ export const BUILDING_TYPES = [
   def('lighthouse', 'Lighthouse', 6, 'docks', [], T4, sz([12, 12], [12, 12], [80, 80]), (g, r, d) => lighthouse(g, r, d), { weight: 0, landmark: true, square: true }),
   def('bridge_tower', 'Bridge tower', 5, 'bridge', [], T4, sz([8, 8], [26, 26], [70, 70]), (g, r, d) => bridgeTower(g, r, d), { weight: 0 }),
   def('bridge_deck', 'Bridge deck', 4, 'bridge', [], T4, sz([20, 20], [20, 20], [14, 14]), (g, r, d) => bridgeDeck(g, r, d), { weight: 0, walkable: true }),
+  def('metro_track', 'Elevated metro track', 4, 'bridge', [], 2.5, sz([16, 16], [7, 7], [15, 15]), (g, r, d) => metroTrack(g, r, d), { weight: 0, walkable: true }),
+  def('metro_station', 'Metro station', 4, 'bridge', [], 2.5, sz([16, 16], [7, 7], [15, 15]), (g, r, d) => metroStation(g, r, d), { weight: 0, walkable: true }),
   def('road_bridge', 'Road bridge', 3, 'bridge', [], T2, sz([24, 24], [24, 24], [4, 4]), (g, r, d) => roadBridge(g, r, d), { weight: 0, walkable: true }),
 ];
 
 export const TYPE_BY_ID = Object.fromEntries(BUILDING_TYPES.map((t) => [t.id, t]));
-export const VARIANTS = 3;
+export const VARIANTS = 4;
 const MARGIN = 3;
 
 // Footprint and height for a (type, variant) without building the voxels.

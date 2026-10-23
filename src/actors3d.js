@@ -84,7 +84,7 @@ export class Actors {
 
   setKaiju(id) {
     if (this.kaiju) this.scene.remove(this.kaiju.root);
-    const kmat = this.makeMat();
+    const kmat = this.makeMat(0.3);
     const rig = partsGroup(KAIJU_MODELS[id](), kmat);
     rig.mat = kmat;
     this.kaiju = rig;

@@ -69,6 +69,7 @@ export class Game {
     this.units = [];
     this.people = [];
     this.traffic = [];
+    this.trains = [];
     this.projectiles = [];
     this.hazards = [];
     this.scheduled = [];
@@ -96,6 +97,85 @@ export class Game {
       landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 },
     };
     this.populate(true);
+    const metro = this.city.metro;
+    if (metro && metro.segments.length) {
+      this.trains.push(this.newTrain(metro.length * 0.25, 1), this.newTrain(metro.length * 0.7, -1));
+      this.trainRespawn = 0;
+    }
+  }
+
+  // ---------------------------------------------------------------- elevated metro
+  newTrain(s, dir) {
+    return { s, dir, speed: 55, stop: 0, lastStation: -1, dead: false, cars: 3, x: 0, y: 0, heading: 0, isTrain: true };
+  }
+
+  // Position and heading along the metro route at distance s.
+  metroAt(s) {
+    const pts = this.city.metro.points;
+    let left = Math.max(0, Math.min(this.city.metro.length - 0.01, s));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i];
+      const [x1, y1] = pts[i + 1];
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      if (left <= len) return { x: x0 + ((x1 - x0) / len) * left, y: y0 + ((y1 - y0) / len) * left, heading: Math.atan2(y1 - y0, x1 - x0) };
+      left -= len;
+    }
+    const [x, y] = pts[pts.length - 1];
+    return { x, y, heading: 0 };
+  }
+
+  updateTrains(dt) {
+    const metro = this.city.metro;
+    if (!metro) return;
+    const k = this.kaiju;
+    for (const t of this.trains) {
+      if (t.dead) continue;
+      if (t.stop > 0) t.stop -= dt;
+      else {
+        t.s += t.dir * t.speed * dt;
+        if (t.s < 0 || t.s > metro.length) {
+          t.dir *= -1;
+          t.s = Math.max(0, Math.min(metro.length, t.s));
+        }
+        for (let i = 0; i < metro.stations.length; i++) {
+          if (i !== t.lastStation && Math.abs(t.s - metro.stations[i]) < 3) {
+            t.lastStation = i;
+            t.stop = 3;
+          }
+        }
+      }
+      const p = this.metroAt(t.s);
+      t.x = p.x;
+      t.y = p.y;
+      t.heading = p.heading + (t.dir < 0 ? Math.PI : 0);
+      // A broken span ahead derails the train.
+      const ahead = Math.floor((t.s + t.dir * metro.segLen * 0.6) / metro.segLen);
+      const seg = metro.segments[Math.max(0, Math.min(metro.segments.length - 1, ahead))];
+      if (seg && seg.state !== 'intact') this.killTrain(t, true);
+      else if (k.stage >= 4 && Math.hypot(t.x - k.x, t.y - k.y) < k.r + 20) this.killTrain(t, false);
+    }
+    this.trains = this.trains.filter((t) => !t.dead);
+    if (this.trains.length < 2) {
+      this.trainRespawn -= dt;
+      if (this.trainRespawn <= 0) {
+        this.trainRespawn = 25;
+        const s = this.rng.chance(0.5) ? 0 : metro.length;
+        const startSeg = metro.segments[s ? metro.segments.length - 1 : 0];
+        if (startSeg && startSeg.state === 'intact') this.trains.push(this.newTrain(s, s ? -1 : 1));
+      }
+    }
+  }
+
+  killTrain(t, derailed) {
+    if (t.dead) return;
+    t.dead = true;
+    const k = this.kaiju;
+    const loot = lootFor(3, k.stage, 3);
+    this.addBiomass(derailed ? 0 : loot.biomass);
+    this.stats.scrap += loot.scrap * this.diff.loot;
+    this.stats.destroyed++;
+    this.fxEvent({ t: 'trainDie', train: t, dir: norm(t.x - k.x, t.y - k.y) });
+    this.spawnExplosion(t.x, t.y, 30);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -213,6 +293,7 @@ export class Game {
     this.updateUnits(dt);
     this.updatePeople(dt);
     this.updateTraffic(dt);
+    this.updateTrains(dt);
     this.updateBoss(dt);
     this.updateProjectiles(dt);
     this.updateHazards(dt);

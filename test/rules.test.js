@@ -74,3 +74,14 @@ test('the drop-in point is a backyard with nothing taller than a person', () => 
   assert.ok(near.some((o) => o.type === 'fence'), 'fenced backyards nearby');
   assert.ok(near.some((o) => o.kind === 'building' && o.tier === 3), 'houses nearby');
 });
+
+test('the city has the things a city has: civic landmarks, parks, plazas, a metro, power lines', () => {
+  const types = new Set(city.objects.map((o) => o.type));
+  for (const t of ['city_hall', 'museum', 'library', 'bank', 'cathedral', 'clock_tower', 'supermarket', 'shop_row', 'townhouse_row', 'construction_site']) assert.ok(types.has(t), t);
+  for (const t of ['cafe_table', 'bike_rack', 'street_sign', 'statue', 'gazebo', 'slide', 'hoop', 'big_screen', 'food_truck', 'metro_entrance', 'beach_umbrella']) assert.ok(types.has(t), t);
+  const kinds = new Set(city.decals.map((d) => d.kind));
+  for (const k of ['path', 'pond', 'plaza', 'parking', 'manhole', 'sandbox']) assert.ok(kinds.has(k), k);
+  assert.ok(kinds.has('basketball') || kinds.has('tennis'));
+  assert.ok(city.metro.segments.length > 100 && city.metro.stations.length >= 5);
+  assert.ok(city.powerLines.length > 20);
+});
