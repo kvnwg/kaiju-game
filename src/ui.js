@@ -196,10 +196,10 @@ export class UI {
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
         <h3>Look</h3>
-        <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Pixel</button><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Smooth</button></div>
+        <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Voxel</button><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Retro pixel</button></div>
         <h3>Graphics</h3>
         <div class="segs" id="qualSegs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
-        <p class="tiny">Low turns off shadows and bloom for older phones.</p>
+        <p class="tiny">Low turns off shadows, bloom and tilt-shift for older phones.</p>
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);

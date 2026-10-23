@@ -13,7 +13,7 @@ npm test             # unit tests + headless autopilot runs (Node 20+)
 
 - **Move:** drag anywhere for a floating virtual stick, or use WASD / arrow keys. Movement is relative to the tilted camera. Attacks fire automatically at the nearest target.
 - **Pause:** the II button, Esc or P. The pause menu has a graphics setting (High, Medium or Low). The game also steps down on its own if frames run slow.
-- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed (and with it the map), `?q=low` sets quality, `?look=smooth` turns off the pixel-art look. `?debug=1` enables G (grow a stage), B (summon the boss early at Apex), K (kill the boss) and H (heal).
+- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed (and with it the map), `?q=low` sets quality, `?look=pixel` turns on the optional retro pixel filter. `?debug=1` enables G (grow a stage), B (summon the boss early at Apex), K (kill the boss) and H (heal).
 
 ## What's in it
 
@@ -26,7 +26,7 @@ npm test             # unit tests + headless autopilot runs (Node 20+)
 | Small assets | 79 voxel props: cars, taxis, buses, trucks, lampposts, neon poles, vending machines, food carts, barriers, power poles, billboards, swing sets, pools, trampolines, BBQs, gnomes, and pine, birch, blossom and autumn trees |
 | Life | Voxel crowds that walk the streets and flee from you, plus traffic driving the road network |
 | Destruction | Buildings are pre-fractured into Voronoi chunks. Hits knock off the chunks nearest the impact, shoving into a building chips it where you push, and collapses tip toward the hit direction, then break into physics debris and leave a rubble pile. Small things shatter into voxels |
-| Lighting | Golden afternoon to sunset to neon night, following run progress. Windows light up after dark, neon glows, street lights pool on the ground, and the effects include soft shadows and bloom. The default Pixel look renders a small frame upscaled with hard pixels, with 1px outlines, a limited palette and ordered dithering; Smooth swaps that for full resolution and tilt-shift |
+| Lighting | Golden afternoon to sunset to neon night, following run progress. Windows light up after dark, neon glows, street lights pool on the ground, and the effects include soft shadows and bloom. The world renders as crisp full-resolution voxels with tilt-shift, while the HUD is pixel art. An optional Retro pixel look (pause menu) renders a small upscaled frame with 1px outlines, a limited palette and ordered dithering |
 | Kaiju | Rex, Gorilla Grunt, Ember Lizard and Volt Beetle, each with its own animated voxel rig (walk cycle, tail, jaw, punches) |
 | Augments | 38 augments in three kinds. **Moves** are attacks that fire on their own cooldown, each with its own animation and effects: Claw Strike, Tail Spin, Spine Missiles, Car Toss, Roar, Laser Eyes, Seismic Slam, Atomic Breath and Meteor Call. **Mods** upgrade one move (Double Strike, Crescent Sweep, Molten Claws, Cyclone, Barrage, Cluster Spines, Juggler, Ricochet, Prism Split, Overcharge, Aftershock, Fault Lines, Napalm, Long Breath, Meteor Shower...) or all of them (Hair Trigger, Kaiju-Sized, Echo), and are only offered once you own their move. **Passives** cover destruction chains, defence and growth. Your first offer is always three moves |
 | Run loop | 2 synergy sets, rerolls, escalating military, the boss, revive, results, difficulty tiers and local best scores |

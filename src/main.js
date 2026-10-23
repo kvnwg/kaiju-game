@@ -213,7 +213,7 @@ function updatePreyArrow() {
 function boot() {
   try {
     if (!window.THREE) throw new Error('three.js did not load');
-    renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: profile.pixelArt !== false && params.get('look') !== 'smooth', floaterLayer: document.getElementById('floaters') });
+    renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || profile.pixelArt === true, floaterLayer: document.getElementById('floaters') });
     renderer.onQualityChange = (q) => {
       profile.quality = q;
       saveProfile(profile);

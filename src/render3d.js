@@ -124,7 +124,7 @@ export function makeVoxelMaterial(uniforms, selfLit = 0) {
 }
 
 export class Renderer3D {
-  constructor(canvas, { quality = 'high', floaterLayer = null, pixelArt = true } = {}) {
+  constructor(canvas, { quality = 'high', floaterLayer = null, pixelArt = false } = {}) {
     this.canvas = canvas;
     this.floaterLayer = floaterLayer;
     this.pixelArt = pixelArt;
