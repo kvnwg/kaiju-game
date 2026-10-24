@@ -42,6 +42,7 @@ export class UI {
     this.bossbar = $('#bossbar');
     this.bossFill = $('#bossbar .fill');
     this.bossName = $('#bossbar span');
+    this.bossQuip = $('#bossbar .quip');
     this.augbar = $('#augbar');
     this.bannerEl = $('#banner');
     this.hintEl = $('#hint');
@@ -85,7 +86,8 @@ export class UI {
     const growth = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / s.biomassToNext);
     this.growthFill.style.width = `${growth * 100}%`;
     this.growthText.textContent = `Size ${k.stage} · ${s.name}`;
-    this.growthPct.textContent = k.stage >= MAX_STAGE ? 'MAX' : `${Math.floor(growth * 100)}%`;
+    const gated = k.stage < MAX_STAGE && growth >= 1 && !game.gateCleared[k.stage];
+    this.growthPct.textContent = k.stage >= MAX_STAGE ? 'MAX' : gated ? 'BOSS' : `${Math.floor(growth * 100)}%`;
     this.stageNum.textContent = k.level;
     this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
     this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';
@@ -126,7 +128,10 @@ export class UI {
     const bossOn = Boolean(b && !b.dead);
     this.bossbar.classList.toggle('hidden', !bossOn);
     if (bossOn) {
-      this.bossName.textContent = b.phase === 2 ? `${b.name} · enraged` : b.name;
+      const name = b.phase === 2 ? `${b.name} · ${b.gate ? 'furious' : 'enraged'}` : b.name;
+      if (this.bossName.textContent !== name) this.bossName.textContent = name;
+      const quip = b.quip && game.time < b.quipUntil ? `“${b.quip}”` : b.shield ? 'Filibustering: immune' : b.state === 'break' ? 'On break: takes extra damage' : '';
+      if (this.bossQuip.textContent !== quip) this.bossQuip.textContent = quip;
       this.bossFill.style.width = `${(100 * b.hp) / b.maxHp}%`;
     }
 

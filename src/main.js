@@ -105,6 +105,15 @@ function handleEvents(events) {
       case 'eliteDown':
         ui.banner(`${e.name} destroyed`, '+1 level and a pile of scrap', 'synergy');
         break;
+      case 'gateWarning':
+        ui.banner('Size-up blocked', `${e.name} has been sent to stop you`, 'warning');
+        break;
+      case 'gateBoss':
+        ui.banner(e.name, e.title, 'warning');
+        break;
+      case 'gateBossDefeated':
+        ui.banner(`${e.name} defeated`, e.text, 'grow');
+        break;
       case 'bossWarning':
         ui.banner('Warning', `${e.name} approaching from the harbor`, 'warning');
         break;
@@ -200,6 +209,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'g') game.debugGrow();
   if (e.key === 'l') game.debugLevel();
   if (e.key === 'b' && game.bossTimer !== null) game.bossTimer = 0.1;
+  if (e.key === 'n' && game.kaiju.stage < 6) game.addBiomass(game.stage.biomassToNext);
   if (e.key === 'k' && game.boss) game.damageBoss(game.boss.hp + 1);
   if (e.key === 'h') game.kaiju.hp = game.kaiju.maxHp;
 });

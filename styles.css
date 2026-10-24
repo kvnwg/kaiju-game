@@ -307,6 +307,8 @@ html, body {
   background: var(--ico-skull) center / contain no-repeat;
   image-rendering: pixelated;
 }
+#bossbar .quip { display: block; min-height: 14px; margin-top: 6px; font-family: var(--body, inherit); font-style: normal; font-size: 12px; text-transform: none; color: #fff3b0; }
+#bossbar .quip:empty { visibility: hidden; }
 #bossbar .track { position: relative; height: 18px; margin-top: 6px; background: #3a1418; overflow: hidden; }
 #bossbar .track::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 15px, rgba(13, 14, 20, 0.45) 15px 18px); }
 #bossbar .fill { height: 100%; background: #ff3b3b; box-shadow: inset 0 var(--p) 0 #ff8a7a, inset 0 calc(-1 * var(--p)) 0 #9a1515; transition: width 0.1s steps(3); }

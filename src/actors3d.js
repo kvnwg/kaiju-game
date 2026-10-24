@@ -1,7 +1,7 @@
 /* global THREE */
 // Animated voxel characters: the player's kaiju, the boss, military units, crowds and traffic.
 import { meshGrid } from './mesher.js';
-import { KAIJU_MODELS, UNIT_MODELS, bossModel, personModel, PERSON_VARIANTS } from './models.js';
+import { KAIJU_MODELS, UNIT_MODELS, bossModel, GATE_BOSS_MODELS, personModel, PERSON_VARIANTS } from './models.js';
 import { buildProp } from './props.js';
 import { arcHeight } from './fx3d.js';
 import { EAT_TIME } from './config.js';
@@ -329,25 +329,54 @@ export class Actors {
       }
       return;
     }
+    const id = b.model || 'coast';
+    if (this.boss && this.boss.id !== id) {
+      this.scene.remove(this.boss.root);
+      this.boss = null;
+    }
     if (!this.boss) {
       const bm = this.makeMat();
-      this.boss = partsGroup(bossModel(), bm);
+      this.boss = partsGroup(b.model ? GATE_BOSS_MODELS[b.model]() : bossModel(), bm);
       this.boss.mat = bm;
+      this.boss.id = id;
       this.scene.add(this.boss.root);
     }
     const rig = this.boss;
     if (b.dead) {
-      rig.root.position.y -= 0.6;
+      rig.root.position.y -= b.r * 0.004;
       rig.root.rotation.z += 0.004;
       if (rig.root.position.y < -b.r * 2) rig.root.visible = false;
       return;
     }
+    rig.root.visible = true;
     rig.root.scale.setScalar(b.r / rig.model.radius);
     rig.root.position.set(b.x, 0, b.y);
     rig.root.rotation.y = -b.aim;
-    animateRig(rig, b.walk * 4, b.state !== 'idle' || true, t, b.state === 'windup');
+    const moving = !['break', 'speech', 'windup'].includes(b.state);
+    animateRig(rig, b.walk * 4, moving, t, b.state === 'windup');
+    // Boss-specific flourishes: the spinning cone, the crane's boom and ball, sitting down
+    // for a union break, waving through a speech.
+    const n = rig.nodes;
+    if (n.cone) {
+      n.cone.rotation.y = t * (b.state === 'donut' ? 9 : 2);
+      n.cone.position.y = n.cone.userData.base.y + Math.abs(Math.sin(t * 6)) * 0.6;
+    }
+    if (n.boom) {
+      const spin = b.swingT > 0 ? (1.9 - b.swingT) * 5.5 : 0;
+      const lift = b.state === 'break' ? 0.05 : 0.6 + Math.sin(t * 1.5) * 0.05;
+      n.boom.rotation.set(0, spin, lift);
+      if (n.ball) n.ball.rotation.set(Math.sin(t * 2.2) * 0.25, 0, -lift + Math.sin(t * 2.6) * (b.swingT > 0 ? 0.6 : 0.15));
+    }
+    if (n.body && b.state === 'break') n.body.position.y = n.body.userData.base.y * 0.45;
+    if (b.state === 'speech') {
+      if (n.armL) n.armL.rotation.z = 1.3 + Math.sin(t * 5) * 0.4;
+      if (n.armR) n.armR.rotation.z = 1.1 + Math.sin(t * 5 + 1) * 0.3;
+    }
     if (b.flash > 0) rig.mat.emissive.setRGB(0.75, 0.75, 0.72);
-    else {
+    else if (b.shield) {
+      const fl = 0.25 + 0.15 * Math.sin(t * 8);
+      rig.mat.emissive.setRGB(fl * 0.3, fl * 0.6, fl);
+    } else {
       const fl = b.state === 'windup' ? 0.25 + 0.25 * Math.sin(t * 30) : 0;
       rig.mat.emissive.setRGB(fl, fl * 0.4, fl * 0.2);
     }

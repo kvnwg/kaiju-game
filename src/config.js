@@ -200,6 +200,44 @@ export const BOSS = {
   arriveDelay: 6, // seconds after reaching Apex before the boss walks in
 };
 
+// A boss guards every size-up: fill the growth bar and one is sent after you; beat it to grow.
+// Sizes are in units of your radius at that stage, damage in fractions of that stage's max health,
+// and health in hits of your current base damage (so augments still make the fight shorter).
+export const GATE = { warn: 2.5, hits: 46, hitsPerLevel: 0.6, interval: 3.1, furious: 0.7, heal: 0.15, secondWind: 0.5 };
+export const GATE_BOSSES = [
+  null,
+  {
+    id: 'kilowatt', name: 'Agent Kilowatt', title: 'Cyborg hitman. Sent to "handle" you.',
+    r: 1.3, speed: 0.8, keep: 5, contact: 0.04, patterns: ['pistol', 'blink', 'pistol', 'mines'],
+    quips: { pistol: ['Nothing personal.', 'Hold still.', 'Bang. Bang. Bang.'], blink: ['Over here.', 'Too slow.'], mines: ["Here's my card.", 'Networking!'] },
+    furious: 'Kilowatt has removed his sunglasses.', defeat: 'Agent Kilowatt has been... decommissioned.',
+  },
+  {
+    id: 'karen', name: 'KAREN-9000', title: 'HOA president. Power armour. Opinions.',
+    r: 1.4, speed: 0.75, keep: 3, contact: 0.05, chargeSpeed: 3.2, chargeDmg: 0.16, patterns: ['violation', 'charge', 'manager', 'violation', 'charge'],
+    quips: { violation: ["That's a violation!", 'Your lawn is TOO SMASHED.', 'I am filing a complaint.'], charge: ['Excuse me?!', 'I was HERE first!'], manager: ['I want to speak to your MANAGER.', 'Officers! THAT one!'] },
+    furious: 'KAREN-9000 has escalated to corporate.', defeat: 'KAREN-9000 will be leaving a one-star review.',
+  },
+  {
+    id: 'whippy', name: 'Mr. Whippy', title: 'Armoured ice-cream truck. The jingle never stops.',
+    r: 1.3, speed: 0.95, keep: 2, contact: 0.08, chargeSpeed: 3.6, chargeDmg: 0.2, patterns: ['scoops', 'donut', 'scoops', 'charge'],
+    quips: { scoops: ['Brain freeze!', 'Two scoops!', 'Sprinkles are extra.'], donut: ['♪ Pop goes the weasel ♪', 'Wheeeee!'], charge: ['Beep beep!', 'No refunds!'] },
+    furious: 'Mr. Whippy has switched to rocky road.', defeat: 'Mr. Whippy has melted.',
+  },
+  {
+    id: 'bill', name: 'Wrecking Bill', title: 'Sentient demolition crane. Paid by the hour.',
+    r: 1.3, speed: 0.7, keep: 3, contact: 0.1, hits: 0.85, patterns: ['swing', 'beams', 'swing', 'unionBreak'],
+    quips: { swing: ['Coming through!', 'Swing batter!', 'Mind the ball!'], beams: ['Heads up!', 'Load incoming!'], unionBreak: ['Union break. Fifteen minutes.', 'Contractually obligated nap.'] },
+    furious: 'Wrecking Bill is working overtime.', defeat: 'Wrecking Bill has clocked out. Permanently.',
+  },
+  {
+    id: 'mayor', name: 'The Mecha-Mayor', title: 'City Hall, standing up for itself.',
+    r: 1.3, speed: 0.75, keep: 3, contact: 0.1, hits: 0.85, patterns: ['taxLaser', 'budgetCuts', 'speech', 'blimps', 'taxLaser', 'budgetCuts'],
+    quips: { taxLaser: ['Time to pay your fair share!', 'Audit beam, engage!'], budgetCuts: ['Budget cuts!', 'Slashing spending!'], speech: ['My fellow citizens...', 'Four more years!', 'I will now filibuster.'], blimps: ['Vote Mayor!', 'Campaign drop!'] },
+    furious: 'The Mecha-Mayor has declared a state of emergency.', defeat: 'The Mecha-Mayor has been voted out.',
+  },
+];
+
 export const LIMITS = {
   collapsing: 3, // buildings mid-collapse at once (design doc: performance budget)
   vfx: 600,

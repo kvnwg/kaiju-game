@@ -479,6 +479,190 @@ export function bossModel() {
   };
 }
 
+// ---------------------------------------------------------------- gate bosses
+// One boss guards each size-up. Built from parts so they can walk and swing; front is +x.
+export const GATE_BOSS_MODELS = {
+  // Agent Kilowatt: a cyborg hitman in a trench coat, shades and one glowing red eye.
+  kilowatt() {
+    const coat = 0xb89a6a;
+    const body = new VoxelGrid(4, 8, 6);
+    body.box(0, 0, 0, 4, 8, 6, coat);
+    body.box(3, 2, 2, 4, 8, 4, 0xf2f2f2);
+    body.box(3, 3, 2, 4, 7, 3, 0xc0262c);
+    body.box(0, 2, 0, 4, 3, 6, 0x5a4a32);
+    const head = new VoxelGrid(4, 4, 4);
+    head.box(0, 0, 0, 4, 4, 4, 0xd9a07a);
+    head.box(0, 3, 0, 4, 4, 4, 0x1a1a1a);
+    head.box(3, 2, 0, 4, 3, 4, 0x111111);
+    head.set(3, 2, 1, 0xff2a2a, E);
+    head.box(0, 0, 0, 2, 2, 1, 0x8c939c);
+    const leg = () => {
+      const g = new VoxelGrid(2, 6, 2);
+      g.box(0, 1, 0, 2, 6, 2, 0x22252b);
+      g.box(0, 0, 0, 3, 1, 2, 0x0d0d0d);
+      return g;
+    };
+    const gunArm = new VoxelGrid(7, 2, 2);
+    gunArm.box(0, 0, 0, 4, 2, 2, coat);
+    gunArm.box(4, 0, 0, 7, 2, 2, 0x1a1a1a);
+    gunArm.set(6, 1, 0, 0x59c3ff, E);
+    const cyberArm = new VoxelGrid(5, 2, 2);
+    cyberArm.box(0, 0, 0, 5, 2, 2, 0x8c939c);
+    cyberArm.set(2, 1, 0, 0xff2a2a, E);
+    return {
+      radius: 3, height: 18,
+      parts: [
+        part('body', body, { x: 2, y: 0, z: 3 }, { x: 0, y: 6, z: 0 }),
+        part('head', head, { x: 2, y: 0, z: 2 }, { x: 0, y: 8, z: 0 }, 'body'),
+        part('legL', leg(), { x: 1, y: 6, z: 1 }, { x: 0, y: 0, z: -1.5 }, 'body', { swing: 1 }),
+        part('legR', leg(), { x: 1, y: 6, z: 1 }, { x: 0, y: 0, z: 1.5 }, 'body', { swing: -1 }),
+        part('armL', cyberArm, { x: 1, y: 1, z: 1 }, { x: 0, y: 6, z: -4 }, 'body', { arm: 1 }),
+        part('armR', gunArm, { x: 1, y: 1, z: 1 }, { x: 0, y: 6, z: 4 }, 'body', { arm: -1 }),
+      ],
+    };
+  },
+  // KAREN-9000: HOA power armour, an asymmetric blonde bob and a clipboard.
+  karen() {
+    const shell = 0xe8dcc8;
+    const pink = 0xe86aa0;
+    const body = new VoxelGrid(7, 9, 9);
+    body.box(0, 0, 0, 7, 9, 9, shell);
+    body.box(0, 4, 0, 7, 5, 9, pink);
+    body.box(6, 5, 3, 7, 8, 6, 0x6fd8ff, E);
+    const head = new VoxelGrid(6, 6, 6);
+    head.box(0, 0, 0, 6, 5, 6, shell);
+    head.box(5, 1, 1, 6, 3, 5, 0x2a2a2a);
+    head.box(0, 4, 0, 6, 6, 6, 0xf2d36b);
+    head.box(0, 1, 0, 3, 6, 1, 0xf2d36b);
+    head.box(0, 1, 5, 2, 4, 6, 0xf2d36b);
+    head.box(5, 2, 1, 6, 3, 2, 0xff4a4a, E);
+    const leg = () => {
+      const g = new VoxelGrid(3, 7, 3);
+      g.box(0, 1, 0, 3, 7, 3, shell);
+      g.box(0, 0, 0, 4, 1, 3, pink);
+      return g;
+    };
+    const clipArm = new VoxelGrid(8, 3, 3);
+    clipArm.box(0, 0, 0, 5, 3, 3, shell);
+    clipArm.box(5, -1, 0, 6, 5, 3, 0x8a5a2a);
+    clipArm.box(5, 0, 0, 6, 4, 3, 0xf8f8f0);
+    clipArm.set(5, 3, 1, 0x8a8a8a);
+    const arm = new VoxelGrid(6, 3, 3);
+    arm.box(0, 0, 0, 6, 3, 3, shell);
+    arm.box(5, 0, 0, 6, 3, 3, pink);
+    return {
+      radius: 6, height: 24,
+      parts: [
+        part('body', body, { x: 3.5, y: 0, z: 4.5 }, { x: 0, y: 7, z: 0 }),
+        part('head', head, { x: 3, y: 0, z: 3 }, { x: 0, y: 9, z: 0 }, 'body'),
+        part('legL', leg(), { x: 1.5, y: 7, z: 1.5 }, { x: 0, y: 0, z: -2.5 }, 'body', { swing: 1 }),
+        part('legR', leg(), { x: 1.5, y: 7, z: 1.5 }, { x: 0, y: 0, z: 2.5 }, 'body', { swing: -1 }),
+        part('armL', clipArm, { x: 1, y: 1.5, z: 1.5 }, { x: 0, y: 7, z: -6 }, 'body', { arm: 1 }),
+        part('armR', arm, { x: 1, y: 1.5, z: 1.5 }, { x: 0, y: 7, z: 6 }, 'body', { arm: -1 }),
+      ],
+    };
+  },
+  // Mr. Whippy: an armoured ice-cream truck with angry headlights and a giant cone on top.
+  whippy() {
+    const body = new VoxelGrid(16, 9, 8);
+    body.box(0, 1, 0, 16, 9, 8, 0xf8f4ee);
+    body.box(0, 3, 0, 16, 4, 8, 0xff8fc0);
+    body.box(4, 4, 0, 10, 7, 1, 0x6fd8ff);
+    body.box(4, 4, 7, 10, 7, 8, 0x6fd8ff);
+    body.box(13, 5, 1, 16, 8, 7, 0x2a3a4a);
+    body.box(13, 7, 1, 16, 8, 3, 0x1a1a1a);
+    body.box(13, 7, 5, 16, 8, 7, 0x1a1a1a);
+    body.set(15, 2, 1, 0xfff2a0, E);
+    body.set(15, 2, 6, 0xfff2a0, E);
+    for (const x of [2, 11]) for (const z of [0, 7]) body.box(x, 0, z, x + 3, 2, z + 1, 0x111111);
+    const cone = new VoxelGrid(6, 10, 6);
+    cone.box(2, 0, 2, 4, 4, 4, 0xd99a4a);
+    cone.box(1, 4, 1, 5, 6, 5, 0xffd0e0);
+    cone.box(1, 6, 1, 5, 8, 5, 0x8a5a3a);
+    cone.box(2, 8, 2, 4, 10, 4, 0xf8f4ee);
+    cone.set(3, 9, 3, 0xff3b6b, E);
+    return {
+      radius: 8, height: 20,
+      parts: [
+        part('body', body, { x: 8, y: 0, z: 4 }, { x: 0, y: 0, z: 0 }),
+        part('cone', cone, { x: 3, y: 0, z: 3 }, { x: -2, y: 9, z: 0 }, 'body', { spin: true }),
+      ],
+    };
+  },
+  // Wrecking Bill: a demolition crane in a hard hat with a wrecking ball on a boom.
+  bill() {
+    const yellow = 0xf2b134;
+    const body = new VoxelGrid(12, 8, 10);
+    body.box(0, 0, 0, 12, 2, 10, 0x2a2a2a);
+    body.box(1, 2, 1, 11, 7, 9, yellow);
+    body.box(8, 3, 2, 11, 6, 8, 0x6fd8ff);
+    body.box(3, 7, 3, 8, 8, 7, 0xffd23f);
+    body.box(9, 4, 3, 11, 5, 4, 0x1a1a1a);
+    body.box(9, 4, 6, 11, 5, 7, 0x1a1a1a);
+    const boom = new VoxelGrid(22, 2, 2);
+    for (let x = 0; x < 22; x++) boom.box(x, 0, 0, x + 1, 2, 2, x % 3 ? yellow : 0x2a2a2a);
+    const ball = new VoxelGrid(5, 8, 5);
+    ball.box(2, 5, 2, 3, 8, 3, 0x5a5a5a);
+    ball.box(0, 0, 0, 5, 5, 5, 0x3a3d42);
+    ball.set(2, 4, 4, 0xffffff);
+    return {
+      radius: 10, height: 30,
+      parts: [
+        part('body', body, { x: 6, y: 0, z: 5 }, { x: 0, y: 0, z: 0 }),
+        part('boom', boom, { x: 0, y: 1, z: 1 }, { x: 2, y: 7, z: 0 }, 'body', { boom: true }),
+        part('ball', ball, { x: 2.5, y: 8, z: 2.5 }, { x: 21, y: 0, z: 0 }, 'boom', { swingBall: true }),
+      ],
+    };
+  },
+  // The Mecha-Mayor: City Hall stood up and walked off, with a dome head and a moustache.
+  mayor() {
+    const stone = 0xe8e2d4;
+    const body = new VoxelGrid(14, 16, 18);
+    body.box(0, 0, 0, 14, 16, 18, stone);
+    for (let z = 1; z < 18; z += 3) body.box(13, 1, z, 14, 13, z + 1, 0xfaf6ee);
+    body.box(12, 13, 0, 14, 16, 18, 0xcfc8b8);
+    body.box(13, 4, 7, 14, 9, 11, 0x5a3a2a);
+    body.box(11, 2, 0, 12, 16, 3, 0xc0262c);
+    body.box(11, 12, 3, 12, 14, 18, 0xc0262c);
+    const head = new VoxelGrid(10, 10, 10);
+    head.cylinder(5, 5, 4.6, 0, 6, 0x7fa89a);
+    head.cylinder(5, 5, 3.4, 6, 9, 0x8fb8aa);
+    head.box(4, 9, 4, 6, 10, 6, 0xffd23f, E);
+    head.box(9, 3, 3, 10, 4, 4, 0xfff2a0, E);
+    head.box(9, 3, 6, 10, 4, 7, 0xfff2a0, E);
+    head.box(9, 1, 2, 10, 2, 8, 0x3a2414);
+    head.box(9, 0, 1, 10, 1, 3, 0x3a2414);
+    head.box(9, 0, 7, 10, 1, 9, 0x3a2414);
+    const leg = () => {
+      const g = new VoxelGrid(6, 14, 6);
+      g.box(0, 2, 0, 6, 14, 6, 0xcfc8b8);
+      g.box(-1, 0, -1, 7, 2, 7, 0x9a948a);
+      return g;
+    };
+    const arm = (gavel) => {
+      const g = new VoxelGrid(20, 5, 5);
+      g.box(0, 0, 0, 14, 5, 5, stone);
+      g.box(14, 1, 1, 18, 4, 4, 0xcfc8b8);
+      if (gavel) {
+        g.box(17, 0, 2, 18, 5, 3, 0x6a4a2a);
+        g.box(18, -2, 0, 20, 7, 5, 0x8a5a3a);
+      }
+      return g;
+    };
+    return {
+      radius: 14, height: 46,
+      parts: [
+        part('body', body, { x: 7, y: 0, z: 9 }, { x: 0, y: 14, z: 0 }),
+        part('head', head, { x: 5, y: 0, z: 5 }, { x: 0, y: 16, z: 0 }, 'body'),
+        part('legL', leg(), { x: 3, y: 14, z: 3 }, { x: 0, y: 0, z: -5 }, 'body', { swing: 1 }),
+        part('legR', leg(), { x: 3, y: 14, z: 3 }, { x: 0, y: 0, z: 5 }, 'body', { swing: -1 }),
+        part('armL', arm(true), { x: 2, y: 2.5, z: 2.5 }, { x: 0, y: 12, z: -11 }, 'body', { arm: 1 }),
+        part('armR', arm(false), { x: 2, y: 2.5, z: 2.5 }, { x: 0, y: 12, z: 11 }, 'body', { arm: -1 }),
+      ],
+    };
+  },
+};
+
 // Elevated metro car: silver with a blue stripe and lit windows.
 export function trainCarModel(front = false) {
   const g = new VoxelGrid(14, 6, 5);

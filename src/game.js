@@ -1,5 +1,5 @@
 import {
-  WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, LIMITS,
+  WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
   UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
@@ -70,6 +70,8 @@ export class Game {
     this.vfx = [];
     this.boss = null;
     this.bossTimer = null;
+    this.gateTimer = null; // countdown to the size-gate boss walking in
+    this.gateCleared = []; // gateCleared[stage]: that size's boss is down, so the kaiju may grow
     this.collapsing = 0;
     this.active = new Set();
     this.shake = 0;
@@ -861,6 +863,17 @@ export class Game {
   checkGrowth() {
     const k = this.kaiju;
     if (k.stage >= MAX_STAGE || k.biomass < this.stage.biomassToNext) return;
+    // A full growth bar summons this size's boss; growing waits until it is beaten.
+    if (!this.gateCleared[k.stage]) {
+      k.biomass = this.stage.biomassToNext;
+      if (!this.boss && this.gateTimer === null) {
+        this.gateTimer = GATE.warn;
+        const def = GATE_BOSSES[k.stage];
+        this.emit('gateWarning', { name: def.name, title: def.title });
+      }
+      return;
+    }
+    if (this.boss && this.boss.gate) return; // grow once its death throes are over
     k.biomass -= this.stage.biomassToNext;
     this.grow();
   }
@@ -1377,7 +1390,7 @@ export class Game {
     const dir = this.director;
     const th = this.threat / 100;
     // Threat speeds up reinforcements and lets more of them on the field at once.
-    dir.spawnT -= dt * (1 + th * 1.2);
+    dir.spawnT -= dt * (1 + th * 1.2) * (this.boss && this.boss.gate ? 0.5 : 1);
     const alive = this.units.filter((u) => !u.dead && u.type !== 'jet').length;
     if (dir.spawnT <= 0) {
       dir.spawnT = esc.interval * this.rng.range(0.7, 1.3);
@@ -1634,9 +1647,13 @@ export class Game {
         } else if (free(nx, u.y)) u.x = nx;
         else if (free(u.x, ny)) u.y = ny;
         else if (!free(u.x, u.y)) {
-          // Already stuck inside something (e.g. knocked back): let it walk out.
-          u.x = nx;
-          u.y = ny;
+          // Already stuck inside something (e.g. knocked back): let it walk out, but never
+          // from grazing a wall to deeper inside it.
+          const deep = (x, y) => this.blockedAt(x, y, pad * 0.4, minTier);
+          if (!deep(nx, ny) || deep(u.x, u.y)) {
+            u.x = nx;
+            u.y = ny;
+          }
         }
         u.heading = Math.atan2(my, mx);
       }
@@ -1937,35 +1954,49 @@ export class Game {
         this.spawnBoss();
       }
     }
+    if (this.gateTimer !== null) {
+      this.gateTimer -= dt;
+      if (this.gateTimer <= 0) {
+        this.gateTimer = null;
+        this.spawnGateBoss();
+      }
+    }
     const b = this.boss;
     if (!b || b.dead) return;
     const k = this.kaiju;
+    const g = b.gate ? b.def : null;
     b.flash = Math.max(0, b.flash - dt);
+    b.swingT = Math.max(0, (b.swingT || 0) - dt);
     const dx = k.x - b.x;
     const dy = k.y - b.y;
     const dist = Math.hypot(dx, dy) || 1;
-    b.aim = Math.atan2(dy, dx);
+    if (b.state !== 'donut') b.aim = Math.atan2(dy, dx);
+    const speed = g ? g.speed * this.stage.speed : BOSS.speed;
+    const touch = () => {
+      if (dist < b.r + k.r + (g ? b.unit * 0.3 : 10)) this.takeDamage((g ? g.contact * b.D : BOSS.contactDmg * b.dmgMul) * dt, 'melee');
+    };
 
     if (b.state === 'enter') {
       b.walk += dt;
       b.y += (b.targetY - b.y) * Math.min(1, dt * 0.8);
       b.x += (b.targetX - b.x) * Math.min(1, dt * 0.8);
-      if (Math.hypot(b.targetX - b.x, b.targetY - b.y) < 20) {
+      if (Math.hypot(b.targetX - b.x, b.targetY - b.y) < (g ? b.r * 1.5 : 20)) {
         b.state = 'idle';
         b.next = 1.5;
-        this.emit('bossFight', { name: BOSS.name });
+        this.emit('bossFight', { name: b.name });
       }
       return;
     }
     if (b.state === 'charge') {
       b.walk += dt * 3;
-      const step = BOSS.chargeSpeed * dt;
+      const step = (g ? (g.chargeSpeed || 3) * this.stage.speed : BOSS.chargeSpeed) * dt;
       b.x += b.chargeDir.x * step;
       b.y += b.chargeDir.y * step;
       b.chargeLeft -= step;
       if (!b.chargeHit && Math.hypot(k.x - b.x, k.y - b.y) < b.r + k.r) {
         b.chargeHit = true;
-        this.takeDamage(BOSS.chargeDmg * b.dmgMul, 'melee');
+        if (k.dodging > 0) this.perfectDodge(b.x, b.y);
+        this.takeDamage(g ? (g.chargeDmg || 0.2) * b.D : BOSS.chargeDmg * b.dmgMul, 'melee');
         this.shake = Math.max(this.shake, 0.9);
       }
       this.bossTrample(b);
@@ -1976,29 +2007,159 @@ export class Game {
       return;
     }
     if (b.state === 'windup') return;
-    const want = b.r + k.r + 160;
+    if (b.state === 'donut') {
+      // Mr. Whippy laps the kaiju in a tightening circle, leaving sticky sprinkles behind.
+      b.donutT -= dt;
+      b.donutR = Math.max(b.unit * 2.6, b.donutR - b.unit * 1.2 * dt);
+      b.donutA += ((g.chargeSpeed || 3) * this.stage.speed * 0.8 * dt) / b.donutR;
+      const nx = k.x + Math.cos(b.donutA) * b.donutR;
+      const ny = k.y + Math.sin(b.donutA) * b.donutR;
+      b.aim = Math.atan2(ny - b.y, nx - b.x);
+      b.x = nx;
+      b.y = ny;
+      b.walk += dt * 3;
+      b.dropT -= dt;
+      b.shotT = (b.shotT || 0) - dt;
+      if (b.shotT <= 0) {
+        // Sprinkles fly out of the window as it laps you.
+        b.shotT = 0.45;
+        this.bossShot(b, Math.atan2(k.y - b.y, k.x - b.x), 'bullet', 0.04 * b.D);
+      }
+      if (b.dropT <= 0) {
+        b.dropT = 0.28;
+        this.hazards.push({ kind: 'circle', x: b.x, y: b.y, r: b.unit * 0.9, t: 0, delay: 0.75, dmg: 0.05 * b.D, type: 'explosive', slow: 0.9, boss: true });
+      }
+      touch();
+      if (b.donutT <= 0) {
+        b.state = 'idle';
+        b.next = 1;
+      }
+      return;
+    }
+    if (b.state === 'break') {
+      // Wrecking Bill sits down for his union break, and takes extra damage while he does.
+      b.breakT -= dt;
+      if (b.breakT <= 0) {
+        b.state = 'idle';
+        b.next = 0.8;
+        this.bossQuip(b, 'Break is over. Back to work.');
+      }
+      return;
+    }
+    if (b.state === 'speech') {
+      // The Mecha-Mayor's filibuster: immune while he talks, and his supporters arrive.
+      b.speechT -= dt;
+      b.quipT -= dt;
+      if (b.quipT <= 0) {
+        b.quipT = 1.5;
+        this.bossQuip(b, 'speech');
+        this.fx.rings.push({ x: b.x, y: b.y, r0: b.r, r1: b.r * 1.6, life: 0.6, max: 0.6, color: 0x7fc8ff, width: b.r * 0.12 });
+      }
+      if (b.speechT <= 0) {
+        b.state = 'idle';
+        b.shield = false;
+        b.next = 1;
+      }
+      return;
+    }
+    const want = g ? b.r + k.r + g.keep * b.unit : b.r + k.r + 160;
+    let mx = 0;
+    let my = 0;
     if (dist > want) {
+      mx = dx / dist;
+      my = dy / dist;
+    } else if (g && dist < want * 0.6) {
+      mx = (-dx / dist) * 0.7;
+      my = (-dy / dist) * 0.7;
+    }
+    if (g) {
+      // Gate bosses sidestep while they line up the next attack.
+      mx += (-dy / dist) * 0.4 * (b.strafe || 1);
+      my += (dx / dist) * 0.4 * (b.strafe || 1);
+      if (this.rng.chance(dt * 0.3)) b.strafe = -(b.strafe || 1);
+    }
+    const ml = Math.hypot(mx, my);
+    if (ml > 0.05) {
       b.walk += dt;
-      b.x += (dx / dist) * BOSS.speed * dt;
-      b.y += (dy / dist) * BOSS.speed * dt;
+      // Run away and a gate boss breaks into a sprint to keep up.
+      const sp = g && dist > want * 2.5 ? speed * 1.7 : speed;
+      const nx = b.x + (mx / ml) * sp * dt * Math.min(1, ml);
+      const ny = b.y + (my / ml) * speed * dt * Math.min(1, ml);
+      if (!g || !isWater(nx, ny)) {
+        b.x = nx;
+        b.y = ny;
+      }
       this.bossTrample(b);
     }
-    if (dist < b.r + k.r + 10) this.takeDamage(BOSS.contactDmg * b.dmgMul * dt, 'melee');
+    touch();
     if (b.phase === 1 && b.hp < b.maxHp * 0.5) {
       b.phase = 2;
-      this.emit('banner', { text: `${BOSS.name} is enraged!` });
-      for (let i = 0; i < 2; i++) {
-        const p = this.spawnPoint('mech');
-        this.spawnUnit('mech', p.x, p.y);
+      if (g) {
+        this.emit('banner', { text: g.furious });
+        this.shake = Math.max(this.shake, 0.5);
+      } else {
+        this.emit('banner', { text: `${BOSS.name} is enraged!` });
+        for (let i = 0; i < 2; i++) {
+          const p = this.spawnPoint('mech');
+          this.spawnUnit('mech', p.x, p.y);
+        }
       }
     }
     b.next -= dt;
     if (b.next <= 0) {
       const pattern = b.patterns[b.patternIndex % b.patterns.length];
       b.patternIndex++;
+      b.next = (g ? GATE.interval : 3.3) * (b.phase === 2 ? 0.7 : 1);
+      if (g) this.bossQuip(b, pattern);
       this.bossAttack(pattern);
-      b.next = b.phase === 2 ? 2.3 : 3.3;
     }
+  }
+
+  // A line of dialogue over the boss's head (and under its health bar).
+  bossQuip(b, key) {
+    const lines = b.def && b.def.quips[key];
+    const text = lines ? lines[this.rng.int(0, lines.length - 1)] : key;
+    if (!text) return;
+    b.quip = text;
+    b.quipUntil = this.time + 2.2;
+    this.fx.floaters.push({ x: b.x, y: b.y, h: b.r * 2.4, text, color: '#fff3b0', life: 1.8, max: 1.8 });
+  }
+
+  spawnGateBoss() {
+    const k = this.kaiju;
+    const def = GATE_BOSSES[k.stage];
+    const unit = this.stage.radius;
+    const span = this.viewSpan();
+    let x = k.x + span * 0.7;
+    let y = k.y;
+    for (let i = 0; i < 16; i++) {
+      const a = this.rng.range(0, Math.PI * 2);
+      const tx = k.x + Math.cos(a) * span * 0.7;
+      const ty = k.y + Math.sin(a) * span * 0.7;
+      if (!isWater(tx, ty) && !isWater(k.x + (tx - k.x) * 0.4, k.y + (ty - k.y) * 0.4)) {
+        x = tx;
+        y = ty;
+        break;
+      }
+    }
+    // Health is counted in hits of the kaiju's own damage, so the fight lasts about as long
+    // whatever was picked, and a little longer the higher the level.
+    const hp = this.baseDamage() * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * this.diff.enemyHp;
+    const dmgMul = 1 + (this.enemyScale().dmg - 1) * 0.5;
+    this.boss = {
+      isBoss: true, gate: k.stage, def, model: def.id, name: def.name, title: def.title,
+      x, y, r: def.r * unit, unit, hp, maxHp: hp, D: this.stage.maxHp * dmgMul * 0.6, dmgMul,
+      state: 'enter', targetX: k.x + (x - k.x) * 0.45, targetY: k.y + (y - k.y) * 0.45,
+      phase: 1, next: 1.5, patterns: def.patterns, patternIndex: 0, strafe: 1,
+      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, shield: false, quip: '', quipUntil: 0,
+    };
+    this.shake = Math.max(this.shake, 0.6);
+    // Second wind: a boss fight never starts on your last legs.
+    if (k.hp < k.maxHp * GATE.secondWind) {
+      k.hp = k.maxHp * GATE.secondWind;
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'SECOND WIND', color: '#9cff7a', life: 1.4, max: 1.4 });
+    }
+    this.emit('gateBoss', { name: def.name, title: def.title });
   }
 
   spawnBoss() {
@@ -2019,7 +2180,7 @@ export class Game {
 
   bossTrample(b) {
     for (const o of this.objectsNear(b.x, b.y, b.r * 0.8)) {
-      if (o.landmark) continue;
+      if (o.landmark || (b.gate && o.tier >= b.gate)) continue;
       this.destroyObject(o, norm(o.x - b.x, o.y - b.y), 'boss');
     }
   }
@@ -2027,6 +2188,7 @@ export class Game {
   bossAttack(pattern) {
     const b = this.boss;
     const k = this.kaiju;
+    if (b.gate) return this.gateAttack(b, pattern);
     if (pattern === 'barrage') {
       const n = b.phase === 2 ? 12 : 8;
       for (let i = 0; i < n; i++) {
@@ -2063,11 +2225,268 @@ export class Game {
     }
   }
 
+  // A boss projectile: slower than the kaiju can sidestep, like every other shot.
+  bossShot(b, angle, kind, dmg) {
+    const k = this.kaiju;
+    const sp = this.kaijuSpeed() * (kind === 'missile' ? 1.25 : 1.8);
+    const r = Math.max(0.4, b.unit * 0.18);
+    this.projectiles.push({
+      kind, x: b.x + Math.cos(angle) * b.r * 0.6, y: b.y + Math.sin(angle) * b.r * 0.6, vx: Math.cos(angle) * sp, vy: Math.sin(angle) * sp,
+      r, size: Math.max(r, k.r * 0.28), dmg, type: kind === 'bullet' ? 'bullet' : 'explosive', life: (b.unit * 18) / sp + 0.8, age: 0,
+      homing: kind === 'missile', h: b.r * 1.2, sedate: 0,
+    });
+  }
+
+  gateAttack(b, pattern) {
+    const k = this.kaiju;
+    const s = b.unit;
+    const D = b.D;
+    const p2 = b.phase === 2;
+    const alive = () => this.boss === b && !b.dead;
+    const aimAt = () => Math.atan2(k.y - b.y, k.x - b.x);
+    // Ground attacks land where you are heading, so running in a straight line is not enough.
+    const lead = (t) => ({ x: k.x + k.vx * t * 0.8, y: k.y + k.vy * t * 0.8 });
+    const circles = (n, spread, r, dmg, delay, extra = {}) => {
+      const c = lead(delay);
+      for (let i = 0; i < n; i++) {
+        const a = this.rng.range(0, Math.PI * 2);
+        const d = i === 0 ? 0 : i === 1 ? s * 0.4 : this.rng.range(s * 1.2, s * spread);
+        const from = i === 1 ? k : c;
+        this.hazards.push({ kind: 'circle', x: from.x + Math.cos(a) * d, y: from.y + Math.sin(a) * d, r, t: 0, delay: delay + i * 0.08, dmg, type: 'explosive', from: { x: b.x, y: b.y }, boss: true, ...extra });
+      }
+    };
+    const line = (x1, y1, x2, y2, w, dmg, delay, beam, extra = {}) => {
+      this.hazards.push({ kind: 'line', x1, y1, x2, y2, w, t: 0, delay, dmg, type: 'laser', beam, boss: true, ...extra });
+    };
+    switch (pattern) {
+      case 'pistol': {
+        // Telegraphed burst: a laser sight, then three (five when furious) rounds.
+        const a = aimAt();
+        const len = Math.hypot(k.x - b.x, k.y - b.y) + s * 4;
+        b.state = 'windup';
+        line(b.x, b.y, b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, s * 0.35, 0, 0.55, 0xff2a2a, {
+          visualOnly: true,
+          onHit: () => {
+            if (!alive()) return;
+            b.state = 'idle';
+            const n = p2 ? 5 : 3;
+            for (let i = 0; i < n; i++) {
+              this.schedule(i * 0.13, () => {
+                if (!alive()) return;
+                this.bossShot(b, aimAt() + this.rng.range(-0.05, 0.05), 'bullet', 0.05 * D);
+                this.fxEvent({ t: 'shot', kind: 'bullet', x: b.x, y: b.y });
+              });
+            }
+          },
+        });
+        break;
+      }
+      case 'blink': {
+        // Teleports to a new angle, then fans a spread of rounds.
+        this.fx.rings.push({ x: b.x, y: b.y, r0: b.r * 0.3, r1: b.r * 2, life: 0.35, max: 0.35, color: 0x59c3ff, width: b.r * 0.3 });
+        for (let i = 0; i < 8; i++) {
+          const a = this.rng.range(0, Math.PI * 2);
+          const d = this.rng.range(s * 3.5, s * 5.5);
+          const x = k.x + Math.cos(a) * d;
+          const y = k.y + Math.sin(a) * d;
+          if (isWater(x, y)) continue;
+          b.x = x;
+          b.y = y;
+          break;
+        }
+        this.fx.rings.push({ x: b.x, y: b.y, r0: b.r * 2, r1: b.r * 0.3, life: 0.35, max: 0.35, color: 0x59c3ff, width: b.r * 0.3 });
+        b.state = 'windup';
+        this.schedule(0.45, () => {
+          if (!alive()) return;
+          b.state = 'idle';
+          const n = p2 ? 7 : 5;
+          const a0 = aimAt();
+          for (let i = 0; i < n; i++) this.bossShot(b, a0 + (i - (n - 1) / 2) * 0.16, 'bullet', 0.05 * D);
+          this.fxEvent({ t: 'shot', kind: 'burst', x: b.x, y: b.y });
+        });
+        break;
+      }
+      case 'mines':
+        // Exploding business cards scattered around the kaiju.
+        circles(p2 ? 8 : 5, 4, s * 1.4, 0.1 * D, 1.5);
+        break;
+      case 'violation':
+        // Homing violation notices.
+        for (let i = 0, n = p2 ? 5 : 3; i < n; i++) this.bossShot(b, aimAt() + (i - (n - 1) / 2) * 0.45, 'missile', 0.05 * D);
+        this.fxEvent({ t: 'shot', kind: 'missile', x: b.x, y: b.y });
+        break;
+      case 'manager': {
+        // Calls in the local enforcement.
+        const types = ESCALATION[b.gate].weights;
+        for (let i = 0, n = p2 ? 2 : 1; i < n; i++) {
+          const type = this.rng.weighted(types);
+          const r = this.scaledDef(type).r;
+          let pos = null;
+          for (let t = 0; t < 8 && !pos; t++) {
+            const a = this.rng.range(0, Math.PI * 2);
+            const x = b.x + Math.cos(a) * b.r * 2;
+            const y = b.y + Math.sin(a) * b.r * 2;
+            if (!isWater(x, y) && !this.blockedAt(x, y, r)) pos = { x, y };
+          }
+          this.spawnGroup(type, pos || this.spawnPoint(type));
+        }
+        break;
+      }
+      case 'charge': {
+        const d = norm(k.x - b.x, k.y - b.y);
+        const len = Math.hypot(k.x - b.x, k.y - b.y) + k.r * 3;
+        b.state = 'windup';
+        line(b.x, b.y, b.x + d.x * len, b.y + d.y * len, b.r * 1.3, 0, p2 ? 0.8 : 1.05, 0xff5555, {
+          visualOnly: true,
+          onHit: () => {
+            if (!alive()) return;
+            b.state = 'charge';
+            b.chargeDir = d;
+            b.chargeLeft = len;
+            b.chargeHit = false;
+          },
+        });
+        break;
+      }
+      case 'scoops':
+        // Lobbed scoops: each splat is a brain freeze that slows you down.
+        circles(p2 ? 9 : 6, 4, s * 1.25, 0.07 * D, 1.2, { slow: 1.6 });
+        break;
+      case 'donut':
+        b.state = 'donut';
+        b.donutT = p2 ? 4 : 3;
+        b.donutR = Math.max(s * 3, Math.hypot(b.x - k.x, b.y - k.y));
+        b.donutA = Math.atan2(b.y - k.y, b.x - k.x);
+        b.dropT = 0;
+        break;
+      case 'swing': {
+        // Wrecking-ball spin: a ring of impacts sweeping round the crane at your distance,
+        // chasing the way you are circling. Step in or out of the ring to dodge it.
+        const a0 = aimAt();
+        const R = Math.max(b.r + s, Math.min(s * 5, Math.hypot(k.x - b.x, k.y - b.y)));
+        const n = Math.max(8, Math.ceil((Math.PI * 2 * R) / (s * 2.2)));
+        const rel = { x: k.vx - 0, y: k.vy - 0 };
+        const dirn = (Math.cos(a0) * rel.y - Math.sin(a0) * rel.x) >= 0 ? 1 : -1;
+        const sweep = p2 ? Math.PI * 2 : Math.PI * 1.4;
+        b.state = 'windup';
+        b.swingT = 1.9;
+        for (let i = 0; i < n; i++) {
+          const a = a0 - dirn * 0.5 + dirn * ((sweep * i) / n);
+          this.hazards.push({ kind: 'circle', x: b.x + Math.cos(a) * R, y: b.y + Math.sin(a) * R, r: s * 1.25, t: 0, delay: 0.85 + (i * 1.0) / n, dmg: 0.13 * D, type: 'explosive', boss: true });
+        }
+        this.schedule(1.9, () => {
+          if (!alive()) return;
+          if (b.state === 'windup') b.state = 'idle';
+          // Loose rivets fly off the end of the swing.
+          for (let i = 0; i < 5; i++) this.bossShot(b, aimAt() + (i - 2) * 0.18, 'bullet', 0.05 * D);
+        });
+        break;
+      }
+      case 'beams': {
+        // Steel beams dropped across your path.
+        const sp = Math.hypot(k.vx, k.vy);
+        const a = sp > 1 ? Math.atan2(k.vy, k.vx) : aimAt();
+        const ux = Math.cos(a);
+        const uy = Math.sin(a);
+        const n = p2 ? 6 : 4;
+        const c = lead(1.3);
+        for (let i = 0; i < n; i++) {
+          const off = (i - (n - 1) / 2) * s * 1.6 + this.rng.range(-0.3, 0.3) * s;
+          const cx = c.x + ux * off;
+          const cy = c.y + uy * off;
+          const half = s * 3.2;
+          line(cx - uy * half, cy + ux * half, cx + uy * half, cy - ux * half, s * 0.9, 0.12 * D, 1.1 + i * 0.18, 0x9aa3ad);
+        }
+        break;
+      }
+      case 'unionBreak':
+        b.state = 'break';
+        b.breakT = p2 ? 2.6 : 4;
+        this.fx.floaters.push({ x: b.x, y: b.y, h: b.r * 1.6, text: 'ON BREAK: HIT HIM!', color: '#9cff7a', life: 2, max: 2 });
+        break;
+      case 'taxLaser': {
+        const a0 = aimAt();
+        const len = s * 12;
+        for (const off of p2 ? [-0.35, 0, 0.35] : [0]) {
+          const a = a0 + off;
+          line(b.x + Math.cos(a) * b.r * 0.5, b.y + Math.sin(a) * b.r * 0.5, b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, s, 0.22 * D, 1.0, 0xffd23f);
+        }
+        break;
+      }
+      case 'budgetCuts': {
+        // A giant X slashed across where you stand (and a + after it when furious).
+        const len = s * 4.5;
+        const a0 = this.rng.range(0, Math.PI);
+        const cut = (cx, cy, base, delay) => {
+          for (const a of [base + Math.PI / 4, base - Math.PI / 4]) {
+            line(cx - Math.cos(a) * len, cy - Math.sin(a) * len, cx + Math.cos(a) * len, cy + Math.sin(a) * len, s * 0.8, 0.18 * D, delay, 0xff5a5a);
+          }
+        };
+        const c = lead(1.1);
+        cut(c.x, c.y, a0, 1.1);
+        if (p2) cut(k.x + k.vx * 1.4, k.y + k.vy * 1.4, a0 + Math.PI / 4, 1.8);
+        break;
+      }
+      case 'speech': {
+        b.state = 'speech';
+        b.shield = true;
+        b.speechT = 3.5;
+        b.quipT = 1.5;
+        const types = ESCALATION[b.gate].weights;
+        for (let i = 0; i < 2; i++) this.spawnGroup(this.rng.weighted(types));
+        break;
+      }
+      case 'blimps':
+        // Campaign blimps carpet-bomb the area, and a flurry of pamphlets comes your way.
+        circles(p2 ? 12 : 8, 3.2, s * 1.3, 0.12 * D, 1.4);
+        for (let i = 0; i < 6; i++) this.bossShot(b, aimAt() + (i - 2.5) * 0.16, 'bullet', 0.05 * D);
+        break;
+      default:
+        break;
+    }
+  }
+
+  defeatGateBoss(b) {
+    const k = this.kaiju;
+    b.hp = 0;
+    b.dead = true;
+    this.gateCleared[b.gate] = true;
+    this.stats.gateBosses = (this.stats.gateBosses || 0) + 1;
+    const scrap = 60 * b.gate * b.gate * this.diff.loot * this.scrapMult();
+    this.stats.scrap += scrap;
+    k.hp = Math.min(k.maxHp, k.hp + k.maxHp * GATE.heal);
+    this.slowmo = 0.8;
+    this.shake = Math.max(this.shake, 0.9);
+    // Its leftover attacks fizzle out.
+    this.hazards = this.hazards.filter((h) => !h.boss);
+    this.projectiles = this.projectiles.filter((p) => p.friendly);
+    for (let i = 0; i < 5; i++) this.schedule(i * 0.2, () => this.spawnExplosion(b.x + this.rng.range(-b.r, b.r), b.y + this.rng.range(-b.r, b.r), b.r * 0.9));
+    this.fxEvent({ t: 'bossDie', b });
+    this.fx.floaters.push({ x: b.x, y: b.y, h: b.r * 2, text: `+${Math.round(scrap)}`, color: '#ffd84a', life: 1.5, max: 1.5 });
+    this.spawnOrbs(b.x, b.y, 14, true);
+    for (const u of this.units) u.fear = Math.max(u.fear, 3);
+    this.emit('gateBossDefeated', { name: b.name, text: b.def.defeat });
+    // Clear the boss after the death throes; the full growth bar then grows the kaiju.
+    this.schedule(1.4, () => {
+      if (this.boss === b) this.boss = null;
+    });
+    return true;
+  }
+
   damageBoss(amount) {
     const b = this.boss;
     if (!b || b.dead || b.state === 'enter') return false;
+    if (b.shield) {
+      if (this.time - (b.immuneAt || -9) > 0.7) {
+        b.immuneAt = this.time;
+        this.fx.floaters.push({ x: b.x, y: b.y, h: b.r * 1.8, text: 'IMMUNE', color: '#7fc8ff', life: 0.8, max: 0.8 });
+      }
+      return true;
+    }
+    if (b.state === 'break') amount *= 1.6;
     b.hp -= amount;
     b.flash = 0.08;
+    if (b.hp <= 0 && b.gate) return this.defeatGateBoss(b);
     if (b.hp <= 0) {
       b.hp = 0;
       b.dead = true;
@@ -2154,6 +2573,10 @@ export class Game {
       }
       if (hit && k.dodging > 0) this.perfectDodge(h.x, h.y);
       if (hit) this.takeDamage(h.dmg, h.type);
+      if (hit && h.slow && k.invuln <= 0) {
+        if (k.netted <= 0) this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'BRAIN FREEZE!', color: '#ffc0e0', life: 1.2, max: 1.2 });
+        k.netted = Math.max(k.netted, h.slow);
+      }
     }
     this.hazards = this.hazards.filter((h) => !h.done);
   }
@@ -2270,6 +2693,7 @@ export class Game {
   }
 
   debugGrow() {
+    this.gateCleared[this.kaiju.stage] = true;
     if (this.kaiju.stage < MAX_STAGE) this.addBiomass(this.stage.biomassToNext - this.kaiju.biomass);
   }
 }

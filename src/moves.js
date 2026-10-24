@@ -224,8 +224,13 @@ export class MoveSystem {
             if (u.dead || u.flying || u.road) continue;
             const d = Math.hypot(u.x - k.x, u.y - k.y);
             if (d < pull * 1.5 && d > 0.1) {
-              u.x += ((k.x - u.x) / d) * pull * 0.6 * dt;
-              u.y += ((k.y - u.y) / d) * pull * 0.6 * dt;
+              // Dragged along the ground, but never into a building.
+              const nx = u.x + ((k.x - u.x) / d) * pull * 0.6 * dt;
+              const ny = u.y + ((k.y - u.y) / d) * pull * 0.6 * dt;
+              if (!g.blockedAt(nx, ny, u.r * 0.6, u.def.mob ? u.tier : 0)) {
+                u.x = nx;
+                u.y = ny;
+              }
             }
           }
         }
@@ -833,14 +838,18 @@ export class MoveSystem {
         t: 0,
         update(dt) {
           this.t += dt;
-          const pull = (o, f) => {
+          const pull = (o, f, pad = 0, minTier = 0) => {
             const d = Math.hypot(o.x - v.x, o.y - v.y);
             if (d < v.r * 1.4 && d > 0.5) {
-              o.x += ((v.x - o.x) / d) * v.r * f * dt;
-              o.y += ((v.y - o.y) / d) * v.r * f * dt;
+              const nx = o.x + ((v.x - o.x) / d) * v.r * f * dt;
+              const ny = o.y + ((v.y - o.y) / d) * v.r * f * dt;
+              // Units are dragged across the ground, never into a building.
+              if (pad && g.blockedAt(nx, ny, pad, minTier)) return;
+              o.x = nx;
+              o.y = ny;
             }
           };
-          for (const u of g.units) if (!u.dead && !u.road && u.type !== 'jet' && !(u.tier > k.stage)) pull(u, 0.9);
+          for (const u of g.units) if (!u.dead && !u.road && u.type !== 'jet' && !(u.tier > k.stage)) pull(u, 0.9, u.flying ? 0 : u.r * 0.6, u.def.mob ? u.tier : 0);
           for (const p of g.people) if (!p.taken) pull(p, 1.2);
           for (const c of g.traffic) if (!c.dead && Math.hypot(c.x - v.x, c.y - v.y) < v.r * 0.8) g.killCar(c);
           tick -= dt;

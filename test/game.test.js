@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect } from '../src/game.js';
-import { STAGES, MAX_STAGE, xpToNext } from '../src/config.js';
+import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { waterField } from '../src/world.js';
@@ -31,7 +31,8 @@ test('levelling up opens an augment pick; growing in size does not', () => {
   assert.equal(g.pick.options.length, 3);
   assert.ok(g.choose(g.pick.options[0]));
   assert.equal(g.state, 'playing');
-  // A big chunk of biomass grows the kaiju and queues several picks, one after another.
+  // A big chunk of biomass grows the kaiju (once this size's boss is down) and queues picks.
+  g.gateCleared[1] = true;
   g.addBiomass(STAGES[1].biomassToNext);
   g.update(1 / 60);
   assert.equal(g.kaiju.stage, 2);
@@ -307,4 +308,49 @@ test('a small kaiju eats people whole: snatch, chomp, swallow', () => {
   }
   assert.ok(seen.has('chomp') && seen.has('swallow'));
   assert.ok(!g.people.includes(p), 'swallowed');
+});
+
+test('a full growth bar sends a boss for your size; growing waits until it is beaten', () => {
+  const g = new Game({ seed: 7 });
+  g.addBiomass(STAGES[1].biomassToNext * 1.5);
+  while (g.state === 'picking') g.choose(g.pick.options[0]);
+  g.update(1 / 30);
+  assert.equal(g.kaiju.stage, 1, 'no size-up before the boss');
+  assert.equal(g.kaiju.biomass, STAGES[1].biomassToNext, 'growth bar holds at full');
+  for (let i = 0; i < 120 && !g.boss; i++) {
+    g.update(1 / 30);
+    while (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  const b = g.boss;
+  assert.ok(b && b.gate === 1 && b.name === GATE_BOSSES[1].name, 'Agent Kilowatt arrives');
+  b.state = 'idle';
+  g.damageBoss(b.hp + 1);
+  assert.ok(b.dead && g.gateCleared[1]);
+  for (let i = 0; i < 90 && g.kaiju.stage === 1; i++) {
+    g.update(1 / 30);
+    while (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  assert.equal(g.kaiju.stage, 2, 'beating it grows the kaiju');
+  assert.equal(g.boss, null);
+});
+
+test('every size has its own boss with working attack patterns', () => {
+  for (let n = 1; n < GATE_BOSSES.length; n++) {
+    const g = new Game({ seed: 20 + n });
+    for (let s = 1; s < n; s++) g.grow();
+    g.spawnGateBoss();
+    const b = g.boss;
+    assert.equal(b.gate, n);
+    b.state = 'idle';
+    for (const p of new Set(GATE_BOSSES[n].patterns)) {
+      b.state = 'idle';
+      g.bossAttack(p);
+      for (let i = 0; i < 150; i++) {
+        g.update(1 / 30);
+        while (g.state === 'picking') g.choose(g.pick.options[0]);
+        if (g.state !== 'playing') break;
+      }
+      assert.ok(!Number.isNaN(b.x) && !Number.isNaN(b.y), `${b.name} ${p}`);
+    }
+  }
 });
