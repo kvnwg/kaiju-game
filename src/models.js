@@ -378,6 +378,18 @@ export const UNIT_MODELS = {
     for (const x of [1, 5, 9, 13]) for (const z of [0, 6]) g.box(x, 0, z, x + 2, 2, z + 1, 0x111111);
     return simple(g, 2.4);
   },
+  // Brood Call hatchling: a little green kaiju.
+  hatchling: () => {
+    const g = new VoxelGrid(8, 5, 4);
+    g.box(1, 1, 1, 6, 4, 3, 0x5aa84f);
+    g.box(5, 2, 1, 8, 5, 3, 0x6fc25f);
+    g.set(7, 4, 1, 0x111111);
+    g.set(7, 4, 2, 0x111111);
+    g.box(0, 2, 1, 1, 3, 3, 0x4a8c40);
+    for (const x of [1, 4]) for (const z of [1, 2]) g.set(x, 0, z, 0x3c7a34);
+    g.box(2, 4, 1, 5, 5, 3, 0xf2d24a);
+    return simple(g, 0.4);
+  },
   // Melee mobs, one built to each size: they rush in and brawl.
   drone: () => {
     const g = new VoxelGrid(6, 3, 6);

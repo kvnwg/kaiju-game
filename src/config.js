@@ -120,8 +120,8 @@ export const ENEMIES = {
   infantry: { name: 'Rocket team', tier: 4, r: 4, hp: 240, speed: 50, standoff: 180, range: 360, cd: 2.8, attack: 'rocket', dmg: 10, proj: 220, soft: true, sedate: 2 },
   // Melee mobs: your size, in squads, slightly slower than you. They charge and brawl.
   drone: { name: 'Attack drone', tier: 1, r: 1.6, hp: 6, speed: 21, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 1, mob: true },
-  robodog: { name: 'Robo-hound', tier: 2, r: 4, hp: 30, speed: 44, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 2.4, mob: true },
-  walker: { name: 'Exo Walker', tier: 3, r: 10, hp: 150, speed: 88, standoff: 0, range: 0, cd: 1.2, attack: 'melee', dmg: 7, mob: true },
+  robodog: { name: 'Robo-hound', tier: 2, r: 4, hp: 30, speed: 44, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 2, mob: true },
+  walker: { name: 'Exo Walker', tier: 3, r: 10, hp: 130, speed: 84, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 5.5, mob: true },
   crusher: { name: 'Spider Crusher', tier: 4, r: 22, hp: 450, speed: 155, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 15, mob: true },
   warframe: { name: 'Warframe', tier: 5, r: 42, hp: 1800, speed: 255, standoff: 0, range: 0, cd: 1.4, attack: 'melee', dmg: 44, mob: true },
   titan: { name: 'Titan', tier: 6, r: 88, hp: 8500, speed: 410, standoff: 0, range: 0, cd: 1.5, attack: 'melee', dmg: 110, mob: true },

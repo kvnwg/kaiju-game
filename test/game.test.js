@@ -88,7 +88,8 @@ test('every move fires, hits things and shows its effect', () => {
       g.drainEvents();
       g.drainVfx();
     }
-    assert.ok(g.stats.moves > 0, `${m.id} fired`);
+    // Orbiting Spines are always on rather than firing on a cooldown.
+    assert.ok(g.stats.moves > 0 || m.id === 'orbitingSpines', `${m.id} fired`);
     assert.ok(g.objects.filter((o) => o.state === 'intact').length < hp0 || g.stats.people > 0, `${m.id} did damage`);
   }
 });

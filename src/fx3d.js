@@ -666,7 +666,7 @@ export class FX {
           pts.push(new THREE.Vector3(p0.x + (p1.x - p0.x) * t + j, h * (1 - t * 0.5) + Math.abs(j), p0.y + (p1.y - p0.y) * t - j));
         }
       }
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xbfeaff, transparent: true, opacity: b.life / b.max }));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: b.color || 0xbfeaff, transparent: true, opacity: b.life / b.max }));
       line.renderOrder = 9;
       this.scene.add(line);
       this.boltLines.push(line);
@@ -707,7 +707,16 @@ export class FX {
       }
       else if (p.kind === 'rock') put(p.x, game.kaiju.r, p.y, p.r * 1.5, 0x8a7a66, rot, 1);
       else if (p.kind === 'car') continue; // drawn as a tumbling car by the actors
-      else if (p.kind === 'net') {
+      else if (p.kind === 'slab') {
+        // A building torn out of the ground, tumbling through the air.
+        const y = arcHeight(p);
+        put(p.x, y, p.y, p.size, p.color, rot + p.age * 4, 1, 0.9);
+        if (Math.random() < 0.7) this.dust.add({ x: p.x, y, z: p.y, vx: 0, vy: 0, vz: 0, size: p.size * 0.6, grow: 1.5, life: 0.5, max: 0.5, a: 0.35, drag: 2, ...rgb(0xb8b0a4) });
+      } else if (p.kind === 'acid') {
+        const y = arcHeight(p);
+        put(p.x, y, p.y, p.size, p.color, rot, 1.4);
+        if (Math.random() < 0.8) this.glow.add({ x: p.x, y, z: p.y, vx: 0, vy: 0, vz: 0, size: p.size * 2.5, grow: -1, life: 0.3, max: 0.3, a: 0.8, ...rgb(p.color) });
+      } else if (p.kind === 'net') {
         // A spinning white net with weighted corners.
         const spin = this.t * 9;
         put(p.x, p.h ?? 2, p.y, p.r * 1.8, 0xe8eef6, rot + spin, 1, 0.08);
@@ -793,7 +802,7 @@ export class FX {
     for (const o of game.fx.orbs) put(o.x, k.r * 0.8 + Math.sin(o.t * 10) * k.r * 0.2, o.y, Math.max(0.35, k.r * 0.12), o.color, o.t * 5, 1);
     for (const f of game.fires) {
       if (Math.random() < 0.5) {
-        const c = rgb(Math.random() < 0.5 ? 0xff7a1a : 0xffc04a);
+        const c = rgb(f.acid ? (Math.random() < 0.5 ? 0x7dff3a : 0xc8ff4a) : Math.random() < 0.5 ? 0xff7a1a : 0xffc04a);
         this.glow.add({ x: f.x + (Math.random() - 0.5) * f.r, y: 0.5, z: f.y + (Math.random() - 0.5) * f.r, vx: 0, vy: f.r * 1.5, vz: 0, drag: 1, size: f.r * 0.6, grow: -0.3, life: 0.5, max: 0.5, a: 0.8 * Math.min(1, f.t), ...c });
       }
     }

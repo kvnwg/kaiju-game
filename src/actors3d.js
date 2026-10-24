@@ -65,6 +65,7 @@ export class Actors {
     this.boss = null;
     this.unitGeo = {};
     this.unitMeshes = new Map();
+    this.allyMeshes = new Map();
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();
     this._e = new THREE.Euler();
@@ -126,12 +127,40 @@ export class Actors {
     }
     for (const [, m] of this.unitMeshes) this.scene.remove(m);
     this.unitMeshes.clear();
+    for (const [, m] of this.allyMeshes) this.scene.remove(m);
+    this.allyMeshes.clear();
+  }
+
+  // Brood Call hatchlings: little green kaiju scampering after enemies.
+  updateAllies(game) {
+    const live = new Set();
+    const ug = this.unitGeometry('hatchling');
+    for (const a of game.allies) {
+      live.add(a);
+      let m = this.allyMeshes.get(a);
+      if (!m) {
+        m = new THREE.Mesh(ug.geo, this.mat);
+        m.castShadow = true;
+        this.allyMeshes.set(a, m);
+        this.scene.add(m);
+      }
+      const s = a.r / 1.6;
+      m.scale.setScalar(s * Math.min(1, a.life * 2));
+      m.position.set(a.x, Math.abs(Math.sin(a.phase)) * a.r * 0.4, a.y);
+      m.rotation.y = -a.heading;
+    }
+    for (const [a, m] of this.allyMeshes) {
+      if (live.has(a)) continue;
+      this.scene.remove(m);
+      this.allyMeshes.delete(a);
+    }
   }
 
   update(game, dt, t, elev) {
     this.updateKaiju(game, t, elev);
     this.updateBoss(game, t);
     this.updateUnits(game, t);
+    this.updateAllies(game);
     this.updatePeople(game, t);
     this.updateTraffic(game);
   }
@@ -360,7 +389,8 @@ export class Actors {
       m.rotation.y = -(faceAim ? u.aim : u.heading) + (u.type === 'police' ? Math.sin(t * 9 + u.age) * 0.18 * st : 0);
       m.rotation.order = 'YXZ';
       m.rotation.z = u.type === 'heli' ? Math.sin(t * 3 + u.age) * 0.08 : u.type === 'cop' ? -st * 0.35 : 0;
-      m.material = u.flash > 0 ? this.flashMat : this.mat;
+      // Frozen units turn ice-white; hits flash white too.
+      m.material = u.flash > 0 || u.frozen > 0 ? this.flashMat : this.mat;
       m.scale.setScalar((u.scale || 1) * (u.elite ? 1.5 : 1) * (u.flash > 0 ? 1.15 : 1));
     }
     for (const [u, m] of this.unitMeshes) {

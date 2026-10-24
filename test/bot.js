@@ -2,12 +2,28 @@
 // otherwise walks toward the most valuable thing it can break, steps out of telegraphed
 // attacks, and takes the first augment offered.
 import { canDamage } from '../src/config.js';
+import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { distToSegment } from '../src/game.js';
 
 export function botStep(game) {
   const k = game.kaiju;
   if (game.state === 'picking') {
-    game.choose(game.pick.options[0]);
+    // Pick like a sensible player: evolutions, then attack moves until there are a few,
+    // then upgrades of what is held; Glass Cannon only as a last resort.
+    const moves = MOVES.filter((m) => game.has(m.id)).length;
+    const score = (id) => {
+      const a = AUGMENT_BY_ID[id];
+      if (a.kind === 'evolution') return 10;
+      if (a.kind === 'filler') return 0;
+      if (id === 'glassCannon') return 0.5;
+      if (a.kind === 'move') return game.has(id) ? 3 : moves < 3 ? 4 : 1.5;
+      const survival = ['regen', 'toughness', 'buildingEater', 'thickHide', 'magneticHide', 'snackAttack'];
+      const offense = ['might', 'area', 'adrenaline', 'rageMode', 'echo', 'bloodlust', 'longLegs'];
+      const base = survival.includes(id) ? 3.2 : offense.includes(id) ? 2.4 : 1.4;
+      return base + (game.has(id) ? 0.3 : 0);
+    };
+    const opts = [...game.pick.options].sort((x, y) => score(y) - score(x));
+    game.choose(opts[0]);
     return;
   }
   if (game.state === 'dead') {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AUGMENTS, AUGMENT_BY_ID, MOVES, PASSIVES, SYNERGY_SETS, MOVE_SLOTS, PASSIVE_SLOTS,
-  offerAugments, applyPick, completedSets, maxLevel, moveStats, levelText,
+  offerAugments, applyPick, completedSets, maxLevel, moveStats, levelText, readyEvolutions, EVOLUTIONS, movesHeld,
 } from '../src/augments.js';
 import { createRng } from '../src/rng.js';
 
@@ -56,8 +56,23 @@ test('maxed augments are not offered; everything maxed falls back to Feast and S
   const held = new Map();
   MOVES.slice(0, MOVE_SLOTS).forEach((m) => held.set(m.id, maxLevel(m)));
   PASSIVES.slice(0, PASSIVE_SLOTS).forEach((p) => held.set(p.id, maxLevel(p)));
+  // Tail Spin maxed plus Long Legs: its evolution is ready and always offered.
+  assert.ok(readyEvolutions(held).some((e) => e.id === 'cycloneKing'));
+  assert.ok(offerAugments({ held, rng: createRng(1) }).includes('cycloneKing'));
+  for (const e of readyEvolutions(held)) applyPick(held, e.id);
   const offer = offerAugments({ held, rng: createRng(1) });
   assert.ok(offer.includes('feast') && offer.includes('scrapPile'));
+});
+
+test('evolutions need their move maxed and their partner passive, and take no slot', () => {
+  const held = new Map([['laserEyes', 7], ['might', 1]]);
+  assert.equal(readyEvolutions(held).length, 0);
+  held.set('laserEyes', 8);
+  assert.deepEqual(readyEvolutions(held).map((e) => e.id), ['omegaBeam']);
+  applyPick(held, 'omegaBeam');
+  assert.equal(readyEvolutions(held).length, 0);
+  assert.equal(movesHeld(held), 1);
+  for (const e of EVOLUTIONS) assert.ok(AUGMENT_BY_ID[e.move] && AUGMENT_BY_ID[e.passive], e.id);
 });
 
 test('guaranteed option is always offered (first-session Laser Eyes)', () => {

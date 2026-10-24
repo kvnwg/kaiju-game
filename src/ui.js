@@ -141,7 +141,7 @@ export class UI {
       };
       const held = [...game.held.entries()].filter(([id]) => AUGMENT_BY_ID[id]);
       const row = (kind) => held.filter(([id]) => AUGMENT_BY_ID[id].kind === kind).map(tile).join('');
-      this.augbar.innerHTML = `<div class="aug-row">${row('move')}</div><div class="aug-row">${row('passive')}</div>`;
+      this.augbar.innerHTML = `<div class="aug-row">${row('move')}${row('evolution')}</div><div class="aug-row">${row('passive')}</div>`;
       this.moveTiles = [...this.augbar.querySelectorAll('[data-move]')].map((el) => ({ el, id: el.dataset.move, cd: el.querySelector('.cd'), last: 1 }));
     }
     for (const t of this.moveTiles || []) {

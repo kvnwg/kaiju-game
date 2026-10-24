@@ -4,7 +4,7 @@
 // (slashes, beams, rings, swirls, cracks) and the kaiju's animation state (kaiju.anim).
 import { canDamage } from './config.js';
 import { MOVES, moveStats } from './augments.js';
-import { norm, distToRect, closestPoint, angleDiff } from './geom.js';
+import { norm, distToRect, closestPoint, angleDiff, distToSegment } from './geom.js';
 
 const GHOST = 0xc58bff; // tint for Echo repeats
 
@@ -30,7 +30,15 @@ export class MoveSystem {
 
   cooldown(id) {
     const m = MOVES.find((mv) => mv.id === id);
-    return m.cd * Math.max(0.3, this.st(id).cd) * (1 - 0.08 * this.g.level('adrenaline'));
+    let cd = m.cd * Math.max(0.3, this.st(id).cd) * (1 - 0.08 * this.g.level('adrenaline'));
+    if (id === 'spineMissiles' && this.g.has('spineStorm')) cd *= 0.35;
+    if (id === 'tailSpin' && this.g.has('cycloneKing')) cd = 3;
+    return cd;
+  }
+
+  // Bloodlust: knock time off every cooldown.
+  refund(seconds) {
+    for (const id of Object.keys(this.timers)) this.timers[id] = Math.max(0, this.timers[id] - seconds);
   }
 
   // 0..1 charge for the HUD.
@@ -42,8 +50,13 @@ export class MoveSystem {
 
   update(dt) {
     const g = this.g;
+    const k = this.k;
+    // Overclock: cooldowns run faster while badly hurt.
+    if (g.has('overclock') && k.hp < k.maxHp * 0.5) dt *= 1 + 0.15 * g.level('overclock');
+    if (g.has('orbitingSpines')) this.orbit(dt);
+    if (g.has('extinctionEvent')) this.meteorShower(dt);
     for (const m of MOVES) {
-      if (!g.has(m.id)) continue;
+      if (!g.has(m.id) || m.id === 'orbitingSpines') continue;
       if (this.timers[m.id] === undefined) this.timers[m.id] = 1;
       this.timers[m.id] -= dt;
       if (this.timers[m.id] > 0) continue;
@@ -70,6 +83,14 @@ export class MoveSystem {
       case 'seismicSlam': return this.seismicSlam(echo);
       case 'atomicBreath': return this.atomicBreath(echo);
       case 'meteorCall': return this.meteorCall(echo);
+      case 'lightningBreath': return this.lightningBreath(echo);
+      case 'buildingHurl': return this.buildingHurl(echo);
+      case 'acidSpit': return this.acidSpit(echo);
+      case 'iceBreath': return this.iceBreath(echo);
+      case 'vortexBelch': return this.vortexBelch(echo);
+      case 'magneticRoar': return this.magneticRoar(echo);
+      case 'frenzyBite': return this.frenzyBite(echo);
+      case 'broodCall': return this.broodCall(echo);
       default: return false;
     }
   }
@@ -169,9 +190,13 @@ export class MoveSystem {
     const reach = k.r * 3.1 * S;
     if (!this.targets(reach).length) return false;
     const spins = s.spins;
-    const cyclone = Boolean(s.cyclone);
-    const D = s.dmg;
-    const dur = cyclone ? 2 * s.duration : 0.42 * spins;
+    const king = g.has('cycloneKing');
+    const cyclone = Boolean(s.cyclone) || king;
+    const D = s.dmg * (king ? 1.3 : 1);
+    const dur = king ? 3 : cyclone ? 2 * s.duration : 0.42 * spins;
+    if (king) {
+      this.cycloneUntil = g.time + dur;
+    }
     const turns = cyclone ? 5 * spins : spins;
     this.anim('spin', dur, { turns });
     let hitT = 0;
@@ -224,7 +249,7 @@ export class MoveSystem {
     const k = this.k;
     const s = this.st('spineMissiles');
     const S = this.size() * s.area;
-    const n = s.count;
+    const n = s.count + (g.has('spineStorm') ? 4 : 0);
     const targets = this.targets(k.r * 12 * S, n);
     if (!targets.length) return false;
     this.anim('spines', 0.5);
@@ -268,10 +293,23 @@ export class MoveSystem {
     const k = this.k;
     const s = this.st('carToss');
     const S = this.size() * s.area;
-    const count = s.count;
+    const storm = g.has('junkyardStorm');
+    const count = storm ? s.count + 5 : s.count;
     const targets = this.targets(k.r * 11 * S, count);
     if (!targets.length) return false;
     this.anim('throw', 0.35);
+    if (storm) {
+      // Cars circle up out of the wreckage, then fire outward at everything in reach.
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        const sx = k.x + Math.cos(a) * k.r * 2.4;
+        const sy = k.y + Math.sin(a) * k.r * 2.4;
+        g.fx.rings.push({ x: sx, y: sy, r0: k.r * 0.2, r1: k.r * 0.8, life: 0.4, max: 0.4, color: 0xff9a3c, width: k.r * 0.12 });
+        const model = g.rng.pick(['car', 'hatchback', 'taxi', 'van', 'pickup', 'bus']);
+        g.schedule(0.35 + i * 0.07, () => this.throwCar(sx, sy, targets[i % targets.length], model, g.rng.int(0, 2), s.bounce, echo));
+      }
+      return true;
+    }
     for (let i = 0; i < count; i++) {
       // Use a real car off the street when one is close, otherwise one appears from the rubble.
       let model = g.rng.pick(['car', 'hatchback', 'taxi', 'van', 'pickup', 'bus']);
@@ -317,9 +355,17 @@ export class MoveSystem {
     const g = this.g;
     const k = this.k;
     const s = this.st('roar');
-    const S = this.size() * s.area;
+    const doom = g.has('doomRoar');
+    const S = this.size() * s.area * (doom ? 1.3 : 1);
     const radius = k.r * 8 * S;
     if (!this.targets(radius).length) return false;
+    if (doom) {
+      // Doom Roar: everything a size below you within the blast is flattened outright.
+      for (const o of g.objectsNear(k.x, k.y, radius * 0.8)) if (o.tier < k.stage && !o.landmark && !o.walkable) g.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'hit');
+      for (const u of g.units) if (!u.dead && u.tier < k.stage && Math.hypot(u.x - k.x, u.y - k.y) < radius * 0.8) g.killUnit(u);
+      g.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: radius * 0.85, life: 0.7, max: 0.7, color: 0xff3b3b, width: k.r * 0.6 });
+      g.impact(0.08, 0.6);
+    }
     this.anim('roar', 0.9);
     const color = echo ? GHOST : 0xffe9a8;
     for (let i = 0; i < 3; i++) g.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: radius * (0.7 + i * 0.15), life: 0.6 + i * 0.15, max: 0.6 + i * 0.15, color, width: k.r * (0.35 - i * 0.08) });
@@ -342,16 +388,18 @@ export class MoveSystem {
     const s = this.st('laserEyes');
     const S = this.size() * s.area;
     const over = Boolean(s.sweepBack);
+    const omega = g.has('omegaBeam');
     const len = k.r * 9 * S * s.length;
-    const D = s.dmg;
+    const D = s.dmg * (omega ? 1.6 : 1);
     const [t] = this.targets(len * 0.9);
     if (!t) return false;
     const center = Math.atan2(t.y - k.y, t.x - k.x);
     const sweep = 0.95;
     const dur = over ? 1.6 : 0.9;
-    const width = k.r * 0.3 * S * s.width;
+    const width = k.r * 0.3 * S * s.width * (omega ? 1.4 : 1);
     const fan = s.split ? [-0.22, 0, 0.22] : [0];
-    const color = echo ? GHOST : 0xff3b6b;
+    const color = echo ? GHOST : omega ? 0xffffff : 0xff3b6b;
+    let scorch = 0;
     this.anim('laser', dur + 0.1);
     let tick = 0;
     this.active.push({
@@ -377,6 +425,11 @@ export class MoveSystem {
             const y2 = ey + Math.sin(b) * len;
             g.fx.beams.push({ x1: ex, y1: ey, x2, y2, width, life: 0.06, max: 0.06, color, h: k.r * 1.55, h2: 0.6, noFlash: true, spark: true, core: true });
             if (hit) g.lineDamage(ex, ey, x2, y2, width * 1.6, g.baseDamage() * D * 0.55);
+            // Omega Beam: the sweep leaves a burning scar across the city.
+            if (omega && hit && eye === 1 && off === 0 && (scorch = (scorch + 1) % 2) === 0) {
+              const f = 0.3 + Math.random() * 0.7;
+              g.fires.push({ x: ex + (x2 - ex) * f, y: ey + (y2 - ey) * f, r: k.r * 0.8, t: 5, max: 5, tick: 0 });
+            }
           }
         }
         if (this.t >= dur) this.done = true;
@@ -412,9 +465,10 @@ export class MoveSystem {
           g.shake = Math.max(g.shake, 0.5);
         });
       }
-      if (s.faults) {
+      const chasm = g.has('earthbreaker');
+      if (s.faults || chasm) {
         const base = Math.atan2(k.facing.y, k.facing.x) + Math.PI / 4;
-        for (let i = 0; i < 4; i++) this.faultLine(k.x, k.y, base + (i * Math.PI) / 2, radius * 2.4, echo);
+        for (let i = 0; i < 4; i++) this.faultLine(k.x, k.y, base + (i * Math.PI) / 2, radius * (chasm ? 3.2 : 2.4), echo, chasm);
       }
     };
     this.active.push({
@@ -433,7 +487,7 @@ export class MoveSystem {
     return true;
   }
 
-  faultLine(x, y, ang, len, echo) {
+  faultLine(x, y, ang, len, echo, chasm = false) {
     const g = this.g;
     const k = this.k;
     const steps = 8;
@@ -446,8 +500,10 @@ export class MoveSystem {
         a += (Math.random() - 0.5) * 0.5;
         const nx = px + Math.cos(a) * seg;
         const ny = py + Math.sin(a) * seg;
-        g.lineDamage(px, py, nx, ny, k.r * 0.9, g.baseDamage() * 3);
-        g.fx.beams.push({ x1: px, y1: py, x2: nx, y2: ny, width: k.r * 0.5, life: 1.6, max: 1.6, color: echo ? GHOST : 0xff7a1a, h: 0.4, noFlash: true });
+        g.lineDamage(px, py, nx, ny, k.r * (chasm ? 1.6 : 0.9), g.baseDamage() * (chasm ? 6 : 3));
+        g.fx.beams.push({ x1: px, y1: py, x2: nx, y2: ny, width: k.r * (chasm ? 1.1 : 0.5), life: chasm ? 4 : 1.6, max: chasm ? 4 : 1.6, color: echo ? GHOST : chasm ? 0xff4a10 : 0xff7a1a, h: 0.4, noFlash: true });
+        // Earthbreaker: the chasm swallows any unit your size or smaller.
+        if (chasm) for (const u of g.units) if (!u.dead && !u.flying && u.tier <= k.stage && distToSegment(u.x, u.y, px, py, nx, ny) < k.r * 0.9 + u.r) g.killUnit(u);
         g.fxEvent({ t: 'dust', x: nx, y: ny, r: k.r * 0.8 });
         px = nx;
         py = ny;
@@ -462,7 +518,8 @@ export class MoveSystem {
     const s = this.st('atomicBreath');
     const S = this.size() * s.area;
     const len = k.r * 13 * S * s.length;
-    const D = s.dmg;
+    const melt = g.has('meltdown');
+    const D = s.dmg * (melt ? 1.3 : 1);
     if (!this.targets(len * 0.8).length) return false;
     const charge = 0.55;
     const dur = 1.2 * s.duration;
@@ -496,7 +553,19 @@ export class MoveSystem {
             g.fires.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t, r: k.r * 0.9 * S, t: 4, max: 4, tick: 0 });
           }
         }
-        if (this.t >= charge + dur) this.done = true;
+        if (this.t >= charge + dur) {
+          this.done = true;
+          // Meltdown: when badly hurt, the breath ends in a detonation where it lands.
+          if (melt && k.hp < k.maxHp * 0.4) {
+            const R = k.r * 5 * S;
+            g.areaDamage(x2, y2, R, g.baseDamage() * 12, 'hit');
+            g.spawnExplosion(x2, y2, R);
+            g.fx.rings.push({ x: x2, y: y2, r0: R * 0.2, r1: R * 1.3, life: 0.9, max: 0.9, color: 0x7df9ff, width: R * 0.2 });
+            g.fx.cracks.push({ x: x2, y: y2, r: R, life: 3, max: 3, seed: Math.random() * 100 });
+            g.shake = 1;
+            g.impact(0.15, 1);
+          }
+        }
       },
     });
     return true;
@@ -530,5 +599,397 @@ export class MoveSystem {
     }
     return true;
   }
-}
 
+  // ------------------------------------------------------------ Extinction Event (evolution)
+  meteorShower(dt) {
+    const g = this.g;
+    const k = this.k;
+    this.showerT = (this.showerT ?? 1) - dt;
+    if (this.showerT > 0 || g.state !== 'playing') return;
+    this.showerT = 1.4;
+    const s = this.st('meteorCall');
+    const span = g.viewSpan() * 0.4;
+    const a = Math.random() * Math.PI * 2;
+    const d = span * (0.25 + Math.random() * 0.75);
+    const x = k.x + Math.cos(a) * d;
+    const y = k.y + Math.sin(a) * d;
+    const r = k.r * 2 * this.size() * s.area;
+    g.hazards.push({
+      friendly: true, kind: 'circle', x, y, r, t: 0, delay: 1.1, meteor: true,
+      onHit: () => {
+        g.areaDamage(x, y, r * 1.4, g.baseDamage() * s.dmg * 4, 'hit');
+        g.spawnExplosion(x, y, r * 1.3);
+        g.shake = Math.max(g.shake, 0.4);
+      },
+    });
+  }
+
+  // ------------------------------------------------------------ Lightning Breath
+  // Nearest thing that conducts: units and vehicles first, then anything breakable.
+  metalNear(from, reach, exclude) {
+    const g = this.g;
+    const k = this.k;
+    let best = null;
+    let bestD = reach;
+    const consider = (t, d) => {
+      if (d < bestD && !exclude.includes(t)) {
+        best = t;
+        bestD = d;
+      }
+    };
+    for (const u of g.units) if (!u.dead && u.type !== 'jet') consider(u, Math.hypot(u.x - from.x, u.y - from.y) - u.r);
+    for (const c of g.traffic) if (!c.dead) consider(c, Math.hypot(c.x - from.x, c.y - from.y));
+    const b = g.boss;
+    if (b && !b.dead && b.state !== 'enter') consider(b, Math.hypot(b.x - from.x, b.y - from.y) - b.r);
+    if (!best) {
+      for (const o of g.objectsNear(from.x, from.y, reach)) {
+        if (o.walkable || !canDamage(o.tier, k.stage, o.landmark) || !(o.vehicle || o.structure)) continue;
+        consider(o, Math.hypot(o.x - from.x, o.y - from.y));
+      }
+    }
+    return best;
+  }
+
+  lightningBreath(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('lightningBreath');
+    const S = this.size() * s.area;
+    const [first] = this.targets(k.r * 7 * S);
+    if (!first) return false;
+    this.anim('breath', 0.4, { charge: 0.1 });
+    const color = echo ? GHOST : 0x9fe8ff;
+    const hit = [];
+    const chain = (from, t, n, dmg) => {
+      const pts = [{ x: from.x, y: from.y }];
+      let cur = t;
+      let prev = from;
+      for (let i = 0; i < n && cur; i++) {
+        pts.push({ x: cur.x, y: cur.y });
+        hit.push(cur);
+        g.damageTarget(cur, dmg, norm(cur.x - prev.x, cur.y - prev.y), 'hit');
+        g.fxEvent({ t: 'sparks', x: cur.x, y: cur.y, h: k.r * 0.5, color });
+        const nxt = this.metalNear(cur, k.r * 4 * S, hit);
+        if (s.fork && i % 2 === 0) {
+          const f = this.metalNear(cur, k.r * 4 * S, [...hit, nxt]);
+          if (f) chain(cur, f, 1, dmg * 0.7);
+        }
+        prev = cur;
+        cur = nxt;
+        dmg *= 0.88;
+      }
+      g.fx.bolts.push({ points: pts, life: 0.3, max: 0.3, width: Math.max(0.4, k.r * 0.12), color });
+    };
+    chain({ x: k.x + k.facing.x * k.r, y: k.y + k.facing.y * k.r }, first, s.count, this.base() * s.dmg * 2.6);
+    g.shake = Math.max(g.shake, 0.15);
+    return true;
+  }
+
+  // ------------------------------------------------------------ Building Hurl
+  buildingHurl(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('buildingHurl');
+    const S = this.size() * s.area;
+    const targets = this.targets(k.r * 13 * S, Math.max(3, s.count)).sort((a, b) => (b.isUnit ? 1 : 0) - (a.isUnit ? 1 : 0));
+    if (!targets.length) return false;
+    // Rip up the biggest building within arm's reach.
+    const near = g.objectsNear(k.x, k.y, k.r * 3).filter((o) => o.structure && !o.walkable && !o.landmark && o.tier <= k.stage && canDamage(o.tier, k.stage, false));
+    near.sort((a, b) => b.w * b.h * b.height - a.w * a.h * a.height);
+    if (!near.length) return false;
+    this.anim('throw', 0.45);
+    const colors = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96 };
+    for (let i = 0; i < s.count; i++) {
+      const b = near[i % near.length];
+      const t = targets[i % targets.length];
+      g.schedule(i * 0.25, () => {
+        const size = Math.max(b.w, b.h);
+        if (b.state === 'intact') g.destroyObject(b, norm(t.x - b.x, t.y - b.y), 'hit');
+        const sp = g.stage.speed * 2.2 + 30;
+        const d = norm(t.x - b.x, t.y - b.y);
+        g.projectiles.push({
+          friendly: true, kind: 'slab', x: b.x, y: b.y, x0: b.x, y0: b.y, vx: d.x * sp, vy: d.y * sp, speed: sp,
+          r: size * 0.3, size: Math.min(size * 0.7, k.r * 2.2), arc: k.r * 3, h0: Math.min(b.height, k.r * 2) * 0.6, dmg: this.base() * s.dmg * 6, life: 3, target: t, age: 0,
+          color: echo ? GHOST : colors[b.style] || 0x9a948a,
+          onHit: (p) => {
+            const r = Math.max(k.r * 1.6, size * 0.9) * S;
+            g.areaDamage(p.x, p.y, r, p.dmg, 'hit');
+            g.spawnExplosion(p.x, p.y, r * 0.8);
+            g.fxEvent({ t: 'dust', x: p.x, y: p.y, r: r * 1.2 });
+            g.shake = Math.max(g.shake, 0.5);
+            if (s.quake) {
+              g.areaDamage(p.x, p.y, r * 1.8, p.dmg * 0.5, 'hit');
+              g.fx.rings.push({ x: p.x, y: p.y, r0: r * 0.5, r1: r * 1.8, life: 0.5, max: 0.5, color: 0xffc36b, width: r * 0.2 });
+              g.fx.cracks.push({ x: p.x, y: p.y, r: r * 1.2, life: 2.5, max: 2.5, seed: Math.random() * 100 });
+            }
+          },
+        });
+      });
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------ Acid Spit
+  acidSpit(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('acidSpit');
+    const S = this.size() * s.area;
+    const targets = this.targets(k.r * 9, s.count);
+    if (!targets.length) return false;
+    this.anim('breath', 0.3, { charge: 0.08 });
+    const puddle = (x, y, scale = 1) => g.fires.push({ x, y, r: k.r * 1.1 * S * scale, t: 4 * s.duration, max: 4 * s.duration, tick: 0, acid: true, dmgMul: 1.7 * s.dmg });
+    targets.forEach((t, i) => {
+      g.schedule(i * 0.1, () => {
+        const x = k.x + k.facing.x * k.r;
+        const y = k.y + k.facing.y * k.r;
+        const sp = g.stage.speed * 2.4 + 30;
+        const d = norm(t.x - x, t.y - y);
+        g.projectiles.push({
+          friendly: true, kind: 'acid', x, y, x0: x, y0: y, vx: d.x * sp, vy: d.y * sp, speed: sp,
+          r: k.r * 0.3, size: k.r * 0.35, arc: k.r * 2, h0: k.r * 1.2, dmg: this.base() * s.dmg * 1.2, life: 3, target: t, age: 0, color: echo ? GHOST : 0x8dff4a,
+          onHit: (p) => {
+            puddle(p.x, p.y);
+            if (s.splash) for (let j = 0; j < 3; j++) puddle(p.x + Math.cos(j * 2.1) * k.r * 1.6, p.y + Math.sin(j * 2.1) * k.r * 1.6, 0.6);
+            g.fxEvent({ t: 'sparks', x: p.x, y: p.y, h: k.r * 0.2, color: 0x8dff4a });
+          },
+        });
+      });
+    });
+    return true;
+  }
+
+  // ------------------------------------------------------------ Ice Breath
+  iceBreath(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('iceBreath');
+    const S = this.size() * s.area;
+    const reach = k.r * 6 * S;
+    const [t] = this.targets(reach);
+    if (!t) return false;
+    const ang = Math.atan2(t.y - k.y, t.x - k.x);
+    k.facing = { x: Math.cos(ang), y: Math.sin(ang) };
+    const charge = 0.15;
+    const dur = 0.7;
+    const arc = 1.0;
+    const color = echo ? GHOST : 0xcff6ff;
+    const freezeFor = 2 * s.duration;
+    this.anim('breath', charge + dur, { charge });
+    const freeze = (u) => {
+      if (u.dead || u.type === 'jet' || u.frozen > 0) return;
+      g.damageUnit(u, this.base() * 0.6 * s.dmg);
+      if (!u.dead) u.frozen = freezeFor;
+    };
+    let tick = 0;
+    this.active.push({
+      t: 0,
+      update(dt) {
+        this.t += dt;
+        if (this.t < charge) return;
+        tick -= dt;
+        if (tick <= 0) {
+          tick = 0.1;
+          const x0 = k.x + Math.cos(ang) * k.r;
+          const y0 = k.y + Math.sin(ang) * k.r;
+          for (let i = -2; i <= 2; i++) {
+            const a = ang + (i / 2) * (arc / 2) + (Math.random() - 0.5) * 0.1;
+            g.fx.beams.push({ x1: x0, y1: y0, x2: x0 + Math.cos(a) * reach, y2: y0 + Math.sin(a) * reach, width: k.r * 0.45, life: 0.14, max: 0.14, color, h: k.r * 1.2, h2: k.r * 0.2, noFlash: true });
+          }
+          for (const u of g.units) {
+            const d = Math.hypot(u.x - k.x, u.y - k.y);
+            if (d < reach + u.r && Math.abs(angleDiff(Math.atan2(u.y - k.y, u.x - k.x), ang)) < arc / 2 + 0.1) freeze(u);
+          }
+          for (const p of g.people) if (!p.taken && Math.hypot(p.x - k.x, p.y - k.y) < reach && Math.abs(angleDiff(Math.atan2(p.y - k.y, p.x - k.x), ang)) < arc / 2) g.flingPerson(p, false, k);
+        }
+        if (this.t >= charge + dur) {
+          this.done = true;
+          if (s.nova) {
+            const R = k.r * 4 * S;
+            for (const u of g.units) if (Math.hypot(u.x - k.x, u.y - k.y) < R + u.r) freeze(u);
+            g.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: R, life: 0.5, max: 0.5, color, width: k.r * 0.4 });
+          }
+        }
+      },
+    });
+    return true;
+  }
+
+  // ------------------------------------------------------------ Vortex Belch
+  vortexBelch(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('vortexBelch');
+    const S = this.size() * s.area;
+    const targets = this.targets(k.r * 10 * S, s.count);
+    if (!targets.length) return false;
+    this.anim('roar', 0.5);
+    const dur = 3 * s.duration;
+    for (const t of targets) {
+      const v = { x: t.x, y: t.y, r: k.r * 3.5 * S };
+      g.fx.swirls.push({ x: v.x, y: v.y, r: v.r, life: dur, max: dur, color: echo ? GHOST : 0xb8f0c8 });
+      let tick = 0;
+      this.active.push({
+        t: 0,
+        update(dt) {
+          this.t += dt;
+          const pull = (o, f) => {
+            const d = Math.hypot(o.x - v.x, o.y - v.y);
+            if (d < v.r * 1.4 && d > 0.5) {
+              o.x += ((v.x - o.x) / d) * v.r * f * dt;
+              o.y += ((v.y - o.y) / d) * v.r * f * dt;
+            }
+          };
+          for (const u of g.units) if (!u.dead && !u.road && u.type !== 'jet' && !(u.tier > k.stage)) pull(u, 0.9);
+          for (const p of g.people) if (!p.taken) pull(p, 1.2);
+          for (const c of g.traffic) if (!c.dead && Math.hypot(c.x - v.x, c.y - v.y) < v.r * 0.8) g.killCar(c);
+          tick -= dt;
+          if (tick <= 0) {
+            tick = 0.35;
+            g.areaDamage(v.x, v.y, v.r * 0.7, g.baseDamage() * 1.1 * s.dmg, 'hit');
+            g.fxEvent({ t: 'dust', x: v.x, y: v.y, r: v.r * 0.5 });
+          }
+          if (this.t >= dur) {
+            this.done = true;
+            if (s.implode) {
+              g.areaDamage(v.x, v.y, v.r * 1.2, g.baseDamage() * 5 * s.dmg, 'hit');
+              g.spawnExplosion(v.x, v.y, v.r);
+              g.shake = Math.max(g.shake, 0.5);
+            }
+          }
+        },
+      });
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------ Orbiting Spines (always on)
+  orbit(dt) {
+    const g = this.g;
+    const k = this.k;
+    if (g.state !== 'playing') return;
+    const s = this.st('orbitingSpines');
+    const S = this.size() * s.area;
+    const n = s.count;
+    const R = k.r * 1.9 * S;
+    this.orbA = (this.orbA || 0) + dt * 2.6 * s.speed;
+    this.orbHit = this.orbHit || new Map();
+    for (const [t, c] of this.orbHit) {
+      if (c - dt <= 0) this.orbHit.delete(t);
+      else this.orbHit.set(t, c - dt);
+    }
+    const hr = k.r * 0.5 * S;
+    const D = this.base() * 1.1 * s.dmg;
+    for (let i = 0; i < n; i++) {
+      const a = this.orbA + (i / n) * Math.PI * 2;
+      const x = k.x + Math.cos(a) * R;
+      const y = k.y + Math.sin(a) * R;
+      const tx = -Math.sin(a) * k.r * 0.55;
+      const ty = Math.cos(a) * k.r * 0.55;
+      g.fx.beams.push({ x1: x - tx, y1: y - ty, x2: x + tx, y2: y + ty, width: k.r * 0.2, life: 0.05, max: 0.05, color: 0x8affd2, h: k.r * 0.9, noFlash: true, core: true });
+      const once = (t, fn) => {
+        if (this.orbHit.has(t)) return;
+        this.orbHit.set(t, 0.5);
+        fn();
+      };
+      for (const u of g.units) if (!u.dead && !u.flying && Math.hypot(u.x - x, u.y - y) < hr + u.r) once(u, () => g.damageUnit(u, D));
+      for (const c of g.traffic) if (!c.dead && Math.hypot(c.x - x, c.y - y) < hr + 3) once(c, () => g.damageCar(c, D));
+      for (const p of g.people) if (!p.taken && Math.hypot(p.x - x, p.y - y) < hr) g.flingPerson(p, false, k);
+      for (const o of g.objectsNear(x, y, hr)) if (!o.walkable && canDamage(o.tier, k.stage, o.landmark)) once(o, () => g.damageObject(o, D, norm(o.x - k.x, o.y - k.y), 'hit', { x, y }));
+    }
+  }
+
+  // ------------------------------------------------------------ Magnetic Roar
+  magneticRoar(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('magneticRoar');
+    const S = this.size() * s.area;
+    const radius = k.r * 8 * S;
+    const heap = { x: k.x + k.facing.x * k.r * 2.2, y: k.y + k.facing.y * k.r * 2.2 };
+    const cars = g.traffic.filter((c) => !c.dead && Math.hypot(c.x - k.x, c.y - k.y) < radius);
+    const parked = g.objectsNear(k.x, k.y, radius).filter((o) => o.vehicle && o.state === 'intact' && canDamage(o.tier, k.stage, false));
+    const vehicles = g.units.filter((u) => !u.dead && u.def.vehicle && !u.flying && Math.hypot(u.x - k.x, u.y - k.y) < radius);
+    if (!cars.length && !parked.length && !vehicles.length) return false;
+    this.anim('roar', 0.7);
+    const color = echo ? GHOST : 0xc58bff;
+    for (let i = 0; i < 3; i++) g.fx.rings.push({ x: k.x, y: k.y, r0: radius * (1 - i * 0.15), r1: k.r * 1.5, life: 0.5 + i * 0.12, max: 0.5 + i * 0.12, color, width: k.r * 0.3 });
+    let shown = 0;
+    const fling = (x, y, model, variant) => {
+      if (shown++ > 8) return;
+      const sp = g.stage.speed * 3 + 40;
+      const d = norm(heap.x - x, heap.y - y);
+      g.projectiles.push({
+        friendly: true, kind: 'car', model, variant, x, y, x0: x, y0: y, vx: d.x * sp, vy: d.y * sp, speed: sp,
+        r: k.r * 0.4, scale: Math.max(1, k.r / 10), arc: k.r * 1.5, h0: k.r * 0.5, dmg: 0, life: 2, target: { x: heap.x, y: heap.y }, age: 0, spin: 6, color,
+        onHit: (p) => g.fxEvent({ t: 'dust', x: p.x, y: p.y, r: k.r * 0.6 }),
+      });
+    };
+    for (const c of cars) {
+      fling(c.x, c.y, c.model, c.variant);
+      g.killCar(c);
+    }
+    for (const o of parked) {
+      fling(o.x, o.y, o.type, o.variant);
+      g.destroyObject(o, norm(heap.x - o.x, heap.y - o.y), 'hit');
+    }
+    for (const u of vehicles) g.damageUnit(u, this.base() * (s.heavy || u.tier < k.stage ? 3 : 1.2) * s.dmg);
+    g.schedule(0.6, () => {
+      g.areaDamage(heap.x, heap.y, k.r * 1.6 * S, this.base() * 2 * s.dmg, 'hit');
+      g.fxEvent({ t: 'dust', x: heap.x, y: heap.y, r: k.r * 1.5 });
+      if (s.blast) {
+        g.areaDamage(heap.x, heap.y, k.r * 2.8 * S, this.base() * 4 * s.dmg, 'hit');
+        g.spawnExplosion(heap.x, heap.y, k.r * 2.4 * S);
+        g.shake = Math.max(g.shake, 0.5);
+      }
+    });
+    return true;
+  }
+
+  // ------------------------------------------------------------ Frenzy Bite
+  frenzyBite(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('frenzyBite');
+    const reach = k.r * 3.2 * this.size() * s.area;
+    const cands = this.targets(reach, 8);
+    if (!cands.length) return false;
+    const tough = (t) => (t.isBoss ? 1e12 : t.maxHp || t.hp || 1);
+    let target = cands.sort((a, b) => tough(b) - tough(a))[0];
+    const n = s.count;
+    for (let i = 0; i < n; i++) {
+      g.schedule(i * 0.13, () => {
+        if (!target || target.dead || (target.state && target.state !== 'intact')) target = this.targets(reach, 1)[0];
+        if (!target) return;
+        const crit = s.crit && i === n - 1;
+        const dmg = this.base() * 1.5 * s.dmg * (crit ? 3 : 1);
+        const dir = norm(target.x - k.x, target.y - k.y);
+        this.anim('eat', 0.13);
+        k.facing = dir;
+        g.fx.slashes.push({ x: target.x - dir.x * k.r * 0.4, y: target.y - dir.y * k.r * 0.4, ang: Math.atan2(dir.y, dir.x), arc: 1.4, r: k.r * 0.9, side: i % 2 ? 1 : -1, life: 0.2, max: 0.2, color: echo ? GHOST : crit ? 0xff4d4d : 0xffffff, h: k.r * 0.6 });
+        g.damageTarget(target, dmg, dir, 'bite');
+        g.shake = Math.max(g.shake, crit ? 0.3 : 0.1);
+        if (crit) g.fx.floaters.push({ x: target.x, y: target.y, h: k.r * 1.6, text: 'CRIT!', color: '#ff6a6a', life: 0.8, max: 0.8 });
+      });
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------ Brood Call
+  broodCall(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('broodCall');
+    if (!this.targets(k.r * 12).length) return false;
+    this.anim('roar', 0.5);
+    for (let i = 0; i < s.count && g.allies.length < 30; i++) {
+      const a = Math.random() * Math.PI * 2;
+      g.allies.push({
+        x: k.x + Math.cos(a) * k.r, y: k.y + Math.sin(a) * k.r, r: Math.max(0.8, k.r * 0.3), life: 8 * s.duration, cd: 0.3, target: null, retarget: 0,
+        dmg: this.base() * 0.7 * s.dmg, speed: g.stage.speed * 1.25, heading: a, boom: Boolean(s.boom), echo, phase: Math.random() * 6,
+      });
+      g.fxEvent({ t: 'dust', x: k.x + Math.cos(a) * k.r, y: k.y + Math.sin(a) * k.r, r: k.r * 0.4 });
+    }
+    return true;
+  }
+}

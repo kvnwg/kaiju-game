@@ -57,6 +57,7 @@ export class Game {
     this.input = { x: 0, y: 0 };
     this.held = new Map();
     this.units = [];
+    this.allies = []; // hatchlings from Brood Call
     this.people = [];
     this.traffic = [];
     this.trains = [];
@@ -230,14 +231,15 @@ export class Game {
   }
 
   baseDamage() {
-    let m = this.stage.damage * (1 + 0.1 * this.level('might'));
+    let m = this.stage.damage * (1 + 0.1 * this.level('might')) * (1 + 0.1 * this.level('glassCannon'));
+    if (this.has('momentum')) m *= 1 + 0.08 * this.level('momentum') * (this.kaiju.momentum || 0);
     if (this.has('rageMode')) m *= 1 + (0.2 + 0.2 * this.level('rageMode')) * (1 - this.kaiju.hp / this.kaiju.maxHp);
     return m;
   }
 
   // ---- stats from passives
   maxHpFor(stage = this.kaiju.stage) {
-    return STAGES[stage].maxHp * this.def.hpMult * (1 + 0.15 * this.level('toughness'));
+    return STAGES[stage].maxHp * this.def.hpMult * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon'));
   }
 
   scrapMult() {
@@ -385,6 +387,7 @@ export class Game {
     this.updateAugments(dt);
     this.updateDirector(dt);
     this.updateUnits(dt);
+    this.updateAllies(dt);
     this.updatePeople(dt);
     this.updateTraffic(dt);
     this.updateTrains(dt);
@@ -463,11 +466,13 @@ export class Game {
     k.moving = mag > 0.05;
     let speed = this.stage.speed * this.def.speedMult * (1 + 0.08 * this.level('longLegs'));
     if (k.netted > 0) speed *= 0.45;
+    if (this.moves.cycloneUntil > this.time) speed *= 1.25; // Cyclone King: a moving tornado
+    k.momentum = mag > 0.05 ? Math.min(1, (k.momentum || 0) + dt / 3) : Math.max(0, (k.momentum || 0) - dt * 1.5);
     k.inWater = isWater(k.x, k.y) && !this.onDeck(k);
     if (k.inWater) speed *= 0.6;
     k.vx = this.input.x * speed;
     k.vy = this.input.y * speed;
-    k.dashCd = Math.max(0, k.dashCd - dt);
+    k.dashCd = Math.max(0, k.dashCd - dt * (this.has('overclock') && k.hp < k.maxHp * 0.5 ? 1 + 0.15 * this.level('overclock') : 1));
     k.dodging = Math.max(0, k.dodging - dt);
     if (k.dashT > 0) {
       k.dashT -= dt;
@@ -518,10 +523,14 @@ export class Game {
 
     // Crush what is smaller, bump into what is your size or bigger.
     let bumped = null;
-    for (const o of this.grid.query(k.x - k.r, k.y - k.r, k.x + k.r, k.y + k.r)) {
+    // Big Bones widens the crush, not the bump.
+    const crushR = k.r * (1 + 0.12 * this.level('bigBones'));
+    for (const o of this.grid.query(k.x - crushR, k.y - crushR, k.x + crushR, k.y + crushR)) {
       if (o.state !== 'intact') continue;
-      if (distToRect(k.x, k.y, o) >= k.r) continue;
+      const od = distToRect(k.x, k.y, o);
+      if (od >= crushR) continue;
       const crushable = !o.landmark && (isSnack(o.tier, k.stage) || (!o.structure && o.tier <= k.stage));
+      if (od >= k.r && !crushable) continue;
       const low = !o.structure && !o.landmark && !o.walkable && (o.height || 0) <= k.r * 2.2;
       if (low && k.hopT > 0) continue; // sailing over it
       if (crushable) this.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'crush');
@@ -756,6 +765,12 @@ export class Game {
     this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.8, text: 'PERFECT DODGE', color: '#7ff0ff', life: 1.2, max: 1.2 });
     this.fxEvent({ t: 'perfect', x: x ?? k.x, y: y ?? k.y, r: k.r });
     this.emit('perfect');
+    if (this.has('perfectRhythm')) {
+      const R = k.r * 3 * (1 + 0.25 * (this.level('perfectRhythm') - 1));
+      this.areaDamage(k.x, k.y, R, this.baseDamage() * 3, 'hit');
+      this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: R, life: 0.45, max: 0.45, color: 0x7ff0ff, width: k.r * 0.4 });
+      this.shake = Math.max(this.shake, 0.4);
+    }
     if (this.time >= this.slowmoReadyAt) {
       this.slowmo = Math.max(this.slowmo, 0.3);
       this.slowmoReadyAt = this.time + 3;
@@ -774,8 +789,9 @@ export class Game {
     const drain = THREAT.drain + this.threat * 0.03 + (this.threatIdle > THREAT.idle ? THREAT.decay : 0);
     this.threat = Math.max(0, this.threat - drain * dt);
     k.healRecent = Math.max(0, k.healRecent - HEALING.recover * dt);
-    k.sedated = Math.max(0, k.sedated - dt);
-    k.netted = Math.max(0, k.netted - dt);
+    const steady = 1 + 0.25 * this.level('steadyFooting');
+    k.sedated = Math.max(0, k.sedated - dt * steady);
+    k.netted = Math.max(0, k.netted - dt * steady);
   }
 
   // How tough the military is right now: every level-up hardens new units.
@@ -999,6 +1015,8 @@ export class Game {
       this.slowmo = Math.max(this.slowmo, o.landmark ? 0.6 : 0.25);
       this.slowmoReadyAt = this.time + 6;
     }
+    if (cause !== 'boss' && (o.structure || o.tier >= k.stage - 1)) this.onKill();
+    if (o.type === 'power_pole' && cause !== 'boss' && this.has('powerSurge')) this.powerSurge(o);
     if (o.structure && o.tier >= 3) {
       if (this.has('gasMain') && this.rng.chance(0.1 + 0.1 * this.level('gasMain'))) this.schedule(0.35, () => this.explode(o));
     }
@@ -1149,6 +1167,7 @@ export class Game {
     this.fxEvent({ t: 'chomp', p: { variant: 0 } });
     u.hp = 0;
     u.eaten = true;
+    if (this.has('ironStomach')) this.addBiomass(lootFor(u.tier, k.stage).biomass * 0.25 * this.level('ironStomach'));
     this.killUnit(u);
     return true;
   }
@@ -1166,7 +1185,8 @@ export class Game {
     this.stats.people++;
     this.addThreat(0.4);
     const loot = lootFor(1, k.stage, 1);
-    this.addBiomass(loot.biomass);
+    this.addBiomass(loot.biomass * (1 + 0.25 * this.level('ironStomach')));
+    this.onKill();
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     if (!k.anim || k.anim.kind === 'eat') k.anim = { kind: 'eat', t: EAT_TIME, max: EAT_TIME };
@@ -1195,6 +1215,7 @@ export class Game {
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     this.fxEvent({ t: 'poof', x: p.x, y: p.y, small: crushed });
+    this.onKill();
     this.bumpCombo();
     return true;
   }
@@ -1255,6 +1276,7 @@ export class Game {
     if (!c.silent) this.shake = Math.max(this.shake, k.stage <= 2 ? 0.2 : 0.1);
     if (k.stage <= 2) this.impact(0.04, 0.2);
     this.bumpCombo();
+    this.onKill();
     this.addThreat(k.stage <= 2 ? 1 : 0.3);
     const loot = lootFor(2, k.stage, 1);
     this.addBiomass(loot.biomass);
@@ -1337,7 +1359,7 @@ export class Game {
       f.tick -= dt;
       if (f.tick <= 0) {
         f.tick = 0.25;
-        const dmg = this.baseDamage() * 0.5 * 0.25;
+        const dmg = this.baseDamage() * 0.5 * 0.25 * (f.dmgMul || 1);
         for (const o of this.objectsNear(f.x, f.y, f.r)) this.damageObject(o, dmg, null, 'hit', { x: f.x, y: f.y });
         for (const u of this.units) if (!u.dead && !u.flying && Math.hypot(u.x - f.x, u.y - f.y) < f.r + u.r) this.damageUnit(u, dmg);
         for (const p of this.people) if (!p.taken && Math.hypot(p.x - f.x, p.y - f.y) < f.r) this.flingPerson(p, false, f);
@@ -1532,6 +1554,12 @@ export class Game {
         this.updateJet(u, dt);
         continue;
       }
+      // Frozen solid: no moving, no shooting.
+      if (u.frozen > 0) {
+        u.frozen -= dt;
+        u.windup = 0;
+        continue;
+      }
       const def = u.def;
       const dx = k.x - u.x;
       const dy = k.y - u.y;
@@ -1618,6 +1646,8 @@ export class Game {
         if (u.cd <= 0 && dist < k.r + u.r + k.r * 0.3) {
           this.takeDamage(def.dmg * u.dmgMul, 'bullet');
           u.cd = def.cd;
+          // Spiked Hide: brawlers get hurt hitting you.
+          if (this.has('spikedHide') && k.invuln <= 0) this.damageUnit(u, this.baseDamage() * 0.3 * this.level('spikedHide'));
         }
       } else if (u.windup > 0) {
         // Telegraphed shot: the shooter aims (shown as a sight line) before the round leaves.
@@ -1716,6 +1746,104 @@ export class Game {
     }
   }
 
+  // Bloodlust: every kill takes a little off your cooldowns.
+  onKill() {
+    if (this.has('bloodlust')) this.moves.refund(0.08 * this.level('bloodlust'));
+  }
+
+  // Power Surge: a downed pole sends current down its line, shocking the street on both sides.
+  powerSurge(pole) {
+    const chain = pole.chunk.powerLines.find((c) => c.includes(pole));
+    if (!chain) return;
+    const i = chain.indexOf(pole);
+    const segs = [chain[i - 1], chain[i + 1]].filter(Boolean).map((n) => [pole, n]);
+    const k = this.kaiju;
+    const dmg = this.baseDamage() * 1.2 * (1 + 0.5 * (this.level('powerSurge') - 1));
+    let t = 0;
+    let tick = 0;
+    this.moves.active.push({
+      update: (dt) => {
+        t += dt;
+        tick -= dt;
+        if (tick <= 0) {
+          tick = 0.3;
+          for (const [a, b] of segs) {
+            this.lineDamage(a.x, a.y, b.x, b.y, Math.max(8, k.r * 0.8), dmg);
+            this.fx.bolts.push({ points: [{ x: a.x, y: a.y }, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, { x: b.x, y: b.y }], life: 0.25, max: 0.25, width: 0.5, color: 0xffe36b });
+          }
+        }
+        return t;
+      },
+      get done() {
+        return t >= 2.5;
+      },
+    });
+  }
+
+  // Hatchlings from Brood Call: run at the nearest enemy, bite, and fade after a while.
+  updateAllies(dt) {
+    const k = this.kaiju;
+    for (const a of this.allies) {
+      a.life -= dt;
+      a.cd -= dt;
+      a.retarget -= dt;
+      a.phase += dt * 10;
+      if (a.retarget <= 0 || !a.target || a.target.dead || (a.target.state && a.target.state !== 'intact')) {
+        a.retarget = 0.5;
+        a.target = null;
+        let best = k.r * 14;
+        for (const u of this.units) {
+          if (u.dead || u.flying) continue;
+          const d = Math.hypot(u.x - a.x, u.y - a.y);
+          if (d < best) {
+            best = d;
+            a.target = u;
+          }
+        }
+        if (!a.target) {
+          for (const o of this.objectsNear(a.x, a.y, k.r * 5)) {
+            if (o.walkable || !canDamage(o.tier, k.stage, o.landmark) || o.tier < k.stage - 1) continue;
+            a.target = o;
+            break;
+          }
+        }
+      }
+      const t = a.target;
+      if (t) {
+        const tr = t.r || Math.min(t.w, t.h) / 2 || 2;
+        const dx = t.x - a.x;
+        const dy = t.y - a.y;
+        const d = Math.hypot(dx, dy) || 1;
+        a.heading = Math.atan2(dy, dx);
+        if (d > tr + a.r) {
+          a.x += (dx / d) * a.speed * dt;
+          a.y += (dy / d) * a.speed * dt;
+        } else if (a.cd <= 0) {
+          a.cd = 0.5;
+          this.damageTarget(t, a.dmg, norm(dx, dy), 'hit');
+          this.fxEvent({ t: 'sparks', x: t.x, y: t.y, h: a.r, color: 0x9cff7a });
+        }
+      } else {
+        // Nothing to fight: trot along beside the kaiju.
+        const d = Math.hypot(k.x - a.x, k.y - a.y);
+        if (d > k.r * 2) {
+          a.x += ((k.x - a.x) / d) * a.speed * dt;
+          a.y += ((k.y - a.y) / d) * a.speed * dt;
+          a.heading = Math.atan2(k.y - a.y, k.x - a.x);
+        }
+      }
+      if (a.life <= 0) {
+        a.dead = true;
+        this.fxEvent({ t: 'poof', x: a.x, y: a.y });
+        if (a.boom) {
+          this.areaDamage(a.x, a.y, k.r * 1.2, a.dmg * 3, 'hit');
+          this.spawnExplosion(a.x, a.y, k.r);
+        }
+      }
+    }
+    this.allies = this.allies.filter((a) => !a.dead);
+  }
+
   // Horde management pays: kills in quick succession build a multi-kill with a bonus.
   countMulti() {
     const m = this.multi;
@@ -1754,6 +1882,11 @@ export class Game {
   damageUnit(u, amount) {
     if (u.dead) return false;
     if (u.tier < this.kaiju.stage) amount = u.hp;
+    // Frozen units shatter at the first hit.
+    if (u.frozen > 0 && amount > 0) {
+      amount = u.hp;
+      this.fxEvent({ t: 'sparks', x: u.x, y: u.y, h: u.r, color: 0xdff8ff });
+    }
     u.hp -= amount;
     u.flash = 0.13;
     if (u.hp <= 0) this.killUnit(u);
@@ -1772,6 +1905,7 @@ export class Game {
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
     this.stats.units++;
     this.countMulti();
+    this.onKill();
     this.addThreat(u.def.mob ? 0.6 : u.tier >= k.stage ? 2.5 : 1);
     if (u.elite) {
       // Elites pay out: a guaranteed level-up and a pile of scrap.
@@ -1877,7 +2011,7 @@ export class Game {
       isBoss: true, name: BOSS.name, x, y, r: BOSS.r, hp: BOSS.hp, maxHp: BOSS.hp,
       state: 'enter', targetX: Math.max(BOSS.r, k.x - span * 0.45), targetY: y,
       phase: 1, next: 2, patterns: ['barrage', 'laser', 'charge'], patternIndex: 0,
-      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: this.enemyScale().dmg,
+      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: 1 + (this.enemyScale().dmg - 1) * 0.5,
     };
     this.shake = 1;
     this.emit('bossSpawn', { name: BOSS.name });
@@ -2044,9 +2178,12 @@ export class Game {
     this.fx.rings.push({ x, y, r0: radius * 0.2, r1: radius, life: 0.35, max: 0.35, color: 0xffb347, width: radius * 0.25 });
   }
 
+  // Loot orbs burst out of kills and settle; walk close and they fly in for a small bonus
+  // (green: XP, gold: scrap). Magnet Jaws widens the pickup range.
   spawnOrbs(x, y, n, biomass) {
     const os = this.fx.orbs;
-    for (let i = 0; i < n && os.length < 150; i++) {
+    if (os.length > 140) os.splice(0, os.length - 140);
+    for (let i = 0; i < n; i++) {
       const a = this.rng.range(0, Math.PI * 2);
       const sp = (0.6 + this.rng.range(0, 1)) * Math.max(4, this.kaiju.r * 4);
       os.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, color: biomass && i % 2 === 0 ? 0x7dff5a : 0xffd84a });
@@ -2057,20 +2194,27 @@ export class Game {
     const k = this.kaiju;
     const { orbs, floaters, rings, beams, bolts } = this.fx;
     const scale = Math.max(4, k.r * 4);
+    const pickR = k.r * 3 * (1 + 0.4 * this.level('magnetJaws')) + 6;
     for (const o of orbs) {
       o.t += dt;
-      const toK = norm(k.x - o.x, k.y - o.y);
-      const pull = (o.t * 26 + 2) * scale;
-      o.vx += toK.x * pull * dt;
-      o.vy += toK.y * pull * dt;
+      const dk = Math.hypot(k.x - o.x, k.y - o.y);
+      if (dk < pickR || o.pulled) {
+        o.pulled = true;
+        const toK = norm(k.x - o.x, k.y - o.y);
+        const pull = (o.t * 20 + 6) * scale;
+        o.vx += toK.x * pull * dt;
+        o.vy += toK.y * pull * dt;
+      }
       o.vx *= 1 - dt * 3;
       o.vy *= 1 - dt * 3;
       o.x += o.vx * dt;
       o.y += o.vy * dt;
-      if (Math.hypot(k.x - o.x, k.y - o.y) < k.r * 0.6 || o.t > 2) {
+      if (dk < k.r * 0.7) {
         o.t = 99;
+        if (o.color === 0x7dff5a) this.addBiomass(lootFor(k.stage, k.stage).biomass * 0.01);
+        else this.stats.scrap += k.stage * 1.5 * this.diff.loot;
         this.fxEvent({ t: 'orb', combo: this.combo.n });
-      }
+      } else if (o.t > 20) o.t = 99;
     }
     for (const f of floaters) f.life -= dt;
     for (const r of rings) r.life -= dt;
