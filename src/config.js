@@ -118,6 +118,13 @@ export const ENEMIES = {
   roadblock: { name: 'Roadblock', tier: 3, r: 11, hp: 320, speed: 0, standoff: 0, range: 250, cd: 1.8, attack: 'bullet', dmg: 6, proj: 260, soft: true },
   tank: { name: 'Tank', tier: 4, r: 15, hp: 1600, speed: 45, standoff: 220, range: 480, cd: 3.2, attack: 'shell', dmg: 40, aoe: 26, vehicle: true },
   infantry: { name: 'Rocket team', tier: 4, r: 4, hp: 240, speed: 50, standoff: 180, range: 360, cd: 2.8, attack: 'rocket', dmg: 10, proj: 220, soft: true, sedate: 2 },
+  // Melee mobs: your size, in squads, slightly slower than you. They charge and brawl.
+  drone: { name: 'Attack drone', tier: 1, r: 1.6, hp: 6, speed: 21, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 1, mob: true },
+  robodog: { name: 'Robo-hound', tier: 2, r: 4, hp: 30, speed: 44, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 2.4, mob: true },
+  walker: { name: 'Exo Walker', tier: 3, r: 10, hp: 150, speed: 88, standoff: 0, range: 0, cd: 1.2, attack: 'melee', dmg: 7, mob: true },
+  crusher: { name: 'Spider Crusher', tier: 4, r: 22, hp: 450, speed: 155, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 15, mob: true },
+  warframe: { name: 'Warframe', tier: 5, r: 42, hp: 1800, speed: 255, standoff: 0, range: 0, cd: 1.4, attack: 'melee', dmg: 44, mob: true },
+  titan: { name: 'Titan', tier: 6, r: 88, hp: 8500, speed: 410, standoff: 0, range: 0, cd: 1.5, attack: 'melee', dmg: 110, mob: true },
   battery: { name: 'Missile battery', tier: 5, r: 18, hp: 5000, speed: 0, standoff: 0, range: 1100, cd: 6.5, attack: 'volley', dmg: 34, proj: 260, vehicle: true, model: 'artillery' },
   heli: { name: 'Gunship drone', tier: 4, r: 14, hp: 1200, speed: 140, standoff: 260, range: 450, cd: 3.2, attack: 'missile', dmg: 8, proj: 260, flying: true, vehicle: true },
   jet: { name: 'Jet', tier: 5, r: 18, hp: 2000, speed: 1500, standoff: 0, range: 0, cd: 0, attack: 'strafe', dmg: 95, aoe: 52, flying: true, vehicle: true },
@@ -128,25 +135,22 @@ export const ENEMIES = {
 // How the military responds at each stage: spawn weights, cap and interval.
 export const ESCALATION = [
   null,
-  { weights: { cop: 1 }, maxAlive: 3, interval: 6, firstDelay: 12 },
-  { weights: { police: 3, dog: 2, cop: 2 }, maxAlive: 5, interval: 4 },
-  { weights: { swat: 3, roadblock: 1, police: 2, netter: 1, dog: 1 }, maxAlive: 6, interval: 3.5 },
-  { weights: { tank: 2, infantry: 1.5, heli: 1.5, swat: 2, police: 2, netter: 1 }, maxAlive: 7, interval: 3.2 },
-  { weights: { mech: 1.5, artillery: 1, tank: 2, infantry: 2, heli: 1.5, swat: 1, battery: 0.5 }, maxAlive: 9, interval: 3, jetEvery: 7 },
-  { weights: { mech: 1.5, artillery: 1, tank: 2, infantry: 2, heli: 1.5, swat: 1, battery: 0.5, netter: 0.5 }, maxAlive: 10, interval: 3, jetEvery: 7 },
+  { weights: { cop: 2, drone: 1 }, maxAlive: 3, interval: 6, firstDelay: 12 },
+  { weights: { police: 2, dog: 1, robodog: 3 }, maxAlive: 5, interval: 4 },
+  { weights: { swat: 2, roadblock: 0.6, netter: 1, walker: 3 }, maxAlive: 6, interval: 3.5 },
+  { weights: { tank: 1.5, infantry: 1, heli: 1, crusher: 3 }, maxAlive: 7, interval: 3.2 },
+  { weights: { mech: 1, artillery: 1, battery: 0.5, warframe: 3 }, maxAlive: 9, interval: 3, jetEvery: 7 },
+  { weights: { titan: 3, warframe: 1.5, artillery: 1, battery: 0.5 }, maxAlive: 10, interval: 3, jetEvery: 7 },
 ];
 
 // Swarms. The military answers with numbers: squads instead of single units, and a field cap
-// that grows with size. Every unit is also scaled up to the kaiju: a tank sent against the Apex
-// is as big next to it as one sent against the Titan (and hits as hard), but anything scaled
-// up from a smaller size still breaks in one hit, so swarms can be stomped.
+// that grows with size. Each size fields units built to that size, led by a melee mob that
+// charges in (drones, robo-hounds, exo walkers, spider crushers, warframes, titans).
 export const SWARM = {
   maxAlive: [0, 6, 12, 18, 24, 30, 36],
-  squad: { cop: 3, police: 2, dog: 3, swat: 2, netter: 1, roadblock: 1, tank: 2, infantry: 2, heli: 1, artillery: 1, mech: 1, battery: 1, jet: 1 },
-  liftSquad: 2, // squads of scaled-up units are this many times bigger
+  squad: { cop: 3, police: 2, dog: 3, swat: 2, netter: 1, roadblock: 1, tank: 2, infantry: 2, heli: 1, artillery: 1, mech: 1, battery: 1, jet: 1, drone: 5, robodog: 4, walker: 3, crusher: 3, warframe: 2, titan: 2 },
   dmg: 0.5, // per-unit damage, since there are so many of them
-  dmgPerSize: 1.8, // damage multiplier per size a unit is scaled up
-  loot: 0.5, // swarm units are worth less each
+  loot: 0.5, // swarm units are worth less each (melee mobs half again)
 };
 
 // Pressure. Destruction fills a threat meter (0-100) that drains a few seconds after you stop;
@@ -169,8 +173,8 @@ export const ELITES = [
   { type: 'police', name: 'Interceptor' },
   { type: 'swat', name: 'Riot Command' },
   { type: 'tank', name: 'Mammoth Tank' },
-  { type: 'mech', name: 'War Mech' },
-  { type: 'mech', name: 'Titan Mech' },
+  { type: 'warframe', name: 'Warframe Prime' },
+  { type: 'titan', name: 'Omega Titan' },
 ];
 export const ELITE = { hp: 9, dmg: 1.8, size: 1.5, first: 40, every: 95 };
 // Charge: a short dash with i-frames that tramples units in the way and tears nets off.

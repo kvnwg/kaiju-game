@@ -350,7 +350,8 @@ export class Actors {
       let y = 0;
       if (u.type === 'heli') y = Math.max(20, k.r * 2.2) + Math.sin(t * 2 + u.age) * 2;
       else if (u.type === 'jet') y = Math.max(40, k.r * 3);
-      else if (u.type === 'mech' || u.type === 'cop' || u.type === 'dog') y = Math.abs(Math.sin(u.age * 6)) * u.r * 0.15;
+      else if (u.type === 'drone') y = Math.max(2, k.r * 0.9) + Math.sin(t * 5 + u.age) * 0.3;
+      else if (u.def.mob || u.type === 'mech' || u.type === 'cop' || u.type === 'dog') y = Math.abs(Math.sin(u.age * (u.def.mob ? 9 : 6))) * u.r * 0.15;
       // Panic: trembling, running hunched away instead of facing the kaiju, cars fishtailing.
       const st = u.stress || 0;
       const shake = st > 0.2 ? Math.sin(t * 60 + u.id * 50) * u.r * 0.12 * st : 0;

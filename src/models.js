@@ -257,6 +257,28 @@ function simple(g, v, ox = g.nx / 2, oz = g.nz / 2) {
   return { grid: g, origin: { x: ox, z: oz }, v };
 }
 
+// A blocky bipedal battle mech; v sets its size.
+function humanoidMech({ body, trim, eye, v, crest = false }) {
+  const g = new VoxelGrid(12, 18, 10);
+  g.box(3, 0, 1, 6, 2, 4, trim);
+  g.box(3, 0, 6, 6, 2, 9, trim);
+  g.box(3, 2, 1, 5, 8, 4, body);
+  g.box(3, 2, 6, 5, 8, 9, body);
+  g.box(2, 8, 1, 9, 14, 9, body);
+  g.box(2, 10, 1, 9, 11, 9, trim);
+  g.box(8, 11, 3, 10, 13, 7, trim);
+  g.box(3, 9, 0, 7, 14, 1, trim);
+  g.box(3, 9, 9, 7, 14, 10, trim);
+  g.box(4, 4, 0, 10, 7, 1, body);
+  g.box(4, 4, 9, 10, 7, 10, body);
+  g.box(9, 4, 0, 11, 7, 1, trim);
+  g.box(9, 4, 9, 11, 7, 10, trim);
+  g.box(4, 14, 3, 8, 17, 7, body);
+  g.box(7, 15, 3, 8, 16, 7, eye, E);
+  if (crest) g.box(4, 17, 4, 7, 18, 6, eye, E);
+  return simple(g, v, 5, 5);
+}
+
 export const UNIT_MODELS = {
   cop: () => personModel(0, { shirt: 0x2a3f7a, pants: 0x1a2440, hat: 0x1a2440, badge: 0xffd23f, gun: true }),
   police: () => {
@@ -356,6 +378,43 @@ export const UNIT_MODELS = {
     for (const x of [1, 5, 9, 13]) for (const z of [0, 6]) g.box(x, 0, z, x + 2, 2, z + 1, 0x111111);
     return simple(g, 2.4);
   },
+  // Melee mobs, one built to each size: they rush in and brawl.
+  drone: () => {
+    const g = new VoxelGrid(6, 3, 6);
+    g.box(2, 1, 2, 4, 3, 4, 0x2a2d33);
+    g.set(3, 1, 3, 0xff3b3b, E);
+    for (const [x, z] of [[0, 0], [4, 0], [0, 4], [4, 4]]) {
+      g.box(x, 2, z, x + 2, 3, z + 2, 0x8c939c);
+      g.box(Math.min(x + 1, 3), 2, Math.min(z + 1, 3), Math.max(x + 1, 3) + 1, 3, Math.min(z + 1, 3) + 1, 0x55585e);
+    }
+    return simple(g, 0.65);
+  },
+  robodog: () => {
+    const g = new VoxelGrid(8, 6, 4);
+    g.box(1, 2, 0, 6, 4, 4, 0xb8bec8);
+    g.box(5, 3, 1, 8, 6, 3, 0x9aa1ab);
+    g.box(7, 4, 1, 8, 5, 3, 0xff3b3b, E);
+    g.box(0, 3, 1, 1, 5, 3, 0x6c737c);
+    for (const x of [1, 5]) for (const z of [0, 3]) g.box(x, 0, z, x + 1, 2, z + 1, 0x3a3f47);
+    g.box(2, 4, 1, 5, 5, 3, 0xffb13b);
+    return simple(g, 1.05);
+  },
+  walker: () => humanoidMech({ body: 0xf2b134, trim: 0x2a2d33, eye: 0x6fe8ff, v: 1.7 }),
+  crusher: () => {
+    // Six-legged spider tank.
+    const g = new VoxelGrid(16, 8, 16);
+    g.box(4, 3, 4, 12, 6, 12, 0x3e4651);
+    g.box(5, 6, 5, 11, 7, 11, 0x56606d);
+    g.box(11, 4, 6, 14, 6, 10, 0x2a2f37);
+    g.box(13, 4, 7, 14, 5, 9, 0xff3b3b, E);
+    for (const [x, z] of [[1, 2], [7, 0], [13, 2], [1, 13], [7, 15], [13, 13]]) {
+      g.box(Math.min(x, 7), 4, Math.min(z, 7), Math.max(x, 8) + 1, 5, Math.min(z, 7) + 1, 0x2a2f37);
+      g.box(x, 0, z, x + 1, 5, z + 1, 0x2a2f37);
+    }
+    return simple(g, 2.75);
+  },
+  warframe: () => humanoidMech({ body: 0x9aa4b4, trim: 0x2e3c5a, eye: 0xff4d6d, v: 5.8 }),
+  titan: () => humanoidMech({ body: 0x5a1f2a, trim: 0x16181e, eye: 0xffd23f, v: 12, crest: true }),
   mech: () => {
     const g = new VoxelGrid(10, 16, 10);
     g.box(2, 0, 1, 5, 7, 4, 0x3a3f47);

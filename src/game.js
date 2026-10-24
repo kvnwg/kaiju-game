@@ -480,9 +480,11 @@ export class Game {
         if (u.dead || u.flying || k.dashHits.has(u) || Math.hypot(u.x - k.x, u.y - k.y) > k.r * 1.3 + u.r) continue;
         k.dashHits.add(u);
         const away = norm(u.x - k.x, u.y - k.y);
-        if (!u.road) {
-          u.x += away.x * k.r * 1.2;
-          u.y += away.y * k.r * 1.2;
+        const nx = u.x + away.x * k.r * 1.2;
+        const ny = u.y + away.y * k.r * 1.2;
+        if (!u.road && !isWater(nx, ny) && !this.blockedAt(nx, ny, u.r * 0.6, u.def.mob ? u.tier : 0)) {
+          u.x = nx;
+          u.y = ny;
         }
         this.damageUnit(u, this.baseDamage() * DASH.dmg);
       }
@@ -1387,7 +1389,7 @@ export class Game {
   // A squad: a few of the same unit in a loose cluster.
   spawnGroup(type, pos = this.spawnPoint(type), count = null) {
     const sd = this.scaledDef(type);
-    if (count === null) count = (SWARM.squad[type] || 1) * (sd.lift ? SWARM.liftSquad : 1);
+    if (count === null) count = SWARM.squad[type] || 1;
     const r = sd.r;
     const out = [];
     for (let i = 0; i < count; i++) {
@@ -1470,28 +1472,19 @@ export class Game {
     return nr ? { x: nr.road.x0 + (nr.road.x1 - nr.road.x0) * nr.t, y: nr.road.y0 + (nr.road.y1 - nr.road.y0) * nr.t } : { x, y };
   }
 
-  // A unit type's stats for the kaiju's current size: units from smaller sizes are scaled up
-  // so they stand as tall next to it as they would have at their own size.
+  // A unit type's stats. (Units used to be scaled up from smaller sizes; now each size fields
+  // units built to that size, so this is the plain definition.)
   scaledDef(type) {
-    const base = ENEMIES[type];
-    const stage = this.kaiju.stage;
-    const lift = Math.max(0, stage - base.tier);
-    if (!lift) return { ...base, scale: 1, lift: 0 };
-    const s = STAGES[stage].radius / STAGES[base.tier].radius;
-    const g = Math.sqrt(s);
-    return {
-      ...base, scale: s, lift, r: base.r * s, standoff: base.standoff * g, range: base.range * g, speed: base.speed * g,
-      proj: base.proj && base.proj * g, aoe: base.aoe && base.aoe * Math.pow(s, 0.7),
-    };
+    return { ...ENEMIES[type], scale: 1, lift: 0 };
   }
 
   spawnUnit(type, x, y) {
     const def = this.scaledDef(type);
     const sc = this.enemyScale();
     const u = {
-      isUnit: true, type, def, x, y, r: def.r, tier: def.lift ? this.kaiju.stage - 1 : def.tier, scale: def.scale,
+      isUnit: true, type, def, x, y, r: def.r, tier: def.tier, scale: 1,
       hp: def.hp * this.diff.enemyHp * sc.hp, maxHp: def.hp * this.diff.enemyHp * sc.hp,
-      dmgMul: sc.dmg * SWARM.dmg * Math.pow(SWARM.dmgPerSize, def.lift),
+      dmgMul: sc.dmg * SWARM.dmg,
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
       heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
       stress: 0, windup: 0, windupMax: 0,
@@ -1598,8 +1591,8 @@ export class Game {
         const nx = u.x + (mx / ml) * sp * dt * Math.min(1, ml);
         const ny = u.y + (my / ml) * sp * dt * Math.min(1, ml);
         // Mechs trample anything up to house size; everything else walks around buildings.
-        // Scaled-up units step over anything a size below them.
-        const minTier = Math.max(u.type === 'mech' ? 4 : 0, def.lift ? u.tier + 1 : 0);
+        // Mobs stride over anything smaller than they are.
+        const minTier = u.type === 'mech' ? 4 : def.mob ? u.tier : 0;
         if (u.type === 'mech') {
           for (const o of this.objectsNear(nx, ny, u.r * 0.8)) {
             if (o.structure && !o.walkable && !o.landmark && o.tier < 4) this.destroyObject(o, norm(o.x - u.x, o.y - u.y), 'boss');
@@ -1774,12 +1767,12 @@ export class Game {
     this.shake = Math.max(this.shake, u.tier >= k.stage ? 0.3 : 0.14);
     if (u.tier >= k.stage) this.impact(0.06, 0.4);
     this.bumpCombo();
-    const loot = lootFor(u.tier, k.stage, u.def.lift ? SWARM.loot : 1);
+    const loot = lootFor(u.tier, k.stage, u.def.mob ? SWARM.loot * 0.5 : 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
     this.stats.units++;
     this.countMulti();
-    this.addThreat(u.tier >= k.stage ? 2.5 : u.def.lift ? 0.3 : 1);
+    this.addThreat(u.def.mob ? 0.6 : u.tier >= k.stage ? 2.5 : 1);
     if (u.elite) {
       // Elites pay out: a guaranteed level-up and a pile of scrap.
       k.xp = Math.max(k.xp, xpToNext(k.level));
@@ -1789,7 +1782,7 @@ export class Game {
       this.impact(0.12, 0.8);
       this.shake = Math.max(this.shake, 0.7);
     }
-    if (!u.def.lift) this.heal(UNIT_HEAL);
+    if (!u.def.mob) this.heal(UNIT_HEAL);
     if (u.def.vehicle && this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
     if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'unitDie', u, dir: norm(u.x - k.x, u.y - k.y) });
