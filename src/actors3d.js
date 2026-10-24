@@ -1,7 +1,8 @@
 /* global THREE */
 // Animated voxel characters: the player's kaiju, the boss, military units, crowds and traffic.
 import { meshGrid } from './mesher.js';
-import { KAIJU_MODELS, UNIT_MODELS, bossModel, GATE_BOSS_MODELS, personModel, PERSON_VARIANTS } from './models.js';
+import { VoxelGrid } from './voxel.js';
+import { KAIJU_MODELS, UNIT_MODELS, bossModel, GATE_BOSS_MODELS, personModel, personLook, PERSON_LOOKS, DOCTOR } from './models.js';
 import { buildProp } from './props.js';
 import { arcHeight } from './fx3d.js';
 import { EAT_TIME } from './config.js';
@@ -79,8 +80,8 @@ export class Actors {
     this._mouth = new THREE.Vector3();
     this._up = new THREE.Vector3();
     this._half = new THREE.Vector3();
-    for (let i = 0; i < PERSON_VARIANTS; i++) {
-      const pm = personModel(i);
+    for (let i = 0; i < PERSON_LOOKS; i++) {
+      const pm = personLook(i);
       const geo = toGeometry(meshGrid(pm.grid, { v: pm.v, ox: pm.origin.x, oz: pm.origin.z, jitter: 0.03 }));
       const im = new THREE.InstancedMesh(geo, this.mat, 160);
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -91,6 +92,13 @@ export class Actors {
       this.peopleMeshes.push(im);
     }
     this.trafficMeshes = new Map();
+    // A floating green cross over each doctor, so the rare heal is easy to spot.
+    const cross = new VoxelGrid(5, 5, 1);
+    cross.box(2, 0, 0, 3, 5, 1, 0x4dff7a);
+    cross.box(0, 2, 0, 5, 3, 1, 0x4dff7a);
+    this.healMat = new THREE.MeshBasicMaterial({ color: 0x5dff88, toneMapped: false });
+    this.crossGeo = toGeometry(meshGrid(cross, { v: 1, ox: 2.5, oz: 0.5 }));
+    this.doctorMarks = [];
   }
 
   setKaiju(id) {
@@ -490,7 +498,8 @@ export class Actors {
   }
 
   updatePeople(game, t) {
-    const counts = new Array(PERSON_VARIANTS).fill(0);
+    const counts = new Array(PERSON_LOOKS).fill(0);
+    let marks = 0;
     const m = this._m;
     const k = game.kaiju;
     for (const p of game.people) {
@@ -504,6 +513,20 @@ export class Actors {
         continue;
       }
       const bob = p.state === 'flung' ? 0 : Math.abs(Math.sin(p.phase)) * 0.35;
+      if (p.variant === DOCTOR && !p.taken) {
+        let mk = this.doctorMarks[marks];
+        if (!mk) {
+          mk = new THREE.Mesh(this.crossGeo, this.healMat);
+          this.scene.add(mk);
+          this.doctorMarks.push(mk);
+        }
+        marks++;
+        const sc = Math.max(0.7, k.r * 0.3);
+        mk.visible = true;
+        mk.scale.setScalar(sc);
+        mk.position.set(p.x, this.personH + 2 + sc * 3 + Math.sin(t * 3) * 0.6, p.y);
+        mk.rotation.y = t * 2;
+      }
       this._v.set(p.x, p.z + bob, p.y);
       if (p.state === 'flung') this._e.set(p.spin, -p.heading, p.spin * 0.7);
       else this._e.set(0, -p.heading, p.state === 'flee' ? -0.25 : 0);
@@ -512,7 +535,8 @@ export class Actors {
       m.compose(this._v, this._q, this._s);
       im.setMatrixAt(i, m);
     }
-    for (let v = 0; v < PERSON_VARIANTS; v++) {
+    for (let i = marks; i < this.doctorMarks.length; i++) this.doctorMarks[i].visible = false;
+    for (let v = 0; v < PERSON_LOOKS; v++) {
       const im = this.peopleMeshes[v];
       im.count = Math.min(160, counts[v]);
       im.instanceMatrix.needsUpdate = true;

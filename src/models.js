@@ -251,6 +251,16 @@ export function personModel(i, o = {}) {
 }
 
 export const PERSON_VARIANTS = 8;
+// The rare doctor: a white coat with a glowing red cross. Eat one to heal.
+export const DOCTOR = PERSON_VARIANTS;
+export const PERSON_LOOKS = PERSON_VARIANTS + 1;
+export function personLook(i) {
+  if (i !== DOCTOR) return personModel(i);
+  const m = personModel(1, { shirt: 0xf4f6f8, pants: 0x8fd1c0, hat: 0x6ab8a8, badge: 0xff2a2a });
+  m.grid.set(0, 3, 0, 0xf4f6f8);
+  m.grid.set(0, 2, 1, 0x7a8a94);
+  return m;
+}
 
 // ---------------------------------------------------------------- military
 function simple(g, v, ox = g.nx / 2, oz = g.nz / 2) {

@@ -1069,6 +1069,10 @@ const T2 = 2.5;
 const T3 = 3;
 const T4 = 4;
 
+// Hospitals (and the bigger medical center) heal the kaiju when smashed.
+const hospital = (g, r, d, P) => { const b = block(g, r, d, { wall: 0xf0ece4, floorH: 4, win: winStd(P, { w: 3, lit: COOL, litChance: 0.7 }), bands: { every: 2, color: 0x9fc4d8 }, clutter: { kinds: ['ac', 'vent'] } }); const cx = Math.floor((b.x0 + b.x1) / 2); for (let i = -2; i <= 2; i++) { g.set(cx + i, b.y1 - 4, b.z1, 0xff3b3b, E); g.set(cx, b.y1 - 4 + i, b.z1, 0xff3b3b, E); } g.box(b.x0 + 3, b.y1 + 1, b.z0 + 3, b.x0 + 10, b.y1 + 2, b.z0 + 10, (x, y, z) => (x === b.x0 + 6 || (z === b.z0 + 6 && (x === b.x0 + 4 || x === b.x0 + 8)) ? 0xf2f2f2 : 0x4f5a66)); };
+export const HOSPITAL_TYPES = new Set(['hospital', 'medical_center']);
+
 function def(id, name, tier, style, zones, v, size, build, extra = {}) {
   return { id, name, tier, style, zones, v, size, build, weight: extra.weight ?? 1, ...extra };
 }
@@ -1111,7 +1115,8 @@ export const BUILDING_TYPES = [
   def('glass_lowrise', 'Glass low-rise', 4, 'garden', ['commercial', 'garden'], T3, sz([24, 30], [20, 26], [12, 18]), (g, r, d, P) => varTower(g, r, d, P, { floorH: 4, styles: { curtain: 3, grid: 1 }, forms: { box: 2, chamfer: 1 }, crown: r.pick(['helipad', 'garden', 'lit', 'slant']) }), { weight: 1.5 }),
   def('overgrown_block', 'Overgrown block', 4, 'garden', ['garden', 'commercial'], T3, sz([20, 26], [18, 24], [16, 24]), (g, r, d, P) => block(g, r, d, { wall: 0xc9c2b0, floorH: 4, win: winStd(P, { litChance: 0.35 }), garden: 0.85, vines: 0.4, balconies: { width: 5, alternate: true, plants: true }, clutter: { kinds: ['garden', 'garden', 'tank'] } }), { weight: 1.5 }),
   def('mall', 'Shopping mall', 4, 'garden', ['commercial'], T3, sz([36, 44], [26, 32], [10, 14]), (g, r, d, P) => block(g, r, d, { wall: 0xdcd3c0, floorH: 5, win: winStd(P, { w: 5, h: 2, gap: 3 }), shop: { sign: true, signLen: 16, awning: [0x3b6fd1] }, roofSign: { colors: [0x22e6ff, 0xff4d6d], bg: 0x1a1a24, frame: 0x55585e, len: 18 }, clutter: { kinds: ['ac', 'ac', 'vent', 'solar'] } }), { weight: 0.6 }),
-  def('hospital', 'Hospital', 4, 'garden', ['commercial'], T3, sz([30, 36], [22, 28], [18, 24]), (g, r, d, P) => { const b = block(g, r, d, { wall: 0xf0ece4, floorH: 4, win: winStd(P, { w: 3, lit: COOL, litChance: 0.7 }), bands: { every: 2, color: 0x9fc4d8 }, clutter: { kinds: ['ac', 'vent'] } }); const cx = Math.floor((b.x0 + b.x1) / 2); for (let i = -2; i <= 2; i++) { g.set(cx + i, b.y1 - 4, b.z1, 0xff3b3b, E); g.set(cx, b.y1 - 4 + i, b.z1, 0xff3b3b, E); } g.box(b.x0 + 3, b.y1 + 1, b.z0 + 3, b.x0 + 10, b.y1 + 2, b.z0 + 10, (x, y, z) => (x === b.x0 + 6 || (z === b.z0 + 6 && (x === b.x0 + 4 || x === b.x0 + 8)) ? 0xf2f2f2 : 0x4f5a66)); }, { weight: 0.5 }),
+  def('hospital', 'Hospital', 4, 'garden', ['commercial', 'pastel', 'brick', 'downtown', 'neon'], T3, sz([30, 36], [22, 28], [18, 24]), hospital, { weight: 1 }),
+  def('medical_center', 'Medical center', 5, 'garden', ['commercial', 'downtown', 'neon'], T3, sz([40, 48], [30, 36], [40, 56]), hospital, { weight: 0.5 }),
   def('cinema', 'Cinema', 4, 'garden', ['commercial', 'neon'], T3, sz([24, 30], [22, 26], [12, 16]), (g, r, d, P) => { const b = block(g, r, d, { wall: 0x8a3b4a, floorH: 6, win: null, shop: { sign: true, signLen: 14, signColors: [0xffd23f, 0xff4d6d] }, clutter: { sparse: true } }); for (let x = b.x0; x < b.x1; x++) { g.set(x, 6, b.z1, x % 2 ? 0xffe28a : 0xffffff, E); g.set(x, 7, b.z1 + 1, 0xd94040); } sign(g, r, 0, Math.floor((b.x0 + b.x1) / 2), 8, 12, 5, b.z1, [0xff4d6d, 0x22e6ff], { seed: 3 }); }, { weight: 0.6 }),
   def('balcony_apartments', 'Balcony apartments', 4, 'garden', ['commercial', 'garden', 'pastel'], T3, sz([20, 26], [18, 22], [20, 28]), (g, r, d, P) => block(g, r, d, { wall: r.pick(P.walls), floorH: 4, win: winStd(P), balconies: { width: 5, plants: true, laundry: true }, shop: { awning: [0x3b6fd1, 0xffffff], sign: true }, garden: 0.4, clutter: { kinds: ['tank', 'ac', 'garden', 'dish'] } }), { weight: 2 }),
 
@@ -1162,7 +1167,7 @@ export const BUILDING_TYPES = [
   def('museum', 'Museum', 4, 'civic', ['garden', 'pastel'], T3, sz([34, 40], [24, 28], [12, 14]), (g, r, d, P) => classical(g, r, d, P, { porticoW: 20 }), { weight: 0.25 }),
   def('bank', 'Bank', 4, 'civic', ['neon', 'brick', 'garden', 'commercial'], T3, sz([20, 24], [18, 22], [12, 14]), (g, r, d, P) => classical(g, r, d, P, { porticoW: 14, sign: true }), { weight: 0.4 }),
   def('library', 'Library', 4, 'civic', ['garden', 'pastel', 'suburb'], T3, sz([28, 34], [20, 24], [12, 14]), (g, r, d, P) => classical(g, r, d, P, {}), { weight: 0.3 }),
-  def('cathedral', 'Cathedral', 5, 'civic', ['pastel', 'brick', 'garden'], T3, sz([26, 30], [40, 46], [44, 52]), (g, r, d, P) => cathedral(g, r, d, P), { weight: 0.12 }),
+  def('cathedral', 'Cathedral', 5, 'civic', ['pastel', 'brick', 'garden'], T3, sz([26, 30], [40, 46], [44, 52]), (g, r, d, P) => cathedral(g, r, d, P), { weight: 0.2 }),
   def('clock_tower', 'Clock tower', 4, 'civic', ['pastel', 'garden', 'brick'], T3, sz([10, 12], [10, 12], [36, 44]), (g, r, d, P) => clockTower(g, r, d, P), { weight: 0.2, square: true }),
   def('train_station', 'Train station', 5, 'civic', ['garden', 'brick', 'commercial'], T3, sz([40, 46], [24, 28], [14, 16]), (g, r, d, P) => trainStation(g, r, d, P), { weight: 0.12, unique: true }),
   def('pagoda', 'Pagoda temple', 4, 'neon', ['neon', 'brick'], T3, sz([12, 14], [12, 14], [25, 25]), (g, r, d, P) => pagoda(g, r, d, P), { weight: 0.3, square: true }),

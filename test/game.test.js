@@ -5,6 +5,7 @@ import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { waterField } from '../src/world.js';
+import { DOCTOR } from '../src/models.js';
 
 // Generate a wide area around the spawn point (normally the world streams in as you move).
 function wide(g, radius = 2600) {
@@ -353,4 +354,24 @@ test('every size has its own boss with working attack patterns', () => {
       assert.ok(!Number.isNaN(b.x) && !Number.isNaN(b.y), `${b.name} ${p}`);
     }
   }
+});
+
+test('no augment heals; hospitals and the rare doctor do', () => {
+  for (const id of ['regen', 'buildingEater', 'snackAttack', 'feast']) assert.equal(AUGMENT_BY_ID[id], undefined, id);
+  const g = new Game({ seed: 9 });
+  for (let s = 1; s < 4; s++) g.grow();
+  g.city.update(g.kaiju.x, g.kaiju.y, 3000, 9999, true);
+  const h = g.city.objects.find((o) => o.type === 'hospital' && o.state === 'intact');
+  assert.ok(h, 'hospitals exist in the world');
+  const k = g.kaiju;
+  k.hp = k.maxHp * 0.3;
+  g.destroyObject(h, { x: 1, y: 0 }, 'hit');
+  assert.ok(Math.abs(k.hp / k.maxHp - 0.55) < 1e-6, 'a hospital your size heals 25%');
+
+  const d = new Game({ seed: 9 });
+  const p = d.people.find((q) => !q.taken);
+  p.variant = DOCTOR;
+  d.kaiju.hp = d.kaiju.maxHp * 0.5;
+  d.eatPerson(p);
+  assert.ok(d.kaiju.hp / d.kaiju.maxHp > 0.6, 'eating a doctor heals');
 });

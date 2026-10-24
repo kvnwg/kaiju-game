@@ -13,7 +13,8 @@ import { VoxelGrid, hash3, shade } from './voxel.js';
 import { FX } from './fx3d.js';
 import { Actors, toGeometry } from './actors3d.js';
 import { Ambient } from './ambient3d.js';
-import { personModel } from './models.js';
+import { personLook } from './models.js';
+import { HOSPITAL_TYPES } from './buildings.js';
 
 export const QUALITY = {
   high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8 },
@@ -281,9 +282,73 @@ export class Renderer3D {
     this.buildingsDirty = true;
     this.ambient.dirty = true;
     for (const b of ch.bridges) this.buildBridge(ch, b);
+    for (const o of ch.objects) if (HOSPITAL_TYPES.has(o.type)) this.addHospitalMark(o);
+  }
+
+  // Hospitals heal when smashed, so they wear a glowing green outline and a floating cross.
+  addHospitalMark(o) {
+    if (!this.healMat) {
+      this.healMat = new THREE.MeshBasicMaterial({ color: 0x5dff88, toneMapped: false, transparent: true, opacity: 0.9 });
+      this.hospitalMarks = new Map();
+    }
+    const g = new THREE.Group();
+    const pad = 1.5;
+    const W = o.w + pad;
+    const D = o.h + pad;
+    const H = o.height + pad * 0.5;
+    const t = Math.max(1, Math.min(o.w, o.h) * 0.06);
+    const bar = (w, h, d, x, y, z) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.healMat);
+      m.position.set(x, y, z);
+      g.add(m);
+    };
+    // A glowing frame round the whole building: a thick ring on the ground, the corners and
+    // the roof edge, so it reads from far above too.
+    for (const y of [0.3, H]) {
+      const h = y < 1 ? 0.6 : t * 0.5;
+      bar(W + t * 2, h, t, 0, y, (D + t) / 2);
+      bar(W + t * 2, h, t, 0, y, -(D + t) / 2);
+      bar(t, h, D, (W + t) / 2, y, 0);
+      bar(t, h, D, -(W + t) / 2, y, 0);
+    }
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bar(t * 0.5, H, t * 0.5, sx * (W + t) / 2, H / 2, sz * (D + t) / 2);
+    const s = Math.max(o.w, o.h) * 0.3;
+    const cross = new THREE.Group();
+    for (const [w, h] of [[s, s * 0.32], [s * 0.32, s]]) cross.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, s * 0.32), this.healMat));
+    cross.position.y = o.height + s * 1.1;
+    g.add(cross);
+    g.userData.cross = cross;
+    g.userData.baseY = cross.position.y;
+    g.position.set(o.x, 0, o.y);
+    this.scene.add(g);
+    this.hospitalMarks.set(o, g);
+  }
+
+  removeHospitalMark(o) {
+    const g = this.hospitalMarks && this.hospitalMarks.get(o);
+    if (!g) return;
+    this.scene.remove(g);
+    g.traverse((c) => c.geometry && c.geometry.dispose());
+    this.hospitalMarks.delete(o);
+  }
+
+  updateHospitalMarks() {
+    if (!this.hospitalMarks) return;
+    const pulse = 0.6 + 0.4 * Math.sin(this.t * 4);
+    this.healMat.opacity = 0.55 + 0.4 * pulse;
+    for (const [o, g] of this.hospitalMarks) {
+      if (o.state !== 'intact') {
+        this.removeHospitalMark(o);
+        continue;
+      }
+      const c = g.userData.cross;
+      c.rotation.y = this.t * 1.5;
+      c.position.y = g.userData.baseY + Math.sin(this.t * 2.5) * c.children[0].geometry.parameters.width * 0.15;
+    }
   }
 
   chunkUnloaded(ch) {
+    for (const o of ch.objects) if (HOSPITAL_TYPES.has(o.type)) this.removeHospitalMark(o);
     this.propsDirty = true;
     this.buildingsDirty = true;
     this.ambient.dirty = true;
@@ -310,7 +375,7 @@ export class Renderer3D {
     let cols = this.pcols.get(variant);
     if (!cols) {
       const set = new Set();
-      for (const v of personModel(variant).grid.data) if (v) set.add(v & 0xffffff);
+      for (const v of personLook(variant).grid.data) if (v) set.add(v & 0xffffff);
       cols = [...set];
       this.pcols.set(variant, cols);
     }
@@ -357,6 +422,7 @@ export class Renderer3D {
     if (!this.cityBuilt) return;
     this.cityBuilt.listeners.delete(this.listener);
     for (const ch of [...this.bridgeMeshes.keys()]) this.chunkUnloaded(ch);
+    if (this.hospitalMarks) for (const o of [...this.hospitalMarks.keys()]) this.removeHospitalMark(o);
     this.terrain.clear();
     this.ambient.clear();
     for (const e of this.propCache.values()) e.n = 0;
@@ -1244,6 +1310,7 @@ export class Renderer3D {
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
+    this.updateHospitalMarks();
     this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Charge trail
     if (k.dashT > 0 && Math.random() < 0.7) this.fx.dustCloud(k.x - k.facing.x * k.r, 0, k.y - k.facing.y * k.r, k.r * 0.5, 2, 0xdfe6ee);

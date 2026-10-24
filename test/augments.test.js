@@ -52,7 +52,7 @@ test('slots: with 6 moves and 6 passives, only upgrades are offered', () => {
   }
 });
 
-test('maxed augments are not offered; everything maxed falls back to Feast and Scrap Pile', () => {
+test('maxed augments are not offered; everything maxed falls back to Growth Spurt and Scrap Pile', () => {
   const held = new Map();
   MOVES.slice(0, MOVE_SLOTS).forEach((m) => held.set(m.id, maxLevel(m)));
   PASSIVES.slice(0, PASSIVE_SLOTS).forEach((p) => held.set(p.id, maxLevel(p)));
@@ -61,7 +61,7 @@ test('maxed augments are not offered; everything maxed falls back to Feast and S
   assert.ok(offerAugments({ held, rng: createRng(1) }).includes('cycloneKing'));
   for (const e of readyEvolutions(held)) applyPick(held, e.id);
   const offer = offerAugments({ held, rng: createRng(1) });
-  assert.ok(offer.includes('feast') && offer.includes('scrapPile'));
+  assert.ok(offer.includes('growthSpurt') && offer.includes('scrapPile'));
 });
 
 test('evolutions need their move maxed and their partner passive, and take no slot', () => {
@@ -96,7 +96,7 @@ test('applyPick levels augments and caps them', () => {
   assert.throws(() => applyPick(held, 'thickHide'));
   for (let l = 1; l <= 8; l++) applyPick(held, 'laserEyes');
   assert.throws(() => applyPick(held, 'laserEyes'));
-  assert.equal(applyPick(held, 'feast'), 0);
+  assert.equal(applyPick(held, 'growthSpurt'), 0);
 });
 
 test('completedSets detects a full set', () => {

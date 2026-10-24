@@ -184,6 +184,10 @@ export const DASH = { cd: 2.8, time: 0.24, speed: 3.4, iframes: 0.32, refund: 0.
 export const MULTI = { window: 0.7, tiers: [5, 10, 20] };
 // Healing gets weaker the more you have healed recently; sedative rounds pause it.
 export const HEALING = { falloff: 10, recover: 0.03 };
+// There are no healing augments: health comes back from hospitals (outlined in green; smash one
+// to heal, less if it is far below your size) and, while small, the rare doctor you can eat.
+export const HOSPITAL = { heal: [0.25, 0.12, 0.05, 0.02] }; // by how many sizes below you it is
+export const DOCTOR_HEAL = { heal: 0.12, gap: [55, 85], chance: 0.06, maxStage: 2 };
 
 export const BOSS = {
   name: 'Coast Guard Mech',

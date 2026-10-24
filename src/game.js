@@ -1,13 +1,14 @@
 import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
-  UNIT_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
-import { PERSON_VARIANTS } from './models.js';
+import { PERSON_VARIANTS, DOCTOR } from './models.js';
+import { HOSPITAL_TYPES } from './buildings.js';
 
 // Aim time before a projectile leaves the barrel (seconds); shells, artillery and lasers
 // already telegraph with ground markers.
@@ -383,7 +384,6 @@ export class Game {
     this.streamWorld();
     if (this.pendingPicks > 0) this.openPick();
     if (this.state !== 'playing') return;
-    if (this.has('regen')) this.heal(0.003 * this.level('regen') * dt);
     this.updateThreat(dt);
     this.updateKaiju(dt);
     this.updateAugments(dt);
@@ -736,6 +736,24 @@ export class Game {
     k.hp = Math.min(k.maxHp, k.hp + k.maxHp * f);
   }
 
+  // Big heals that skip the falloff: smashing a hospital, eating a doctor.
+  bigHeal(fraction, text, x, y) {
+    const k = this.kaiju;
+    const before = k.hp;
+    k.hp = Math.min(k.maxHp, k.hp + k.maxHp * fraction);
+    k.sedated = 0;
+    this.fx.floaters.push({ x, y, h: k.r * 2.8, text: `${text} +${Math.round(((k.hp - before) / k.maxHp) * 100)}%`, color: '#5dff88', life: 1.8, max: 1.8 });
+    this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: k.r * 3, life: 0.6, max: 0.6, color: 0x5dff88, width: k.r * 0.25 });
+    this.emit('healed', { amount: fraction });
+  }
+
+  hospitalHeal(o) {
+    const gap = Math.max(0, this.kaiju.stage - o.tier);
+    const f = HOSPITAL.heal[Math.min(gap, HOSPITAL.heal.length - 1)];
+    this.stats.hospitals = (this.stats.hospitals || 0) + 1;
+    this.bigHeal(f, 'HOSPITAL', o.x, o.y);
+  }
+
   // ---------------------------------------------------------------- skill: charge and perfect dodges
   tryDash() {
     const k = this.kaiju;
@@ -923,7 +941,7 @@ export class Game {
     const k = this.kaiju;
     const before = completedSets(this.held).map((s) => s.id);
     const level = applyPick(this.held, id);
-    if (id === 'feast') this.heal(0.3);
+    if (id === 'growthSpurt' && k.stage < MAX_STAGE) k.biomass = Math.min(this.stage.biomassToNext, k.biomass + this.stage.biomassToNext * 0.15);
     if (id === 'scrapPile') this.stats.scrap += 25 * k.stage * k.stage;
     if (id === 'toughness') {
       const frac = k.hp / k.maxHp;
@@ -1009,9 +1027,8 @@ export class Game {
       if (o.structure && o.tier >= k.stage) {
         this.fx.floaters.push({ x: o.x, y: o.y, h: o.height * 0.8, text: `+${Math.round(scrap)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
       }
-      if (o.vehicle && this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
       if (this.has('magneticHide') && (o.vehicle || o.structure)) this.addShield((o.vehicle ? 0.02 : 0.03) * (0.5 + 0.5 * this.level('magneticHide')));
-      if (o.structure && o.tier >= k.stage && this.has('buildingEater')) this.heal(0.01 + 0.005 * this.level('buildingEater'));
+      if (HOSPITAL_TYPES.has(o.type)) this.hospitalHeal(o);
     }
 
     // Every kill thumps the camera a little; the bigger it is next to you, the harder.
@@ -1072,9 +1089,16 @@ export class Game {
       const zc = this.cellAt(x, y);
       if (zc && zc.style === 'forest' && !this.rng.chance(0.15)) continue;
       if (this.blockedAt(x, y, 1)) continue;
+      // Very rarely, while you are small, one of them is a doctor.
+      let variant = this.rng.int(0, PERSON_VARIANTS - 1);
+      if (!initial && k.stage <= DOCTOR_HEAL.maxStage && this.time >= (this.nextDoctorAt ?? DOCTOR_HEAL.gap[0])
+        && this.rng.chance(DOCTOR_HEAL.chance) && !this.people.some((q) => q.variant === DOCTOR && !q.taken)) {
+        variant = DOCTOR;
+        this.nextDoctorAt = this.time + DOCTOR_HEAL.gap[0];
+      }
       this.people.push({
         isPerson: true, x, y, heading: this.rng.range(0, Math.PI * 2), speed: this.rng.range(4, 7),
-        state: 'walk', t: this.rng.range(1, 4), variant: this.rng.int(0, PERSON_VARIANTS - 1),
+        state: 'walk', t: this.rng.range(1, 4), variant,
         tier: 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: this.rng.range(0, 6),
       });
     }
@@ -1202,6 +1226,11 @@ export class Game {
     this.onKill();
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
+    if (p.variant === DOCTOR) {
+      this.stats.doctors = (this.stats.doctors || 0) + 1;
+      this.bigHeal(DOCTOR_HEAL.heal, 'DOCTOR', p.x, p.y);
+      this.nextDoctorAt = this.time + this.rng.range(...DOCTOR_HEAL.gap);
+    }
     if (!k.anim || k.anim.kind === 'eat') k.anim = { kind: 'eat', t: EAT_TIME, max: EAT_TIME };
     const toward = norm(p.x - k.x, p.y - k.y);
     if (!k.moving && (toward.x || toward.y)) k.facing = toward;
@@ -1295,7 +1324,6 @@ export class Game {
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
     this.stats.destroyed++;
-    if (this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
     if (this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'carDie', car: c, dir: norm(c.x - k.x, c.y - k.y) });
     this.spawnOrbs(c.x, c.y, 3, true);
@@ -1934,7 +1962,6 @@ export class Game {
       this.shake = Math.max(this.shake, 0.7);
     }
     if (!u.def.mob) this.heal(UNIT_HEAL);
-    if (u.def.vehicle && this.has('snackAttack')) this.heal(0.005 + 0.005 * this.level('snackAttack'));
     if (u.def.vehicle && this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'unitDie', u, dir: norm(u.x - k.x, u.y - k.y) });
     if (!u.def.human) this.spawnExplosion(u.x, u.y, u.r * 2.2);

@@ -62,7 +62,6 @@ export const AUGMENTS = [
   { id: 'adrenaline', kind: 'passive', name: 'Adrenaline', tier: 'silver', max: 5, text: '-8% move cooldowns', stat: true },
   { id: 'longLegs', kind: 'passive', name: 'Long Legs', tier: 'silver', max: 5, text: '+8% move speed', stat: true },
   { id: 'toughness', kind: 'passive', name: 'Toughness', tier: 'silver', max: 5, text: '+15% max health', stat: true },
-  { id: 'regen', kind: 'passive', name: 'Regeneration', tier: 'silver', max: 5, text: 'Heal 0.3% health/s', stat: true },
   { id: 'appetite', kind: 'passive', name: 'Appetite', tier: 'silver', max: 5, text: '+10% XP', stat: true },
   { id: 'scavenger', kind: 'passive', name: 'Scavenger', tier: 'silver', max: 5, text: '+20% scrap', stat: true },
   { id: 'thickHide', kind: 'passive', name: 'Thick Hide', tier: 'silver', max: 5, text: '-8% bullet & shell damage', stat: true },
@@ -77,9 +76,7 @@ export const AUGMENTS = [
 
   // ---- perk passives
   { id: 'gasMain', kind: 'passive', name: 'Gas Main', tier: 'gold', max: 3, text: '20% of buildings explode', levelText: '+10% explode chance' },
-  { id: 'buildingEater', kind: 'passive', name: 'Building Eater', tier: 'gold', max: 3, text: 'Big buildings heal 1.5%', levelText: '+0.5% heal per building' },
   { id: 'magneticHide', kind: 'passive', name: 'Magnetic Hide', tier: 'gold', max: 3, text: 'Wreckage becomes a shield', levelText: '+50% shield gain' },
-  { id: 'snackAttack', kind: 'passive', name: 'Snack Attack', tier: 'silver', max: 3, text: 'Vehicles heal 1%', levelText: '+0.5% heal per vehicle' },
   { id: 'rageMode', kind: 'passive', name: 'Rage Mode', tier: 'gold', max: 3, text: 'Up to +40% damage when hurt', levelText: '+20% max rage' },
   { id: 'echo', kind: 'passive', name: 'Echo', tier: 'prismatic', max: 3, text: '30% of moves repeat', levelText: '+30% repeat chance' },
   { id: 'perfectRhythm', kind: 'passive', name: 'Perfect Rhythm', tier: 'gold', max: 3, text: 'Perfect dodges blast a shockwave', levelText: '+25% shockwave size' },
@@ -109,7 +106,7 @@ export function readyEvolutions(held) {
 
 // When everything is maxed, picks fall back to these (Vampire Survivors' chicken and coins).
 export const FILLERS = [
-  { id: 'feast', kind: 'filler', name: 'Feast', tier: 'silver', text: 'Heal 30% health' },
+  { id: 'growthSpurt', kind: 'filler', name: 'Growth Spurt', tier: 'silver', text: '+15% growth' },
   { id: 'scrapPile', kind: 'filler', name: 'Scrap Pile', tier: 'silver', text: '+scrap' },
 ];
 for (const f of FILLERS) AUGMENT_BY_ID[f.id] = f;
@@ -158,7 +155,7 @@ export function moveStats(id, level) {
 export const SYNERGY_SETS = [
   { id: 'demolition', name: 'Demolition Crew', augments: ['gasMain', 'seismicSlam', 'meteorCall'],
     bonus: 'Chain collapses also give XP and growth' },
-  { id: 'unkillable', name: 'Unkillable', augments: ['buildingEater', 'magneticHide', 'thickHide'],
+  { id: 'unkillable', name: 'Unkillable', augments: ['toughness', 'magneticHide', 'thickHide'],
     bonus: 'Shield regenerates while standing still' },
 ];
 

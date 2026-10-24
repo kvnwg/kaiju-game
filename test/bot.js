@@ -4,6 +4,7 @@
 import { canDamage } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { distToSegment } from '../src/game.js';
+import { HOSPITAL_TYPES } from '../src/buildings.js';
 
 export function botStep(game) {
   const k = game.kaiju;
@@ -17,7 +18,7 @@ export function botStep(game) {
       if (a.kind === 'filler') return 0;
       if (id === 'glassCannon') return 0.5;
       if (a.kind === 'move') return game.has(id) ? 3 : moves < 3 ? 4 : 1.5;
-      const survival = ['regen', 'toughness', 'buildingEater', 'thickHide', 'magneticHide', 'snackAttack'];
+      const survival = ['toughness', 'thickHide', 'magneticHide'];
       const offense = ['might', 'area', 'adrenaline', 'rageMode', 'echo', 'bloodlust', 'longLegs'];
       const base = survival.includes(id) ? 3.2 : offense.includes(id) ? 2.4 : 1.4;
       return base + (game.has(id) ? 0.3 : 0);
@@ -92,6 +93,31 @@ export function botStep(game) {
     if (d > b.r + k.r * 1.4) game.setInput(b.x - k.x, b.y - k.y);
     else game.setInput(-(b.y - k.y), b.x - k.x); // circle the boss
     return;
+  }
+  // Hurt: go smash a hospital, or eat a doctor, if one is in sight.
+  if (k.hp < k.maxHp * 0.6) {
+    let heal = null;
+    let healD = game.viewSpan() * (k.hp < k.maxHp * 0.35 ? 1.2 : 0.7);
+    for (const p of game.people) {
+      if (p.variant !== 8 || p.taken) continue;
+      const d = Math.hypot(p.x - k.x, p.y - k.y);
+      if (d < healD) {
+        heal = p;
+        healD = d;
+      }
+    }
+    for (const o of game.objectsNear(k.x, k.y, healD)) {
+      if (!HOSPITAL_TYPES.has(o.type) || o.state !== 'intact' || !canDamage(o.tier, k.stage, o.landmark)) continue;
+      const d = Math.hypot(o.x - k.x, o.y - k.y);
+      if (d < healD) {
+        heal = o;
+        healD = d;
+      }
+    }
+    if (heal) {
+      game.setInput(heal.x - k.x, heal.y - k.y);
+      return;
+    }
   }
   let chase = null;
   let chaseD = game.viewSpan() * 0.35;
