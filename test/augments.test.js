@@ -85,8 +85,8 @@ test('applyPick levels augments and caps them', () => {
 });
 
 test('completedSets detects a full set', () => {
-  const held = new Map([['dominoEffect', 1], ['gasMain', 1]]);
+  const held = new Map([['gasMain', 1], ['seismicSlam', 1]]);
   assert.equal(completedSets(held).length, 0);
-  held.set('seismicSlam', 1);
+  held.set('meteorCall', 1);
   assert.deepEqual(completedSets(held).map((s) => s.id), ['demolition']);
 });

@@ -177,35 +177,6 @@ test('hits on buildings report an impact point for the voxel chipping', () => {
   assert.ok(hit && hit.obj === b && hit.x === b.x - b.w / 2 && hit.frac > 0);
 });
 
-function neighbourPair(g, tier) {
-  for (const a of g.objects) {
-    if (a.kind !== 'building' || a.tier !== tier || a.walkable) continue;
-    const n = g.objects.find((o) => o !== a && o.kind === 'building' && !o.walkable && o.tier <= tier && Math.abs(o.y - a.y) < 30 && o.x > a.x && o.x - a.x < a.w / 2 + o.w / 2 + 60);
-    if (n) return [a, n];
-  }
-  return null;
-}
-
-test('Domino Effect topples neighbours in the fall direction', () => {
-  const g = wide(new Game({ seed: 6 }), 1500);
-  g.kaiju.stage = 4;
-  const pair = neighbourPair(g, 4);
-  assert.ok(pair, 'found neighbouring buildings');
-  const [a, n] = pair;
-  g.destroyObject(a, { x: 1, y: 0 }, 'hit');
-  for (let i = 0; i < 30; i++) g.update(1 / 30);
-  assert.equal(n.hp, n.maxHp, 'no damage without the augment');
-
-  const g2 = wide(new Game({ seed: 6 }), 1500);
-  g2.kaiju.stage = 4;
-  const [a2, n2] = neighbourPair(g2, 4);
-  g2.held.set('dominoEffect', 1);
-  g2.kaiju.level = 200;
-  g2.destroyObject(a2, { x: 1, y: 0 }, 'hit');
-  for (let i = 0; i < 30; i++) g2.update(1 / 30);
-  assert.ok(n2.hp < n2.maxHp, 'neighbour took collapse damage');
-});
-
 test('chain collapses drop biomass only with the Demolition Crew set', () => {
   const g = wide(new Game({ seed: 7 }));
   g.kaiju.stage = 4;
@@ -213,7 +184,7 @@ test('chain collapses drop biomass only with the Demolition Crew set', () => {
   const bio0 = g.stats.biomass;
   g.destroyObject(a, { x: 1, y: 0 }, 'chain');
   assert.equal(g.stats.biomass, bio0);
-  for (const id of ['dominoEffect', 'gasMain', 'seismicSlam']) g.held.set(id, 1);
+  for (const id of ['gasMain', 'seismicSlam', 'meteorCall']) g.held.set(id, 1);
   g.destroyObject(b, { x: 1, y: 0 }, 'chain');
   assert.ok(g.stats.biomass > bio0);
 });
@@ -304,6 +275,17 @@ test('smashing something your size freezes time for a moment (hitstop)', () => {
   const t0 = g.time;
   g.update(1 / 60);
   assert.ok(g.time - t0 < 0.005, 'simulation barely moves during hitstop');
+});
+
+test('a cop goes down in one bite, whatever its level scaling', () => {
+  const g = new Game({ seed: 5 });
+  const k = g.kaiju;
+  k.level = 30;
+  const cop = g.spawnUnit('cop', k.x + 3, k.y);
+  assert.ok(cop.hp > g.baseDamage() * 2, 'tough enough that a normal hit would not do');
+  g.performAttack(cop);
+  assert.ok(cop.dead);
+  assert.equal(k.anim.kind, 'eat');
 });
 
 test('a small kaiju eats people whole: snatch, chomp, swallow', () => {

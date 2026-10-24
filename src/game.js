@@ -636,6 +636,8 @@ export class Game {
 
   damageTarget(t, amount, dir, cause = 'hit') {
     if (t.isBoss) return this.damageBoss(amount);
+    // Cops go down in one bite, whatever their toughness.
+    if (t.isUnit && t.type === 'cop' && cause === 'bite') return this.eatCop(t);
     if (t.isUnit) return this.damageUnit(t, amount);
     if (t.isPerson) return this.kaiju.stage <= 2 && cause === 'bite' ? this.eatPerson(t) : this.flingPerson(t, false);
     if (t.isCar) return this.damageCar(t, amount);
@@ -996,31 +998,8 @@ export class Game {
       this.slowmoReadyAt = this.time + 6;
     }
     if (o.structure && o.tier >= 3) {
-      if (this.has('dominoEffect')) this.schedule(0.25, () => this.domino(o));
       if (this.has('gasMain') && this.rng.chance(0.1 + 0.1 * this.level('gasMain'))) this.schedule(0.35, () => this.explode(o));
     }
-  }
-
-  domino(o) {
-    const dmgK = 0.5 + 0.25 * this.level('dominoEffect');
-    const size = Math.max(o.w, o.h);
-    const len = Math.max(size * 1.3, o.height * 0.8);
-    const d = o.fallDir;
-    const x1 = o.x + d.x * size * 0.5;
-    const y1 = o.y + d.y * size * 0.5;
-    const x2 = x1 + d.x * len;
-    const y2 = y1 + d.y * len;
-    const width = Math.min(o.w, o.h);
-    const found = this.grid.query(Math.min(x1, x2) - width, Math.min(y1, y2) - width, Math.max(x1, x2) + width, Math.max(y1, y2) + width);
-    for (const n of found) {
-      if (n === o || n.state !== 'intact') continue;
-      if (distToSegment(n.x, n.y, x1, y1, x2, y2) > width / 2 + Math.max(n.w, n.h) / 2) continue;
-      this.damageObject(n, o.maxHp * dmgK, d, 'chain', closestPoint(x1, y1, n));
-    }
-    for (const u of this.units) if (!u.dead && !u.flying && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, o.maxHp * dmgK);
-    const b = this.boss;
-    if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(o.maxHp * dmgK);
-    this.fxEvent({ t: 'dust', x: (x1 + x2) / 2, y: (y1 + y2) / 2, r: len * 0.5 });
   }
 
   explode(o) {
@@ -1156,6 +1135,20 @@ export class Game {
       this.director.crowdT = 0.5;
       this.populate(false);
     }
+  }
+
+  eatCop(u) {
+    if (u.dead) return false;
+    const k = this.kaiju;
+    if (!k.anim || k.anim.kind === 'eat') k.anim = { kind: 'eat', t: EAT_TIME, max: EAT_TIME };
+    const toward = norm(u.x - k.x, u.y - k.y);
+    if (!k.moving && (toward.x || toward.y)) k.facing = toward;
+    this.fxEvent({ t: 'eat', x: u.x, y: u.y });
+    this.fxEvent({ t: 'chomp', p: { variant: 0 } });
+    u.hp = 0;
+    u.eaten = true;
+    this.killUnit(u);
+    return true;
   }
 
   // While the kaiju is small it eats people whole: a snatch, a toss, a chomp and a gulp.

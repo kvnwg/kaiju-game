@@ -1051,6 +1051,7 @@ export class Renderer3D {
           break;
         case 'unitDie': {
           const u = e.u;
+          if (u.eaten) break;
           this.fx.fireBurst(u.x, u.flying ? game.kaiju.r * 2 : 0, u.y, u.r * 1.5, 6);
           for (let i = 0; i < 6; i++) this.fx.addDebris({ x: u.x, y: u.r, z: u.y, vx: e.dir.x * u.r * 6 + (Math.random() - 0.5) * u.r * 6, vy: u.r * (3 + Math.random() * 4), vz: e.dir.y * u.r * 6 + (Math.random() - 0.5) * u.r * 6, sx: u.r * 0.4, sy: u.r * 0.3, sz: u.r * 0.4, size: u.r * 0.4, color: 0x3a3d42, life: 5 });
           break;

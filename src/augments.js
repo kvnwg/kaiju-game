@@ -48,7 +48,6 @@ export const AUGMENTS = [
   { id: 'thickHide', kind: 'passive', name: 'Thick Hide', tier: 'silver', max: 5, text: '-8% bullet & shell damage', stat: true },
 
   // ---- perk passives
-  { id: 'dominoEffect', kind: 'passive', name: 'Domino Effect', tier: 'gold', max: 3, text: 'Collapses crush neighbours', levelText: 'Heavier collapses' },
   { id: 'gasMain', kind: 'passive', name: 'Gas Main', tier: 'gold', max: 3, text: '20% of buildings explode', levelText: '+10% explode chance' },
   { id: 'buildingEater', kind: 'passive', name: 'Building Eater', tier: 'gold', max: 3, text: 'Big buildings heal 1.5%', levelText: '+0.5% heal per building' },
   { id: 'magneticHide', kind: 'passive', name: 'Magnetic Hide', tier: 'gold', max: 3, text: 'Wreckage becomes a shield', levelText: '+50% shield gain' },
@@ -109,7 +108,7 @@ export function moveStats(id, level) {
 }
 
 export const SYNERGY_SETS = [
-  { id: 'demolition', name: 'Demolition Crew', augments: ['dominoEffect', 'gasMain', 'seismicSlam'],
+  { id: 'demolition', name: 'Demolition Crew', augments: ['gasMain', 'seismicSlam', 'meteorCall'],
     bonus: 'Chain collapses also give XP and growth' },
   { id: 'unkillable', name: 'Unkillable', augments: ['buildingEater', 'magneticHide', 'thickHide'],
     bonus: 'Shield regenerates while standing still' },
