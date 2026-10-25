@@ -17,7 +17,7 @@ let profile = loadProfile();
 const sfx = new Sfx();
 sfx.setMuted(profile.sound === false);
 // Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
-for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
+for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', 'touchstart', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
 let renderer = null;
 let game = null;
 let paused = false;
@@ -179,6 +179,7 @@ function togglePause(force) {
         sfx.setMuted(!on);
         profile.sound = on;
         saveProfile(profile);
+        showSound();
       },
       onQuality: (q) => setQuality(q),
       onPixelArt: (on) => {
@@ -196,6 +197,17 @@ function togglePause(force) {
 }
 
 document.getElementById('pauseBtn').addEventListener('click', () => togglePause());
+// Sound on/off right on the HUD (the same setting as in the pause menu).
+const soundBtn = document.getElementById('soundBtn');
+const showSound = () => soundBtn.classList.toggle('muted', sfx.muted);
+showSound();
+soundBtn.addEventListener('click', () => {
+  sfx.setMuted(!sfx.muted);
+  profile.sound = !sfx.muted;
+  saveProfile(profile);
+  showSound();
+  if (!sfx.muted) sfx.click();
+});
 // The charge button must not start a stick drag on the canvas underneath.
 const dashBtn = document.getElementById('dashBtn');
 dashBtn.addEventListener('pointerdown', (e) => {
@@ -290,4 +302,4 @@ window.addEventListener('resize', () => renderer && renderer.resize());
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, startRun, showMenu, profile: () => profile };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, sfx, startRun, showMenu, profile: () => profile };

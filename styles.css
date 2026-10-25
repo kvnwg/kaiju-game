@@ -286,6 +286,14 @@ html, body {
 .icon-btn::before { left: 7px; }
 .icon-btn::after { left: 13px; }
 .icon-btn:active { transform: translate(1px, 1px); }
+/* speaker glyph; crossed out when muted */
+.sound-btn::before, .sound-btn::after { display: none; }
+.sound-btn {
+  background: var(--panel) center / 18px 18px no-repeat url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'><path d='M1 3h2l2-2v7l-2-2H1z' fill='%23f4f1e8'/><path d='M6 3h1v3H6zM7 2h1v1H7zM7 6h1v1H7zM8 3h1v3H8z' fill='%23f4f1e8'/></svg>");
+}
+.sound-btn.muted {
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'><path d='M1 3h2l2-2v7l-2-2H1z' fill='%23f4f1e8'/><path d='M6 3h1v1H6zM8 3h1v1H8zM7 4h1v1H7zM6 5h1v1H6zM8 5h1v1H8z' fill='%23ff5a5a'/></svg>");
+}
 
 #bossbar {
   margin: 10px auto 0;

@@ -11,8 +11,15 @@ export class Sfx {
     this.stage = 1;
   }
 
-  // Browsers only start audio after a user gesture.
+  // Browsers only start audio after a user gesture (inside the artifact frame, autoplay is off,
+  // so every tap or key press tries again until it is running).
   unlock() {
+    try {
+      // iPhones: play through the ringer's silent switch, like a game should.
+      if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback';
+    } catch {
+      // Not supported here.
+    }
     try {
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -31,10 +38,22 @@ export class Sfx {
         for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
         this.ctx = ctx;
       }
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      if (this.ctx.state !== 'running') {
+        // A silent one-sample sound started inside the gesture unlocks older Safari too.
+        const s = this.ctx.createBufferSource();
+        s.buffer = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
+        s.connect(this.ctx.destination);
+        s.start(0);
+        const p = this.ctx.resume();
+        if (p && p.catch) p.catch(() => {});
+      }
     } catch {
       this.ctx = null;
     }
+  }
+
+  get running() {
+    return Boolean(this.ctx && this.ctx.state === 'running');
   }
 
   setMuted(m) {
