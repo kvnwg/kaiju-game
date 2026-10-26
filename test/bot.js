@@ -55,6 +55,14 @@ export function botStep(game) {
         game.tryDash();
         break;
       }
+      if (h.kind === 'line' && distToSegment(k.x, k.y, h.x1, h.y1, h.x2, h.y2) < h.w / 2 + k.r) {
+        const dx = h.x2 - h.x1;
+        const dy = h.y2 - h.y1;
+        const side = (k.x - h.x1) * -dy + (k.y - h.y1) * dx > 0 ? 1 : -1;
+        game.setInput(-dy * side, dx * side);
+        game.tryDash();
+        break;
+      }
     }
   }
   for (const h of game.hazards) {

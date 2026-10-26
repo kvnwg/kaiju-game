@@ -21,7 +21,6 @@ export const QUALITY = {
   medium: { name: 'Medium', pixelRatio: 1, shadows: 1024, bloom: true, tilt: false, lights: 6 },
   low: { name: 'Low', pixelRatio: 0.75, shadows: 0, bloom: false, tilt: false, lights: 4 },
 };
-const POINT_LIGHTS = 8;
 const YAW = 0.62;
 const PITCH = 0.92; // ~53 degrees down
 const FOV = 32;
@@ -127,6 +126,26 @@ export function makeVoxelMaterial(uniforms, selfLit = 0) {
   return m;
 }
 
+// One geometry from boxes [w, h, d, x, y, z]: a marker drawn in one call instead of one per box.
+function boxesGeometry(boxes) {
+  const pos = [];
+  const nor = [];
+  const idx = [];
+  for (const [w, h, d, x, y, z] of boxes) {
+    const g = new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+    const base = pos.length / 3;
+    for (const v of g.attributes.position.array) pos.push(v);
+    for (const v of g.attributes.normal.array) nor.push(v);
+    for (const i of g.index.array) idx.push(base + i);
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setIndex(idx);
+  return out;
+}
+
 export class Renderer3D {
   constructor(canvas, { quality = 'high', floaterLayer = null, pixelArt = false } = {}) {
     this.canvas = canvas;
@@ -154,12 +173,10 @@ export class Renderer3D {
     this.sun.shadow.normalBias = 0.6;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
+    // A fixed pool of point lights for flashes, glows and street lamps. The pool's size never
+    // changes during play (unused lights sit at zero intensity, never hidden): three.js builds a
+    // shader per light count, so a changing count would recompile every material mid-game.
     this.points = [];
-    for (let i = 0; i < POINT_LIGHTS; i++) {
-      const p = new THREE.PointLight(0xffffff, 0, 50, 1.6);
-      this.scene.add(p);
-      this.points.push(p);
-    }
     this.scene.fog = new THREE.Fog(0xf0d6b8, 300, 1200);
     this.scene.background = new THREE.Color(0xf0d6b8);
 
@@ -193,6 +210,12 @@ export class Renderer3D {
   setQuality(q) {
     this.qualityName = q;
     this.quality = QUALITY[q];
+    while (this.points.length > this.quality.lights) this.scene.remove(this.points.pop());
+    while (this.points.length < this.quality.lights) {
+      const p = new THREE.PointLight(0xffffff, 0, 50, 1.6);
+      this.scene.add(p);
+      this.points.push(p);
+    }
     const sh = this.quality.shadows;
     this.renderer.shadowMap.enabled = sh > 0;
     this.sun.castShadow = sh > 0;
@@ -297,28 +320,22 @@ export class Renderer3D {
     const D = o.h + pad;
     const H = o.height + pad * 0.5;
     const t = Math.max(1, Math.min(o.w, o.h) * 0.06);
-    const bar = (w, h, d, x, y, z) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.healMat);
-      m.position.set(x, y, z);
-      g.add(m);
-    };
     // A glowing frame round the whole building: a thick ring on the ground, the corners and
-    // the roof edge, so it reads from far above too.
+    // the roof edge, so it reads from far above too. One merged mesh: one draw call.
+    const bars = [];
     for (const y of [0.3, H]) {
       const h = y < 1 ? 0.6 : t * 0.5;
-      bar(W + t * 2, h, t, 0, y, (D + t) / 2);
-      bar(W + t * 2, h, t, 0, y, -(D + t) / 2);
-      bar(t, h, D, (W + t) / 2, y, 0);
-      bar(t, h, D, -(W + t) / 2, y, 0);
+      bars.push([W + t * 2, h, t, 0, y, (D + t) / 2], [W + t * 2, h, t, 0, y, -(D + t) / 2], [t, h, D, (W + t) / 2, y, 0], [t, h, D, -(W + t) / 2, y, 0]);
     }
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bar(t * 0.5, H, t * 0.5, sx * (W + t) / 2, H / 2, sz * (D + t) / 2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bars.push([t * 0.5, H, t * 0.5, sx * (W + t) / 2, H / 2, sz * (D + t) / 2]);
+    g.add(new THREE.Mesh(boxesGeometry(bars), this.healMat));
     const s = Math.max(o.w, o.h) * 0.3;
-    const cross = new THREE.Group();
-    for (const [w, h] of [[s, s * 0.32], [s * 0.32, s]]) cross.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, s * 0.32), this.healMat));
+    const cross = new THREE.Mesh(boxesGeometry([[s, s * 0.32, s * 0.32, 0, 0, 0], [s * 0.32, s, s * 0.32, 0, 0, 0]]), this.healMat);
     cross.position.y = o.height + s * 1.1;
     g.add(cross);
     g.userData.cross = cross;
     g.userData.baseY = cross.position.y;
+    g.userData.bob = s * 0.15;
     g.position.set(o.x, 0, o.y);
     this.scene.add(g);
     this.hospitalMarks.set(o, g);
@@ -376,7 +393,9 @@ export class Renderer3D {
     this.goldMat.opacity = 0.6 + 0.35 * Math.sin(this.t * 5);
   }
 
-  updateHospitalMarks() {
+  // Hospitals glow while they are worth smashing: within two sizes of the kaiju (a 5% heal or
+  // more). Smaller ones go dark, which also keeps a big kaiju's view free of markers.
+  updateHospitalMarks(stage) {
     if (!this.hospitalMarks) return;
     const pulse = 0.6 + 0.4 * Math.sin(this.t * 4);
     this.healMat.opacity = 0.55 + 0.4 * pulse;
@@ -385,9 +404,11 @@ export class Renderer3D {
         this.removeHospitalMark(o);
         continue;
       }
+      g.visible = stage - o.tier <= 2;
+      if (!g.visible) continue;
       const c = g.userData.cross;
       c.rotation.y = this.t * 1.5;
-      c.position.y = g.userData.baseY + Math.sin(this.t * 2.5) * c.children[0].geometry.parameters.width * 0.15;
+      c.position.y = g.userData.baseY + Math.sin(this.t * 2.5) * g.userData.bob;
     }
   }
 
@@ -791,17 +812,30 @@ export class Renderer3D {
           list[list.length - 3].lod = lod;
         }
       } else if (!o.walkable && !(rec && rec.collapse)) {
-        list.push(this.instFor(this.rInst, key, null), o, 1);
+        // Rubble gets coarser with distance too, and a pile a few pixels wide isn't drawn.
+        const px = view.px(o.x, o.y, size);
+        if (px < 5) continue;
+        const lod = px > 80 ? 0 : px > 25 ? 1 : 2;
+        list.push(this.instFor(this.rInst, `${key}:R${lod}`, null), o, 1);
         list[list.length - 3].rubbleOf = v;
+        list[list.length - 3].lod = lod;
+        list[list.length - 3].rubble = true;
       }
     }
     for (const map of [this.bInst, this.rInst]) for (const e of map.values()) e.n = 0;
     for (let i = 0; i < list.length; i += 3) list[i].n++;
+    // Only detailed buildings cast shadows; once the kaiju towers over the city (size 5+), only
+    // the full-detail ones near it do, which halves the shadow pass. Rubble is low and flat:
+    // its shadow is only worth drawing while the kaiju is small.
+    const stage = game.kaiju.stage;
+    const shadowLod = stage >= 5 ? 1 : 2;
+    const casts = (e) => (e.rubble ? e.lod === 0 && stage <= 3 : !(e.lod >= shadowLod));
     for (const map of [this.bInst, this.rInst]) {
       for (const e of map.values()) {
+        if (e.im) e.im.castShadow = casts(e);
         if (!e.n || (e.im && e.n <= e.cap)) continue;
-        if (!e.geo) e.geo = e.lodOf ? this.lodGeo(e.lodOf, e.lod) : this.rubbleGeo(e.rubbleOf);
-        this.ensureInst(e, e.n, !(e.lod >= 2));
+        if (!e.geo) e.geo = e.lodOf ? this.lodGeo(e.lodOf, e.lod) : this.rubbleGeo(e.rubbleOf, e.lod || 0);
+        this.ensureInst(e, e.n, casts(e));
       }
     }
     for (const map of [this.bInst, this.rInst]) for (const e of map.values()) e.n = 0;
@@ -1028,9 +1062,12 @@ export class Renderer3D {
     }
   }
 
-  rubbleGeo(v) {
-    let g = this.rubbleCache.get(v.key);
+  // A heap of the building's colours; `level` makes it coarser (voxels 2^level times bigger).
+  rubbleGeo(v, level = 0) {
+    const ck = `${v.key}:${level}`;
+    let g = this.rubbleCache.get(ck);
     if (g) return g;
+    const f = 2 ** level;
     const b = v.built;
     // Rubble takes the building's own most common bright colours plus concrete greys.
     const tally = new Map();
@@ -1042,17 +1079,17 @@ export class Renderer3D {
     }
     const colors = [...tally.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5).map((x) => x[0]);
     colors.push(0x8d8a83, 0x6f6c66, 0x4a4744);
-    const nx = b.dims.bx + 4;
-    const nz = b.dims.bz + 4;
-    const maxH = Math.max(2, Math.min(12, Math.round(b.dims.by * 0.2 + 1)));
+    const nx = Math.ceil((b.dims.bx + 4) / f);
+    const nz = Math.ceil((b.dims.bz + 4) / f);
+    const maxH = Math.max(1, Math.ceil(Math.max(2, Math.min(12, Math.round(b.dims.by * 0.2 + 1))) / f));
     const grid = new VoxelGrid(nx, maxH + 1, nz);
     for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
       const d = Math.hypot((x + 0.5 - nx / 2) / (nx / 2), (z + 0.5 - nz / 2) / (nz / 2));
-      const hh = Math.round((1 - d) * maxH * (0.55 + 0.45 * hash3(x >> 1, 0, z >> 1)) + hash3(x, 1, z) * 1.5);
+      const hh = Math.round((1 - d) * maxH * (0.55 + 0.45 * hash3(x >> 1, 0, z >> 1)) + hash3(x, 1, z) * (1.5 / f));
       for (let y = 0; y < hh; y++) grid.set(x, y, z, colors[Math.floor(hash3(x, y, z) * colors.length)]);
     }
-    g = toGeometry(meshGrid(grid, { v: b.dims.v, ox: nx / 2, oz: nz / 2, jitter: 0.1 }));
-    this.rubbleCache.set(v.key, g);
+    g = toGeometry(meshGrid(grid, { v: b.dims.v * f, ox: nx / 2, oz: nz / 2, jitter: 0.1 }));
+    this.rubbleCache.set(ck, g);
     return g;
   }
 
@@ -1236,16 +1273,13 @@ export class Renderer3D {
       }
     }
     cands.sort((a, b) => b.prio - a.prio);
-    const max = this.quality.lights;
-    for (let i = 0; i < POINT_LIGHTS; i++) {
+    for (let i = 0; i < this.points.length; i++) {
       const p = this.points[i];
-      const c = i < max ? cands[i] : null;
+      const c = cands[i];
       if (!c) {
         p.intensity = 0;
-        p.visible = false;
         continue;
       }
-      p.visible = true;
       p.position.set(c.x, c.y, c.z);
       p.color.setHex(c.color);
       p.intensity = c.intensity;
@@ -1401,7 +1435,7 @@ export class Renderer3D {
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
-    this.updateHospitalMarks();
+    this.updateHospitalMarks(k.stage);
     this.updateVaultMark(game);
     this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Charge trail

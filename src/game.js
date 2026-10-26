@@ -159,7 +159,9 @@ export class Game {
     const k = this.kaiju;
     const span = this.viewSpan();
     this.city.detail = k.stage >= 5 ? 1 : 0;
-    this.city.update(k.x, k.y, span * 1.3 + 520, initial ? Infinity : 4, span * 0.6 + 150);
+    // New blocks per frame: a big kaiju needs about half a block a frame, so two keeps up
+    // without a frame doing four blocks of generation at once.
+    this.city.update(k.x, k.y, span * 1.3 + 520, initial ? Infinity : k.stage >= 5 ? 2 : 4, span * 0.6 + 150);
   }
 
   // ---------------------------------------------------------------- elevated metro
@@ -399,6 +401,30 @@ export class Game {
   // The nearest thing worth eating at this size: guides the player when the area is cleared.
   findPrey(maxR = 6000) {
     const k = this.kaiju;
+    // From size 3 up, things big enough to count are rare: walk the loaded chunks' object lists
+    // rather than sweep a huge box of mostly empty grid cells (that sweep cost 40 ms a second at
+    // full size).
+    if (k.stage >= 3) {
+      // Nearest chunks first (each is one city block), stopping once no farther block can win.
+      const cell = WORLD.cell;
+      const chunks = [];
+      for (const ch of this.city.chunks.values()) chunks.push([Math.hypot((ch.c + 0.5) * cell - k.x, (ch.r + 0.5) * cell - k.y), ch]);
+      chunks.sort((a, b) => a[0] - b[0]);
+      let best = null;
+      let bestD = maxR;
+      for (const [cd, ch] of chunks) {
+        if (cd - cell > bestD) break;
+        for (const o of ch.objects) {
+          if (o.tier < k.stage || o.state !== 'intact') continue;
+          const d = Math.hypot(o.x - k.x, o.y - k.y);
+          if (d < bestD && canDamage(o.tier, k.stage, o.landmark)) {
+            bestD = d;
+            best = o;
+          }
+        }
+      }
+      return best;
+    }
     for (let R = 250; R <= maxR; R *= 2) {
       let best = null;
       let bestD = Infinity;
@@ -2391,9 +2417,6 @@ export class Game {
     const dist = Math.hypot(dx, dy) || 1;
     if (b.state !== 'donut') b.aim = Math.atan2(dy, dx);
     const speed = g ? g.speed * this.stage.speed : BOSS.speed;
-    const touch = () => {
-      if (dist < b.r + k.r + (g ? b.unit * 0.3 : 10)) this.takeDamage((g ? g.contact * b.D : BOSS.contactDmg * b.dmgMul) * dt, 'melee');
-    };
 
     if (b.state === 'enter') {
       b.walk += dt;
@@ -2412,12 +2435,6 @@ export class Game {
       b.x += b.chargeDir.x * step;
       b.y += b.chargeDir.y * step;
       b.chargeLeft -= step;
-      if (!b.chargeHit && Math.hypot(k.x - b.x, k.y - b.y) < b.r + k.r) {
-        b.chargeHit = true;
-        if (k.dodging > 0) this.perfectDodge(b.x, b.y);
-        this.takeDamage(g ? (g.chargeDmg || 0.2) * b.D : BOSS.chargeDmg * b.dmgMul, 'melee');
-        this.shake = Math.max(this.shake, 0.9);
-      }
       this.bossTrample(b);
       if (b.chargeLeft <= 0) {
         b.state = 'idle';
@@ -2438,17 +2455,10 @@ export class Game {
       b.y = ny;
       b.walk += dt * 3;
       b.dropT -= dt;
-      b.shotT = (b.shotT || 0) - dt;
-      if (b.shotT <= 0) {
-        // Sprinkles fly out of the window as it laps you.
-        b.shotT = 0.45;
-        this.bossShot(b, Math.atan2(k.y - b.y, k.x - b.x), 'bullet', 0.04 * b.D);
-      }
       if (b.dropT <= 0) {
         b.dropT = 0.28;
-        this.hazards.push({ kind: 'circle', x: b.x, y: b.y, r: b.unit * 0.9, t: 0, delay: 0.75, dmg: 0.05 * b.D, type: 'explosive', slow: 0.9, boss: true });
+        this.hazards.push({ kind: 'circle', x: b.x, y: b.y, r: b.unit * 0.9, t: 0, delay: 0.7, dmg: 0.05 * b.D, type: 'explosive', slow: 0.9, boss: true });
       }
-      touch();
       if (b.donutT <= 0) {
         b.state = 'idle';
         b.next = 1;
@@ -2510,13 +2520,15 @@ export class Game {
       }
       this.bossTrample(b);
     }
-    touch();
     if (b.phase === 1 && b.hp < b.maxHp * 0.5) {
       b.phase = 2;
       if (g) {
         this.emit('banner', { text: g.furious });
         this.shake = Math.max(this.shake, 0.5);
       } else {
+        // Enraged: the sweeping laser and missile waves join the rotation, and it attacks faster.
+        b.patterns = BOSS.patterns2;
+        b.patternIndex = 0;
         this.emit('banner', { text: `${BOSS.name} is enraged!` });
         for (let i = 0; i < 2; i++) {
           const p = this.spawnPoint('mech');
@@ -2528,7 +2540,7 @@ export class Game {
     if (b.next <= 0) {
       const pattern = b.patterns[b.patternIndex % b.patterns.length];
       b.patternIndex++;
-      b.next = (g ? GATE.interval : 3.3) * (b.phase === 2 ? 0.7 : 1);
+      b.next = (g ? GATE.interval : BOSS.interval) * (b.phase === 2 ? 0.7 : 1);
       if (g) this.bossQuip(b, pattern);
       this.bossAttack(pattern);
     }
@@ -2563,7 +2575,7 @@ export class Game {
     }
     // Health is counted in hits of the kaiju's own damage, so the fight lasts about as long
     // whatever was picked, and a little longer the higher the level.
-    const hp = this.stage.damage * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * this.diff.enemyHp;
+    const hp = this.stage.damage * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * (def.hpMul || 1) * this.diff.enemyHp;
     const dmgMul = 1 + (this.enemyScale().dmg - 1) * 0.5;
     this.boss = {
       isBoss: true, gate: k.stage, def, model: def.id, name: def.name, title: def.title,
@@ -2590,7 +2602,7 @@ export class Game {
     this.boss = {
       isBoss: true, name: BOSS.name, x, y, r: BOSS.r, hp: BOSS.hp * this.diff.enemyHp, maxHp: BOSS.hp * this.diff.enemyHp,
       state: 'enter', targetX: Math.max(BOSS.r, k.x - span * 0.45), targetY: y,
-      phase: 1, next: 2, patterns: ['barrage', 'laser', 'charge'], patternIndex: 0,
+      phase: 1, next: 2, patterns: BOSS.patterns, patternIndex: 0,
       aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: 1 + (this.enemyScale().dmg - 1) * 0.5,
     };
     this.shake = 1;
@@ -2608,52 +2620,80 @@ export class Game {
     const b = this.boss;
     const k = this.kaiju;
     if (b.gate) return this.gateAttack(b, pattern);
+    // The Coast Guard Mech. Everything it does is a red telegraph that lands quickly: sizes are
+    // in kaiju radii, so the dodge is a short sidestep or a charge, never a long run.
+    const u = k.r;
+    const m = b.dmgMul;
+    const p2 = b.phase === 2;
+    const T = p2 ? 0.88 : 1;
+    const lead = (t) => ({ x: k.x + k.vx * t * 0.8, y: k.y + k.vy * t * 0.8 });
+    const aimAt = (p) => Math.atan2(p.y - b.y, p.x - b.x);
+    const circle = (x, y, r, dmg, delay, extra = {}) => this.hazards.push({ kind: 'circle', x, y, r, t: 0, delay, dmg, type: 'explosive', boss: true, ...extra });
+    const line = (a, from, len, w, dmg, delay, beam = 0xff3b3b, extra = {}) => this.hazards.push({
+      kind: 'line', x1: from.x, y1: from.y, x2: from.x + Math.cos(a) * len, y2: from.y + Math.sin(a) * len, w, t: 0, delay, dmg, type: 'laser', beam, boss: true, ...extra,
+    });
+    const muzzle = (a) => ({ x: b.x + Math.cos(a) * b.r * 0.5, y: b.y + Math.sin(a) * b.r * 0.5 });
     if (pattern === 'barrage') {
-      const n = b.phase === 2 ? 12 : 8;
+      // Shells rain around where you are heading.
+      const n = p2 ? 16 : 10;
+      const c = lead(0.85 * T);
       for (let i = 0; i < n; i++) {
         const a = this.rng.range(0, Math.PI * 2);
-        const d = i === 0 ? 0 : this.rng.range(k.r * 1.2, k.r * 3);
-        this.hazards.push({ kind: 'circle', x: k.x + Math.cos(a) * d, y: k.y + Math.sin(a) * d, r: BOSS.barrageR, t: 0, delay: 1.3 + i * 0.07, dmg: BOSS.barrageDmg * b.dmgMul, type: 'explosive', from: { x: b.x, y: b.y } });
+        const d = i === 0 ? 0 : i === 1 ? u * 0.5 : this.rng.range(u * 1.2, u * 3.4);
+        const from = i === 1 ? k : c;
+        circle(from.x + Math.cos(a) * d, from.y + Math.sin(a) * d, u * 0.85, BOSS.barrageDmg * m, (0.85 + i * 0.05) * T, { from: { x: b.x, y: b.y } });
       }
     } else if (pattern === 'laser') {
-      const d = norm(k.x - b.x, k.y - b.y);
-      const len = k.r * 11;
-      const line = { x1: b.x + d.x * b.r * 0.5, y1: b.y + d.y * b.r * 0.5, x2: b.x + d.x * len, y2: b.y + d.y * len };
-      this.hazards.push({
-        kind: 'line', ...line, w: BOSS.laserW, t: 0, delay: 1.0, dmg: BOSS.laserDmg * b.dmgMul, type: 'laser', beam: 0xff3b3b,
-        onHit: () => {
-          for (const o of this.grid.query(Math.min(line.x1, line.x2) - 100, Math.min(line.y1, line.y2) - 100, Math.max(line.x1, line.x2) + 100, Math.max(line.y1, line.y2) + 100)) {
-            if (o.state === 'intact' && !o.landmark && distToSegment(o.x, o.y, line.x1, line.y1, line.x2, line.y2) < BOSS.laserW / 2 + Math.min(o.w, o.h) / 2) this.destroyObject(o, d, 'boss');
-          }
-        },
-      });
+      // Main gun at where you'll be; three barrels when enraged.
+      const a0 = aimAt(lead(0.75 * T));
+      for (const off of p2 ? [-0.3, 0, 0.3] : [0]) line(a0 + off, muzzle(a0 + off), u * 12, u * 0.8, BOSS.laserDmg * m, 0.75 * T);
+      const d = norm(Math.cos(a0), Math.sin(a0));
+      const hit = this.hazards[this.hazards.length - 1];
+      hit.onHit = () => {
+        for (const o of this.grid.query(b.x - u * 12, b.y - u * 12, b.x + u * 12, b.y + u * 12)) {
+          if (o.state === 'intact' && !o.landmark && distToSegment(o.x, o.y, hit.x1, hit.y1, hit.x2, hit.y2) < hit.w / 2 + Math.min(o.w, o.h) / 2) this.destroyObject(o, d, 'boss');
+        }
+      };
     } else if (pattern === 'charge') {
+      // The ram: the lane lights up and the hit lands as it starts; then it ploughs through.
       const d = norm(k.x - b.x, k.y - b.y);
-      const len = Math.hypot(k.x - b.x, k.y - b.y) + k.r * 2;
+      const len = Math.hypot(k.x - b.x, k.y - b.y) + u * 2.5;
       b.state = 'windup';
-      this.hazards.push({
-        kind: 'line', x1: b.x, y1: b.y, x2: b.x + d.x * len, y2: b.y + d.y * len, w: b.r * 1.2, t: 0, delay: 1.1, visualOnly: true,
+      line(Math.atan2(d.y, d.x), { x: b.x, y: b.y }, len, b.r * 1.3, BOSS.chargeDmg * m, (p2 ? 0.65 : 0.8), 0xff5555, {
         onHit: () => {
           if (!this.boss || this.boss.dead) return;
           b.state = 'charge';
           b.chargeDir = d;
           b.chargeLeft = len;
-          b.chargeHit = false;
         },
       });
+    } else if (pattern === 'cross') {
+      // Twin rail cannons cross where you stand: step out diagonally.
+      const c = lead(0.75 * T);
+      const a0 = this.rng.range(0, Math.PI);
+      for (const a of [a0, a0 + Math.PI / 2]) line(a, { x: c.x - Math.cos(a) * u * 6, y: c.y - Math.sin(a) * u * 6 }, u * 12, u * 0.9, BOSS.crossDmg * m, 0.75 * T, 0xffd23f);
+    } else if (pattern === 'sweep') {
+      // A searchlight laser sweeps across you: get behind it, or charge through.
+      const a0 = aimAt(k);
+      const dir = this.rng.chance(0.5) ? 1 : -1;
+      for (let i = 0; i < 8; i++) {
+        const a = a0 - dir * 0.85 + dir * (1.7 * i) / 7;
+        line(a, muzzle(a), u * 13, u * 0.7, BOSS.sweepDmg * m, 0.7 + i * 0.09);
+      }
+    } else if (pattern === 'missiles') {
+      // Three waves of missiles, each aimed at where you are going when it fires.
+      for (let w = 0; w < 3; w++) {
+        this.schedule(w * 0.45, () => {
+          if (!this.boss || this.boss.dead) return;
+          const c = lead(0.75);
+          for (let i = 0; i < 4; i++) {
+            const a = this.rng.range(0, Math.PI * 2);
+            const d = i === 0 ? 0 : this.rng.range(u * 0.6, u * 1.8);
+            circle(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d, u * 0.7, BOSS.missileDmg * m, 0.75 + i * 0.04, { from: { x: b.x, y: b.y } });
+          }
+        });
+      }
     }
-  }
-
-  // A boss projectile: slower than the kaiju can sidestep, like every other shot.
-  bossShot(b, angle, kind, dmg) {
-    const k = this.kaiju;
-    const sp = this.kaijuSpeed() * (kind === 'missile' ? 1.25 : 1.8);
-    const r = Math.max(0.4, b.unit * 0.18);
-    this.projectiles.push({
-      kind, x: b.x + Math.cos(angle) * b.r * 0.6, y: b.y + Math.sin(angle) * b.r * 0.6, vx: Math.cos(angle) * sp, vy: Math.sin(angle) * sp,
-      r, size: Math.max(r, k.r * 0.28), dmg, type: kind === 'bullet' ? 'bullet' : 'explosive', life: (b.unit * 18) / sp + 0.8, age: 0,
-      homing: kind === 'missile', h: b.r * 1.2, sedate: 0,
-    });
   }
 
   gateAttack(b, pattern) {
@@ -2665,13 +2705,16 @@ export class Game {
     const aimAt = () => Math.atan2(k.y - b.y, k.x - b.x);
     // Ground attacks land where you are heading, so running in a straight line is not enough.
     const lead = (t) => ({ x: k.x + k.vx * t * 0.8, y: k.y + k.vy * t * 0.8 });
+    // Every attack is a red telegraph that lands quickly (faster still when furious); a gate boss
+    // never hurts by touch.
+    const T = p2 ? 0.88 : 1;
     const circles = (n, spread, r, dmg, delay, extra = {}) => {
       const c = lead(delay);
       for (let i = 0; i < n; i++) {
         const a = this.rng.range(0, Math.PI * 2);
         const d = i === 0 ? 0 : i === 1 ? s * 0.4 : this.rng.range(s * 1.2, s * spread);
         const from = i === 1 ? k : c;
-        this.hazards.push({ kind: 'circle', x: from.x + Math.cos(a) * d, y: from.y + Math.sin(a) * d, r, t: 0, delay: delay + i * 0.08, dmg, type: 'explosive', from: { x: b.x, y: b.y }, boss: true, ...extra });
+        this.hazards.push({ kind: 'circle', x: from.x + Math.cos(a) * d, y: from.y + Math.sin(a) * d, r, t: 0, delay: (delay + i * 0.06) * T, dmg, type: 'explosive', from: { x: b.x, y: b.y }, boss: true, ...extra });
       }
     };
     const line = (x1, y1, x2, y2, w, dmg, delay, beam, extra = {}) => {
@@ -2679,25 +2722,16 @@ export class Game {
     };
     switch (pattern) {
       case 'pistol': {
-        // Telegraphed burst: a laser sight, then three (five when furious) rounds.
-        const a = aimAt();
-        const len = Math.hypot(k.x - b.x, k.y - b.y) + s * 4;
-        b.state = 'windup';
-        line(b.x, b.y, b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, s * 0.35, 0, 0.55, 0xff2a2a, {
-          visualOnly: true,
-          onHit: () => {
-            if (!alive()) return;
-            b.state = 'idle';
-            const n = p2 ? 5 : 3;
-            for (let i = 0; i < n; i++) {
-              this.schedule(i * 0.13, () => {
-                if (!alive()) return;
-                this.bossShot(b, aimAt() + this.rng.range(-0.05, 0.05), 'bullet', 0.05 * D);
-                this.fxEvent({ t: 'shot', kind: 'bullet', x: b.x, y: b.y });
-              });
-            }
-          },
-        });
+        // Laser sight, then the shot down it (a second, re-aimed one when furious).
+        const shoot = (delay) => {
+          const a = Math.atan2(lead(delay).y - b.y, lead(delay).x - b.x);
+          const len = Math.hypot(k.x - b.x, k.y - b.y) + s * 4;
+          line(b.x, b.y, b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, s * 0.45, 0.12 * D, delay, 0xff2a2a, {
+            onHit: () => alive() && this.fxEvent({ t: 'shot', kind: 'bullet', x: b.x, y: b.y }),
+          });
+        };
+        shoot(0.5 * T);
+        if (p2) this.schedule(0.35, () => alive() && shoot(0.45));
         break;
       }
       case 'blink': {
@@ -2714,30 +2748,28 @@ export class Game {
           break;
         }
         this.fx.rings.push({ x: b.x, y: b.y, r0: b.r * 2, r1: b.r * 0.3, life: 0.35, max: 0.35, color: 0x59c3ff, width: b.r * 0.3 });
-        b.state = 'windup';
-        this.schedule(0.45, () => {
-          if (!alive()) return;
-          b.state = 'idle';
-          const n = p2 ? 7 : 5;
-          const a0 = aimAt();
-          for (let i = 0; i < n; i++) this.bossShot(b, a0 + (i - (n - 1) / 2) * 0.16, 'bullet', 0.05 * D);
-          this.fxEvent({ t: 'shot', kind: 'burst', x: b.x, y: b.y });
-        });
+        // A fan of shots lights up from his new spot.
+        const n = p2 ? 7 : 5;
+        const a0 = aimAt();
+        for (let i = 0; i < n; i++) {
+          const a = a0 + (i - (n - 1) / 2) * 0.2;
+          line(b.x, b.y, b.x + Math.cos(a) * s * 9, b.y + Math.sin(a) * s * 9, s * 0.4, 0.07 * D, 0.55 * T, 0xff2a2a, i === 0 ? { onHit: () => alive() && this.fxEvent({ t: 'shot', kind: 'burst', x: b.x, y: b.y }) } : {});
+        }
         break;
       }
       case 'mines':
         // Exploding business cards scattered around the kaiju.
-        circles(p2 ? 8 : 5, 4, s * 1.4, 0.1 * D, 1.5);
+        circles(p2 ? 8 : 5, 4, s * 1.4, 0.1 * D, 1.0);
         break;
       case 'violation':
-        // Homing violation notices.
-        for (let i = 0, n = p2 ? 5 : 3; i < n; i++) this.bossShot(b, aimAt() + (i - (n - 1) / 2) * 0.45, 'missile', 0.05 * D);
+        // Violation notices land where you are heading.
+        circles(p2 ? 5 : 3, 2.4, s * 1.1, 0.07 * D, 0.8);
         this.fxEvent({ t: 'shot', kind: 'missile', x: b.x, y: b.y });
         break;
       case 'manager': {
-        // Calls in the local enforcement.
+        // Calls in the local enforcement (not when the streets are already full).
         const types = ESCALATION[b.gate].weights;
-        for (let i = 0, n = p2 ? 2 : 1; i < n; i++) {
+        for (let i = 0, n = this.units.length < 40 ? (p2 ? 2 : 1) : 0; i < n; i++) {
           const type = this.rng.weighted(types);
           const r = this.scaledDef(type).r;
           let pos = null;
@@ -2755,21 +2787,20 @@ export class Game {
         const d = norm(k.x - b.x, k.y - b.y);
         const len = Math.hypot(k.x - b.x, k.y - b.y) + k.r * 3;
         b.state = 'windup';
-        line(b.x, b.y, b.x + d.x * len, b.y + d.y * len, b.r * 1.3, 0, p2 ? 0.8 : 1.05, 0xff5555, {
-          visualOnly: true,
+        // The lane lights up and the hit lands as the charge starts; then it ploughs through.
+        line(b.x, b.y, b.x + d.x * len, b.y + d.y * len, b.r * 1.3, (b.def.chargeDmg || 0.16) * D, p2 ? 0.65 : 0.8, 0xff5555, {
           onHit: () => {
             if (!alive()) return;
             b.state = 'charge';
             b.chargeDir = d;
             b.chargeLeft = len;
-            b.chargeHit = false;
           },
         });
         break;
       }
       case 'scoops':
         // Lobbed scoops: each splat is a brain freeze that slows you down.
-        circles(p2 ? 9 : 6, 4, s * 1.25, 0.07 * D, 1.2, { slow: 1.6 });
+        circles(p2 ? 9 : 6, 4, s * 1.25, 0.07 * D, 0.85, { slow: 1.6 });
         break;
       case 'donut':
         b.state = 'donut';
@@ -2788,16 +2819,20 @@ export class Game {
         const dirn = (Math.cos(a0) * rel.y - Math.sin(a0) * rel.x) >= 0 ? 1 : -1;
         const sweep = p2 ? Math.PI * 2 : Math.PI * 1.4;
         b.state = 'windup';
-        b.swingT = 1.9;
+        b.swingT = 1.7;
         for (let i = 0; i < n; i++) {
           const a = a0 - dirn * 0.5 + dirn * ((sweep * i) / n);
-          this.hazards.push({ kind: 'circle', x: b.x + Math.cos(a) * R, y: b.y + Math.sin(a) * R, r: s * 1.25, t: 0, delay: 0.85 + (i * 1.0) / n, dmg: 0.13 * D, type: 'explosive', boss: true });
+          this.hazards.push({ kind: 'circle', x: b.x + Math.cos(a) * R, y: b.y + Math.sin(a) * R, r: s * 1.25, t: 0, delay: (0.7 + (i * 0.9) / n) * T, dmg: 0.13 * D, type: 'explosive', boss: true });
         }
-        this.schedule(1.9, () => {
+        this.schedule(1.7, () => {
           if (!alive()) return;
           if (b.state === 'windup') b.state = 'idle';
-          // Loose rivets fly off the end of the swing.
-          for (let i = 0; i < 5; i++) this.bossShot(b, aimAt() + (i - 2) * 0.18, 'bullet', 0.05 * D);
+          // Loose rivets fly off the end of the swing: three lit lanes.
+          const a1 = aimAt();
+          for (let i = 0; i < 3; i++) {
+            const a = a1 + (i - 1) * 0.22;
+            line(b.x, b.y, b.x + Math.cos(a) * s * 8, b.y + Math.sin(a) * s * 8, s * 0.4, 0.06 * D, 0.5, 0xb8c0cc);
+          }
         });
         break;
       }
@@ -2814,7 +2849,7 @@ export class Game {
           const cx = c.x + ux * off;
           const cy = c.y + uy * off;
           const half = s * 3.2;
-          line(cx - uy * half, cy + ux * half, cx + uy * half, cy - ux * half, s * 0.9, 0.12 * D, 1.1 + i * 0.18, 0x9aa3ad);
+          line(cx - uy * half, cy + ux * half, cx + uy * half, cy - ux * half, s * 0.9, 0.12 * D, (0.8 + i * 0.12) * T, 0x9aa3ad);
         }
         break;
       }
@@ -2828,7 +2863,7 @@ export class Game {
         const len = s * 12;
         for (const off of p2 ? [-0.35, 0, 0.35] : [0]) {
           const a = a0 + off;
-          line(b.x + Math.cos(a) * b.r * 0.5, b.y + Math.sin(a) * b.r * 0.5, b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, s, 0.22 * D, 1.0, 0xffd23f);
+          line(b.x + Math.cos(a) * b.r * 0.5, b.y + Math.sin(a) * b.r * 0.5, b.x + Math.cos(a) * len, b.y + Math.sin(a) * len, s, 0.22 * D, 0.75 * T, 0xffd23f);
         }
         break;
       }
@@ -2841,9 +2876,9 @@ export class Game {
             line(cx - Math.cos(a) * len, cy - Math.sin(a) * len, cx + Math.cos(a) * len, cy + Math.sin(a) * len, s * 0.8, 0.18 * D, delay, 0xff5a5a);
           }
         };
-        const c = lead(1.1);
-        cut(c.x, c.y, a0, 1.1);
-        if (p2) cut(k.x + k.vx * 1.4, k.y + k.vy * 1.4, a0 + Math.PI / 4, 1.8);
+        const c = lead(0.8);
+        cut(c.x, c.y, a0, 0.8 * T);
+        if (p2) cut(k.x + k.vx * 1.1, k.y + k.vy * 1.1, a0 + Math.PI / 4, 1.35);
         break;
       }
       case 'speech': {
@@ -2851,14 +2886,14 @@ export class Game {
         b.shield = true;
         b.speechT = 3.5;
         b.quipT = 1.5;
+        // His supporters turn up, but a long fight never floods the streets.
         const types = ESCALATION[b.gate].weights;
-        for (let i = 0; i < 2; i++) this.spawnGroup(this.rng.weighted(types));
+        if (this.units.length < 40) for (let i = 0; i < 2; i++) this.spawnGroup(this.rng.weighted(types));
         break;
       }
       case 'blimps':
-        // Campaign blimps carpet-bomb the area, and a flurry of pamphlets comes your way.
-        circles(p2 ? 12 : 8, 3.2, s * 1.3, 0.12 * D, 1.4);
-        for (let i = 0; i < 6; i++) this.bossShot(b, aimAt() + (i - 2.5) * 0.16, 'bullet', 0.05 * D);
+        // Campaign blimps carpet-bomb the area.
+        circles(p2 ? 12 : 8, 3.2, s * 1.3, 0.12 * D, 0.95);
         break;
       default:
         break;

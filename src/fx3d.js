@@ -178,6 +178,10 @@ export class FX {
     scene.add(this.aimLines);
 
     this.slashMeshes = new Map();
+    // Materials are pooled, never disposed mid-game: freeing the last user of a shader program
+    // makes three.js throw the program away and compile it again for the next effect.
+    this.slashMatPool = [];
+    this.hazMatPool = [];
     this.crackMeshes = new Map();
     this.beamCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     this.ringPool = [];
@@ -411,7 +415,12 @@ export class FX {
       const friendly = h.friendly;
       const color = friendly ? 0xffa628 : h.jet ? 0xffc828 : 0xff3030;
       if (!entry) {
-        const mk = (op) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, depthTest: false, depthWrite: false });
+        const mk = (op) => {
+          const m = this.hazMatPool.pop() || new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false });
+          m.color.setHex(color);
+          m.opacity = op;
+          return m;
+        };
         if (h.kind === 'circle') {
           const outer = new THREE.Mesh(this.circleGeo, mk(0.16));
           const inner = new THREE.Mesh(this.circleGeo, mk(0.32));
@@ -425,7 +434,11 @@ export class FX {
           edge.scale.set(h.r, 1, h.r);
           entry = { parts: [outer, inner, edge], inner };
           if (h.meteor) {
-            const rock = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xff7a1a }));
+            if (!this.rockGeo) {
+              this.rockGeo = new THREE.BoxGeometry(1, 1, 1);
+              this.rockMat = new THREE.MeshBasicMaterial({ color: 0xff7a1a });
+            }
+            const rock = new THREE.Mesh(this.rockGeo, this.rockMat);
             this.scene.add(rock);
             entry.parts.push(rock);
             entry.rock = rock;
@@ -468,8 +481,7 @@ export class FX {
       if (live.has(h)) continue;
       for (const o of entry.parts) {
         this.scene.remove(o);
-        o.material.dispose();
-        if (o === entry.rock) o.geometry.dispose();
+        if (o !== entry.rock) this.hazMatPool.push(o.material);
       }
       this.hazardMeshes.delete(h);
     }
@@ -565,10 +577,12 @@ export class FX {
         geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
         geo.setAttribute('uv2', new THREE.Float32BufferAttribute(uv, 2));
         geo.setIndex(idx);
-        const mat = new THREE.ShaderMaterial({
+        const mat = this.slashMatPool.pop() || new THREE.ShaderMaterial({
           vertexShader: SLASH_VS, fragmentShader: SLASH_FS, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-          blending: THREE.AdditiveBlending, uniforms: { uP: { value: 0 }, uColor: { value: new THREE.Color(sl.color) } },
+          blending: THREE.AdditiveBlending, uniforms: { uP: { value: 0 }, uColor: { value: new THREE.Color() } },
         });
+        mat.uniforms.uColor.value.setHex(sl.color);
+        mat.uniforms.uP.value = 0;
         m = new THREE.Mesh(geo, mat);
         m.renderOrder = 9;
         m.position.set(sl.x, sl.h, sl.y);
@@ -586,7 +600,7 @@ export class FX {
       if (live.has(sl)) continue;
       this.scene.remove(m);
       m.geometry.dispose();
-      m.material.dispose();
+      this.slashMatPool.push(m.material);
       this.slashMeshes.delete(sl);
     }
   }

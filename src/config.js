@@ -189,17 +189,21 @@ export const HEALING = { falloff: 10, recover: 0.03 };
 export const HOSPITAL = { heal: [0.25, 0.12, 0.05, 0.02] }; // by how many sizes below you it is
 export const DOCTOR_HEAL = { heal: 0.12, gap: [55, 85], chance: 0.06, maxStage: 2 };
 
+// The final boss. It never hurts by touch: every hit is a red telegraph (sizes in kaiju radii).
 export const BOSS = {
   name: 'Coast Guard Mech',
-  hp: 4500000,
+  hp: 6750000,
   r: 150,
   speed: 150,
-  contactDmg: 30,
-  barrageDmg: 140,
-  barrageR: 66,
-  laserDmg: 320,
-  laserW: 78,
-  chargeDmg: 300,
+  interval: 2.6, // seconds between attacks; 30% faster when enraged
+  patterns: ['barrage', 'laser', 'charge', 'cross', 'missiles'],
+  patterns2: ['barrage', 'sweep', 'charge', 'missiles', 'laser', 'cross', 'sweep'],
+  barrageDmg: 260,
+  laserDmg: 560,
+  chargeDmg: 640,
+  crossDmg: 420,
+  sweepDmg: 480,
+  missileDmg: 240,
   chargeSpeed: 900,
   arriveDelay: 6, // seconds after reaching Apex before the boss walks in
 };
@@ -212,31 +216,31 @@ export const GATE_BOSSES = [
   null,
   {
     id: 'kilowatt', name: 'Agent Kilowatt', title: 'Cyborg hitman. Sent to "handle" you.',
-    r: 1.3, speed: 0.8, keep: 5, contact: 0.04, patterns: ['pistol', 'blink', 'pistol', 'mines'],
+    r: 1.3, speed: 0.8, keep: 5, patterns: ['pistol', 'blink', 'pistol', 'mines'],
     quips: { pistol: ['Nothing personal.', 'Hold still.', 'Bang. Bang. Bang.'], blink: ['Over here.', 'Too slow.'], mines: ["Here's my card.", 'Networking!'] },
     furious: 'Kilowatt has removed his sunglasses.', defeat: 'Agent Kilowatt has been... decommissioned.',
   },
   {
     id: 'karen', name: 'KAREN-9000', title: 'HOA president. Power armour. Opinions.',
-    r: 1.4, speed: 0.75, keep: 3, contact: 0.05, chargeSpeed: 3.2, chargeDmg: 0.16, patterns: ['violation', 'charge', 'manager', 'violation', 'charge'],
+    r: 1.4, speed: 0.75, keep: 3, chargeSpeed: 3.2, chargeDmg: 0.16, patterns: ['violation', 'charge', 'manager', 'violation', 'charge'],
     quips: { violation: ["That's a violation!", 'Your lawn is TOO SMASHED.', 'I am filing a complaint.'], charge: ['Excuse me?!', 'I was HERE first!'], manager: ['I want to speak to your MANAGER.', 'Officers! THAT one!'] },
     furious: 'KAREN-9000 has escalated to corporate.', defeat: 'KAREN-9000 will be leaving a one-star review.',
   },
   {
     id: 'whippy', name: 'Mr. Whippy', title: 'Armoured ice-cream truck. The jingle never stops.',
-    r: 1.3, speed: 0.95, keep: 2, contact: 0.08, chargeSpeed: 3.6, chargeDmg: 0.2, patterns: ['scoops', 'donut', 'scoops', 'charge'],
+    r: 1.3, speed: 0.95, keep: 2, chargeSpeed: 3.6, chargeDmg: 0.2, patterns: ['scoops', 'donut', 'scoops', 'charge'],
     quips: { scoops: ['Brain freeze!', 'Two scoops!', 'Sprinkles are extra.'], donut: ['♪ Pop goes the weasel ♪', 'Wheeeee!'], charge: ['Beep beep!', 'No refunds!'] },
     furious: 'Mr. Whippy has switched to rocky road.', defeat: 'Mr. Whippy has melted.',
   },
   {
     id: 'bill', name: 'Wrecking Bill', title: 'Sentient demolition crane. Paid by the hour.',
-    r: 1.3, speed: 0.7, keep: 3, contact: 0.1, hits: 0.85, patterns: ['swing', 'beams', 'swing', 'unionBreak'],
+    r: 1.3, speed: 0.7, keep: 3, hits: 0.85, hpMul: 30, patterns: ['swing', 'beams', 'swing', 'unionBreak'],
     quips: { swing: ['Coming through!', 'Swing batter!', 'Mind the ball!'], beams: ['Heads up!', 'Load incoming!'], unionBreak: ['Union break. Fifteen minutes.', 'Contractually obligated nap.'] },
     furious: 'Wrecking Bill is working overtime.', defeat: 'Wrecking Bill has clocked out. Permanently.',
   },
   {
     id: 'mayor', name: 'The Mecha-Mayor', title: 'City Hall, standing up for itself.',
-    r: 1.3, speed: 0.75, keep: 3, contact: 0.1, hits: 0.85, patterns: ['taxLaser', 'budgetCuts', 'speech', 'blimps', 'taxLaser', 'budgetCuts'],
+    r: 1.3, speed: 0.75, keep: 3, hits: 0.85, hpMul: 30, patterns: ['taxLaser', 'budgetCuts', 'speech', 'blimps', 'taxLaser', 'budgetCuts'],
     quips: { taxLaser: ['Time to pay your fair share!', 'Audit beam, engage!'], budgetCuts: ['Budget cuts!', 'Slashing spending!'], speech: ['My fellow citizens...', 'Four more years!', 'I will now filibuster.'], blimps: ['Vote Mayor!', 'Campaign drop!'] },
     furious: 'The Mecha-Mayor has declared a state of emergency.', defeat: 'The Mecha-Mayor has been voted out.',
   },

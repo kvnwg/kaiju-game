@@ -5,9 +5,9 @@ import {
   newSave, migrateV1, rollover, ECONOMY, syncEnergy, spendEnergy, nextEnergyIn, energyCap, openCrate, pityLeft, crateOdds,
   addItem, levelUp, levelCost, resetItem, merge, mergeFodder, mergeAll, equip, autoEquip, loadout, power, recommendedPower,
   buyMutation, mutationCost, runRewards, applyRun, questState, claimQuest, claimQuestBonus, DAILY_QUESTS, claimLogin, loginReady,
-  addPassXp, passTier, claimPass, patrolPending, claimPatrol, quickPatrol, purchase, productVisible, adsLeft, useAd, adEnergy,
-  buyEnergy, spinWheel, buyDeal, starUp, unlockKaiju, addAccountXp, featureOpen, claimCardDaily, claimGrowth, notifications,
-  RARITY, GEAR, CRATES, EPIC,
+  addPassXp, passTier, claimPass, patrolPending, claimPatrol, quickPatrol, adsLeft, useAd, adEnergy, adGems,
+  buyEnergy, spinWheel, buyDeal, starUp, unlockKaiju, addAccountXp, featureOpen, notifications, buySkin,
+  RARITY, GEAR, CRATES, EPIC, SKINS,
 } from '../src/meta.js';
 
 const T0 = new Date(2026, 9, 26, 10, 0, 0).getTime();
@@ -233,7 +233,7 @@ test('the login calendar pays once a day and walks a 7-day loop', () => {
   assert.equal(s.cur.gems, 30);
 });
 
-test('the Rampage Pass gives free rewards to everyone and premium rewards after purchase', () => {
+test('the Rampage Pass pays its free track to everyone and its bonus track for an ad a tier', () => {
   const s = newSave(T0);
   s.account.level = 5;
   addPassXp(s, 350);
@@ -241,13 +241,9 @@ test('the Rampage Pass gives free rewards to everyone and premium rewards after 
   assert.ok(claimPass(s, 1, false));
   assert.equal(claimPass(s, 1, false), null);
   assert.equal(claimPass(s, 4, false), null, 'tier not reached');
-  assert.equal(claimPass(s, 1, true), null, 'premium not bought');
-  assert.ok(productVisible(s, 'passPlus', T0));
-  purchase(s, 'passPlus', T0);
-  assert.ok(s.pass.premium);
-  assert.equal(passTier(s), 13, 'Pass+ skips 10 tiers');
-  assert.ok(claimPass(s, 1, true));
-  assert.equal(s.purchases.spent, 19.99);
+  assert.ok(claimPass(s, 1, true, undefined, T0), 'bonus tier, after its ad');
+  assert.equal(claimPass(s, 1, true, undefined, T0), null, 'once a tier');
+  assert.equal(claimPass(s, 4, true, undefined, T0), null, 'bonus tier not reached');
 });
 
 test('Patrol accrues scrap for up to 12 hours; Quick Patrol pays 2 hours for energy or an ad', () => {
@@ -264,35 +260,19 @@ test('Patrol accrues scrap for up to 12 hours; Quick Patrol pays 2 hours for ene
   assert.ok(quickPatrol(s, 'energy', T0 + 20 * HOUR));
 });
 
-test('purchases grant their contents; gem packs double the first time; cards pay daily', () => {
+test('no real-money store: gems come from play and from ads, 30 an ad with no daily cap', () => {
   const s = newSave(T0);
-  assert.equal(productVisible(s, 'first', T0), false, 'first pack appears at account level 2');
-  addAccountXp(s, 200, T0);
-  assert.equal(s.account.level, 2);
-  assert.ok(productVisible(s, 'first', T0));
-  purchase(s, 'first', T0);
-  assert.equal(productVisible(s, 'first', T0), false, 'once only');
-  assert.ok(s.skins.owned.golden);
-  assert.ok(s.gear.items.some((i) => i.id === 'sawTeeth' && i.rarity === EPIC));
   const g = s.cur.gems;
-  purchase(s, 'gems330', T0);
-  assert.equal(s.cur.gems, g + 660);
-  purchase(s, 'gems330', T0);
-  assert.equal(s.cur.gems, g + 990);
-  purchase(s, 'apex', T0);
-  assert.equal(energyCap(s, T0), 50);
-  assert.ok(claimCardDaily(s, 'apex', T0));
-  assert.equal(claimCardDaily(s, 'apex', T0), null);
-  assert.ok(claimCardDaily(s, 'apex', T0 + 24 * HOUR));
-  assert.equal(energyCap(s, T0 + 31 * 24 * HOUR), 30, 'the card runs out');
-  assert.equal(productVisible(s, 'starter', T0), false);
-  addAccountXp(s, 250, T0);
-  assert.ok(productVisible(s, 'starter', T0), 'starter pack opens at level 3 for 72 hours');
-  assert.equal(productVisible(s, 'starter', T0 + 73 * HOUR), false);
-  s.account.level = 10;
-  purchase(s, 'growth', T0);
-  assert.ok(claimGrowth(s));
-  assert.equal(claimGrowth(s), null);
+  for (let i = 0; i < 25; i++) assert.ok(adGems(s, T0));
+  assert.equal(s.cur.gems, g + 25 * ECONOMY.adGems);
+  assert.equal(ECONOMY.adGems, 30);
+  assert.equal(energyCap(s, T0), ECONOMY.energyCap);
+  assert.equal(s.purchases, undefined, 'no purchase records');
+  // Every skin can be earned in play: for gems or from the pass.
+  for (const sk of Object.values(SKINS)) assert.ok(sk.gems || sk.how, sk.name);
+  s.cur.gems = SKINS.golden.gems;
+  assert.ok(buySkin(s, 'golden'));
+  assert.equal(s.cur.gems, 0);
 });
 
 test('the wheel, deals and kaiju unlocks work end to end', () => {

@@ -1023,12 +1023,13 @@ html, body {
 .deal .dprice { font-family: var(--display); font-size: 9px; display: inline-flex; align-items: center; gap: 3px; }
 .locked-note { color: var(--muted); font-size: 14px; padding: 10px; background: var(--panel); text-align: center; }
 .energy-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.gem-packs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.gem-pack { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 4px 8px; background: linear-gradient(160deg, #24395e, var(--panel) 70%); border: var(--p) solid var(--ink); color: var(--text); cursor: pointer; font: inherit; }
-.gem-pack b { font-family: var(--display); font-weight: 400; font-size: 13px; }
-.gem-pack small { font-size: 12px; color: var(--muted); }
-.gem-pack em { position: absolute; top: 4px; right: 4px; font-style: normal; font-family: var(--display); font-size: 7px; padding: 2px 4px; background: var(--hp); color: #fff; }
-.gem-pack .btn { padding: 8px 10px 6px; font-size: 10px; }
+/* Free gems: the shop's headline, a rewarded ad as often as the player likes. */
+.free-gems { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 12px; background: linear-gradient(160deg, #24395e, #1d2030 70%); border: var(--p) solid var(--ink); clip-path: var(--notch); }
+.free-gems .ic.huge { flex: none; width: 52px; height: 52px; filter: drop-shadow(0 0 10px rgba(111, 240, 255, 0.55)); animation: bob 1.2s steps(2) infinite; }
+.free-gems .fg-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.free-gems .fg-text b { font-family: var(--display); font-weight: 400; font-size: 12px; }
+.free-gems .fg-text small { font-size: 13px; color: var(--muted); }
+.free-gems .btn { flex: none; }
 .skins { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .skin-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; background: var(--panel); border: var(--p) solid var(--ink); font-size: 13px; text-align: center; }
 .skin-card b { font-family: var(--display); font-weight: 400; font-size: 9px; }
@@ -1062,15 +1063,21 @@ html, body {
 .mut.max { border-color: var(--gold); }
 
 /* ---------- hub modals ---------- */
-.hub-modal { z-index: 60; }
+.hub-modal { z-index: 60; align-items: flex-start; }
+.hub-modal > * { margin: auto; }
 .hub-modal .panel { max-height: calc(100vh - 32px); overflow-y: auto; }
+/* Crate openings get a solid backdrop so the cards are all you see. */
+.hub-modal[data-kind="crate"] { background: radial-gradient(circle at 50% 35%, rgba(46, 34, 78, 0.97), rgba(8, 9, 14, 0.98) 70%); }
 .toast { position: absolute; left: 50%; bottom: 120px; z-index: 70; transform: translateX(-50%); padding: 8px 14px 6px; background: rgba(13, 14, 20, 0.92); border: var(--p) solid var(--ink); font-family: var(--display); font-size: 10px; color: var(--text); opacity: 0; pointer-events: none; white-space: nowrap; }
 .toast.show { animation: toastIn 2.2s steps(1, end) forwards, chipPop 0.2s steps(2) both; }
 @keyframes toastIn { 0% { opacity: 1; } 100% { opacity: 0; } }
 .rewards-panel h2 { color: var(--gold); }
-.ad-panel .ad-screen { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 30px 10px; background: #000; border: var(--p) solid var(--ink); font-family: var(--display); }
-.ad-panel .ad-screen b { font-weight: 400; font-size: 12px; }
-.ad-panel .ad-count { font-size: 32px; color: var(--growth); }
+/* Placeholder for a video ad where the CrazyGames SDK isn't present; above everything else. */
+.ad-break { position: absolute; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.92); }
+.ad-break .ad-screen { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(100%, 360px); padding: 34px 12px; background: #000; border: var(--p) solid #2a2d38; font-family: var(--display); text-align: center; }
+.ad-break .ad-screen b { font-weight: 400; font-size: 13px; }
+.ad-break .ad-screen small { font-family: var(--body); font-size: 13px; color: var(--muted); }
+.ad-break .ad-count { font-size: 32px; color: var(--growth); }
 .odds { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 15px; }
 .odds td { padding: 6px; border-bottom: var(--p) solid var(--line); }
 .odds td:last-child { text-align: right; font-family: var(--display); font-size: 11px; }
@@ -1095,19 +1102,39 @@ html, body {
 .ptier.reached { opacity: 1; }
 .ptier .pn { display: grid; place-items: center; font-family: var(--display); font-size: 10px; background: var(--panel-hi); }
 .prew { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; justify-content: center; padding: 6px; background: var(--panel-hi); border: var(--p) solid var(--ink); color: var(--text); cursor: pointer; font: inherit; }
-.prew.prem { background: #3b3220; }
-.prew.prem.lock { filter: grayscale(0.7); }
+.prew.prem { position: relative; background: #3b3220; }
+.prew.prem.adclaim::after { content: '\25B6'; position: absolute; top: 2px; right: 4px; font-size: 9px; color: #7dff5a; }
 .prew.got { opacity: 0.35; }
 .prew:not(:disabled):not(.got) { outline: var(--p) solid var(--growth); }
 .prew .rchip { border: none; background: none; padding: 0; }
 .patrol-art { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 10px 0; }
 .patrol-art .qbar { width: 80%; }
-.wheel-wrap { position: relative; width: min(280px, 72vw); aspect-ratio: 1; margin: 12px auto; }
-.wheel { position: absolute; inset: 0; border-radius: 50%; border: 4px solid var(--ink); background: conic-gradient(#ff7a1a 0 14.28%, #3a6ad8 0 28.57%, #6fdc4f 0 42.86%, #b468ff 0 57.14%, #ffd84a 0 71.43%, #ff4d5a 0 85.71%, #6ff0ff 0 100%); }
-.wseg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: rotate(calc(var(--a) + 360deg / var(--n) / 2)); }
-.wseg span { position: absolute; left: -26px; top: calc(-1 * min(140px, 36vw) + 14px); width: 52px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink); }
-.wseg b { font-family: var(--display); font-weight: 400; font-size: 9px; }
-.wheel-pin { position: absolute; left: 50%; top: -10px; width: 20px; height: 24px; transform: translateX(-50%); background: #fff; clip-path: polygon(0 0, 100% 0, 50% 100%); filter: drop-shadow(0 2px 0 var(--ink)); }
+.wheel-panel { text-align: center; }
+.wheel-wrap { --ws: min(300px, 76vw); position: relative; width: var(--ws); height: var(--ws); margin: 20px auto 14px; }
+.wheel-wrap::before { content: ''; position: absolute; inset: -10%; border-radius: 50%; background: radial-gradient(circle, rgba(255, 205, 90, 0.28), transparent 62%); pointer-events: none; }
+.wheel { position: absolute; inset: 5.5%; border-radius: 50%; will-change: transform; }
+.wheel-face { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.wheel-face .wdiv line { stroke: #f5d27a; stroke-width: 1.4; }
+.wheel-face .wsl.win { animation: wheelWin 0.3s steps(2) 6; }
+@keyframes wheelWin { 50% { filter: brightness(1.8); } }
+.wseg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: rotate(var(--a)); }
+.wseg span { position: absolute; left: -30px; top: calc(var(--ws) * -0.37); width: 60px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: #fff; text-shadow: var(--outline); }
+.wseg .ic { width: 26px; height: 26px; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45)); }
+.wseg b { font-family: var(--display); font-weight: 400; font-size: 10px; line-height: 1; }
+.wseg.jackpot b { color: #3a2000; text-shadow: 0 1px 0 #fff3b0; }
+.wseg.win span { animation: wsegWin 0.3s steps(2) 6; }
+@keyframes wsegWin { 50% { transform: scale(1.25); } }
+.wheel-rim { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.wheel-rim .bulb { fill: #fff6c8; stroke: #0d0e14; stroke-width: 1; }
+.wheel-rim .bulb.b1 { animation: bulbs 0.9s steps(1) infinite; }
+.wheel-rim .bulb.b2 { animation: bulbs 0.9s steps(1) infinite 0.45s; }
+.wheel-wrap.spinning .wheel-rim .bulb { animation-duration: 0.24s; }
+@keyframes bulbs { 50% { fill: #7a5a1e; } }
+.wheel-hub { position: absolute; left: 50%; top: 50%; width: 20%; height: 20%; transform: translate(-50%, -50%); border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 40% 35%, #fff2b0, #e2a832 55%, #8a5a12); border: 3px solid var(--ink); box-shadow: inset 0 0 0 3px #f5d27a; }
+.wheel-hub .ic { width: 52%; height: 52%; }
+.wheel-pin { position: absolute; left: 50%; top: -5%; width: 13%; transform: translateX(-50%); transform-origin: 50% 30%; z-index: 2; filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.45)); }
+.wheel-pin.tick { animation: pinTick 0.14s ease-out; }
+@keyframes pinTick { 0% { transform: translateX(-50%) rotate(-24deg); } 100% { transform: translateX(-50%) rotate(0deg); } }
 .results2 { max-width: 560px; text-align: center; }
 .results2 h1 { font-size: 24px; text-transform: uppercase; text-shadow: 3px 3px 0 var(--ink); }
 .results2.won h1 { color: #b6ff8f; }
@@ -1131,24 +1158,25 @@ html, body {
 @keyframes crateGone { to { transform: scale(2); opacity: 0; } }
 .crate-cards { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: -110px; width: 100%; }
 .crate-open.many .crate-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.ccard { position: relative; width: 120px; height: 160px; opacity: 0; transform: translateY(20px) scale(0.8); background: var(--panel-hi); border: var(--p) solid var(--ink); overflow: hidden; }
-.crate-open.many .ccard { width: 100%; height: 124px; }
+/* The face sits in the flow so a card grows to fit its rewards; the spinning reel overlays it. */
+.ccard { position: relative; display: grid; width: 120px; min-height: 160px; opacity: 0; transform: translateY(20px) scale(0.8); background: var(--panel-hi); border: var(--p) solid var(--ink); overflow: hidden; }
+.crate-open.many .ccard { width: 100%; min-height: 124px; }
 .crate-open.opening .ccard { animation: cardIn 0.25s ease-out forwards; animation-delay: calc(0.6s + var(--d) * 0.04s); }
 @keyframes cardIn { to { opacity: 1; transform: none; } }
 .ccard .reel { position: absolute; inset: 0; display: flex; justify-content: center; overflow: hidden; }
 .ccard .strip { display: flex; flex-direction: column; gap: 14px; padding-top: 10px; animation: reelSpin 0.35s linear infinite; }
 .ccard .strip .ic { width: 40px; height: 40px; opacity: 0.6; filter: blur(0.5px); }
 @keyframes reelSpin { from { transform: translateY(0); } to { transform: translateY(-50%); } }
-.ccard .face { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px; background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--rc) 45%, transparent), var(--panel-hi) 70%); border: var(--p) solid var(--rc); text-align: center; opacity: 0; transform: translateY(-40%); }
+.ccard .face { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px; background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--rc) 45%, transparent), var(--panel-hi) 70%); border: var(--p) solid var(--rc); text-align: center; opacity: 0; transform: translateY(-40%); }
 .ccard .face b { font-family: var(--display); font-weight: 400; font-size: 9px; line-height: 1.3; }
 .ccard .face small { color: var(--rc); font-size: 13px; }
-.ccard .face .extra { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
-.ccard .face .extra .rchip { padding: 1px 3px; font-size: 10px; }
+.ccard .face .extra { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; max-width: 100%; }
+.ccard .face .extra .rchip { flex-wrap: wrap; justify-content: center; max-width: 100%; padding: 1px 3px; font-size: 10px; line-height: 1.2; }
 .ccard.landed .reel { display: none; }
 .ccard.landed .face { animation: faceLand 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) forwards; }
 @keyframes faceLand { to { opacity: 1; transform: none; } }
 .ccard.landed { box-shadow: 0 0 22px color-mix(in srgb, var(--rc) 70%, transparent); }
-.crate-open .done-btn { opacity: 0; pointer-events: none; }
+.crate-open .done-btn { position: sticky; bottom: 10px; z-index: 2; opacity: 0; pointer-events: none; }
 .crate-open.done .done-btn { opacity: 1; pointer-events: auto; }
 .crate-open.flash::after { content: ''; position: fixed; inset: 0; background: var(--rc); opacity: 0; animation: rareFlash 0.5s ease-out; pointer-events: none; }
 @keyframes rareFlash { 0% { opacity: 0.45; } 100% { opacity: 0; } }
@@ -1158,7 +1186,8 @@ html, body {
   .hub-top .xpbar { display: none; }
   .side-btn { width: 50px; min-height: 48px; font-size: 6px; }
   .side-btn .ic { width: 22px; height: 22px; }
-  .deals, .gem-packs { grid-template-columns: repeat(2, 1fr); }
+  .deals { grid-template-columns: repeat(2, 1fr); }
+  .free-gems .ic.huge { width: 40px; height: 40px; }
   .skins { grid-template-columns: repeat(2, 1fr); }
   .crate-open.many .crate-cards { grid-template-columns: repeat(3, 1fr); }
   .stats-row { grid-template-columns: repeat(2, 1fr); }

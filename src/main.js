@@ -6,6 +6,7 @@ import { loadSave, writeSave, clearSave } from './storage.js';
 import { KAIJU, WORLD } from './config.js';
 import { Sfx, Music } from './audio.js';
 import { Hub } from './hub.js';
+import { Platform } from './platform.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 
 const canvas = document.getElementById('game');
@@ -27,6 +28,19 @@ ui.sfx = sfx;
 sfx.setMuted(settings.sound === false);
 const music = new Music(sfx);
 music.setEnabled(settings.music !== false);
+
+// Ads (CrazyGames, or a placeholder elsewhere). The game goes quiet and holds still while one plays.
+const platform = new Platform();
+platform.loadingStart();
+let mutedBeforeAd = null;
+platform.onAdStart = () => {
+  mutedBeforeAd = sfx.muted;
+  sfx.setMuted(true);
+};
+platform.onAdEnd = () => {
+  if (mutedBeforeAd !== null) sfx.setMuted(mutedBeforeAd);
+  mutedBeforeAd = null;
+};
 
 // How hard the soundtrack should hit right now: menu 0, then by size and threat, bosses 4.
 function musicState() {
@@ -269,6 +283,7 @@ function onRunEnd(results) {
   const levelsBefore = save.account.level;
   applyRun(save, results, ctx, rewards, {}, now());
   persist();
+  if (results.won) platform.happytime();
   let doubled = false;
   const show = () => hub.showRunResults(results, rewards, ctx, {
     doubled,
@@ -286,7 +301,8 @@ function onRunEnd(results) {
     },
     onAgain: () => startRun(lastSettings),
   });
-  show();
+  // An ad break after every match, then the results.
+  platform.showAd('midgame').then(show);
 }
 
 // The augment pick, with the extra reroll behind a rewarded ad.
@@ -396,7 +412,8 @@ function frame(now) {
   }
   if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
-    if (inRun && !paused) {
+    platform.setPlaying(inRun && !paused && game.state === 'playing' && !platform.adPlaying);
+    if (inRun && !paused && !platform.adPlaying) {
       const v = input.get();
       const w = renderer.worldDir(v.x, v.y);
       game.setInput(w.x, w.y);
@@ -459,7 +476,7 @@ function boot() {
     return;
   }
   // The very first session drops straight into the suburbs as Rex: no login, no menus.
-  hub = new Hub({ app: document.getElementById('app'), getSave: () => save, persist, onPlay: (opts) => startRun(opts), sfx, getNow: now });
+  hub = new Hub({ app: document.getElementById('app'), getSave: () => save, persist, onPlay: (opts) => startRun(opts), sfx, platform, getNow: now });
   hub.debug = debug;
   hub.onReset = () => {
     clearSave();
@@ -471,6 +488,7 @@ function boot() {
   else if (params.has('hub')) showHub('battle');
   else showTitle();
   loading.classList.add('hidden');
+  platform.loadingStop();
   requestAnimationFrame(frame);
 }
 
@@ -479,4 +497,4 @@ window.addEventListener('resize', () => renderer && renderer.resize());
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, sfx, startRun, showHub, save: () => save, persist };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, sfx, platform, startRun, showHub, save: () => save, persist };

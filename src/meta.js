@@ -1,6 +1,7 @@
 // The meta game around the runs: currencies, energy, account level, chapters, gear with a merge
-// ladder, crates with pity counters, a store, rewarded-ad caps, quests, a login calendar, the
-// Rampage Pass, Patrol idle rewards, the Lucky Wheel, the Mutation tree and kaiju stars.
+// ladder, crates with pity counters, a shop paid in gems, scrap and rewarded ads (no real-money
+// purchases), quests, a login calendar, the Rampage Pass, Patrol idle rewards, the Lucky Wheel,
+// the Mutation tree and kaiju stars.
 // No DOM: everything here is plain functions over a save object, with the time passed in, so it
 // can be tested and later moved behind a server without changes.
 import { createRng } from './rng.js';
@@ -15,7 +16,7 @@ export const ECONOMY = {
   energyRegenMs: 12 * 60000,
   energyAd: 5,
   energyGemPack: { energy: 15, gems: 100, perDay: 3 },
-  apexEnergyCap: 20,
+  adGems: 30, // gems per rewarded ad, as many times as the player likes
   levelUpEnergy: 5,
   levelUpGems: 20,
   quickPatrolEnergy: 15,
@@ -23,8 +24,6 @@ export const ECONOMY = {
   quickPatrolHours: 2,
   patrolCapHours: 12,
   reviveGems: [30, 60],
-  piggyCap: 2000,
-  piggyBreak: 600,
 };
 
 export const RARITY = [
@@ -121,7 +120,7 @@ export const CRATES = {
 
 // Features open with account level, one at a time.
 export const FEATURES = {
-  gear: 2, firstPack: 2, shop: 2, quests: 3, wheel: 3, starter: 3, mutations: 4, growthFund: 4,
+  gear: 2, shop: 2, quests: 3, wheel: 3, mutations: 4,
   pass: 5, patrol: 5, hard: 5, kaiju: 6, eggAd: 8, deals: 8,
 };
 
@@ -129,7 +128,8 @@ export const AD_PLACEMENTS = {
   double: { cap: 3, name: 'Double run rewards' },
   energy: { cap: 3, name: '+5 energy' },
   crate: { cap: 1, name: 'Free Supply Crate' },
-  gems: { cap: 2, name: '30 free gems' },
+  gems: { cap: Infinity, name: '30 gems' },
+  pass: { cap: Infinity, name: 'Bonus pass reward' },
   wheel: { cap: 5, name: 'Lucky Wheel spin' },
   patrol: { cap: 1, name: 'Free Quick Patrol' },
   deal: { cap: 1, name: 'Free Daily Deal' },
@@ -158,47 +158,24 @@ export const LOGIN_REWARDS = [
 
 export const PASS = { tiers: 30, xpPerTier: 100, seasonDays: 28 };
 
+// Eight equal slices on the wheel; the odds come from the weights (out of 100).
 export const WHEEL = [
-  { reward: { scrap: 500 }, weight: 30 },
+  { reward: { scrap: 500 }, weight: 28 },
   { reward: { dnaAny: 5 }, weight: 20 },
   { reward: { gems: 10 }, weight: 15 },
-  { reward: { scrap: 1500 }, weight: 15 },
   { reward: { energy: 5 }, weight: 10 },
-  { reward: { gems: 30 }, weight: 8 },
+  { reward: { scrap: 1500 }, weight: 13 },
+  { reward: { keys: { supply: 1 } }, weight: 6 },
+  { reward: { gems: 30 }, weight: 6 },
   { reward: { keys: { egg: 1 } }, weight: 2 },
 ];
 
 export const SKINS = {
-  golden: { name: 'Golden', how: 'First Purchase Pack', tint: [1, 0.78, 0.25], mix: 0.55, metal: true },
+  golden: { name: 'Golden', gems: 1500, tint: [1, 0.78, 0.25], mix: 0.55, metal: true },
   shadow: { name: 'Shadow', gems: 800, tint: [0.32, 0.18, 0.5], mix: 0.6 },
   neon: { name: 'Neon', gems: 1200, tint: [0.15, 0.95, 1], mix: 0.45, glow: true },
   zombie: { name: 'Zombie', how: 'Rampage Pass tier 30', tint: [0.45, 0.62, 0.35], mix: 0.6 },
 };
-
-export const GROWTH_FUND = [[5, 300], [10, 500], [15, 800], [20, 1000], [25, 1200], [30, 1500], [35, 1700], [40, 2000]];
-
-// The store's real-money products. In the prototype a purchase is simulated (no charge); in the
-// app these SKUs map one to one onto App Store and Google Play products.
-export const PRODUCTS = {
-  first: { name: 'First Purchase Pack', price: 1.99, value: '10x value', grant: { items: [['sawTeeth', EPIC]], gems: 300, scrap: 5000, skin: 'golden' } },
-  starter: { name: 'Starter Pack', price: 4.99, value: '6x value', grant: { gems: 980, keys: { egg: 2 }, shards: { ember: 30 } } },
-  chapter1: { name: 'Chapter Pack I', price: 2.99, grant: { gems: 300, dnaEach: 5, items: [['graniteHide', EPIC]] } },
-  chapter2: { name: 'Chapter Pack II', price: 6.99, grant: { gems: 680, dnaEach: 10, items: [['razorClaws', EPIC]], keys: { egg: 1 } } },
-  chapter3: { name: 'Chapter Pack III', price: 9.99, grant: { gems: 1280, dnaEach: 20, items: [['titanHeart', EPIC]], keys: { egg: 2 } } },
-  monthly: { name: 'Monthly Card', price: 4.99, grant: { gems: 300 }, card: 'monthly', days: 30, daily: 100 },
-  apex: { name: 'Apex Card', price: 9.99, grant: { gems: 680 }, card: 'apex', days: 30, daily: 200 },
-  pass: { name: 'Rampage Pass', price: 9.99, pass: 0 },
-  passPlus: { name: 'Rampage Pass+', price: 19.99, pass: 10 },
-  growth: { name: 'Growth Fund', price: 6.99, growth: true },
-  piggy: { name: 'Gem Piggy', price: 2.99, piggy: true },
-  gems60: { name: 'Pile of Gems', price: 0.99, gems: 60 },
-  gems330: { name: 'Bag of Gems', price: 4.99, gems: 330 },
-  gems680: { name: 'Sack of Gems', price: 9.99, gems: 680 },
-  gems1400: { name: 'Crate of Gems', price: 19.99, gems: 1400 },
-  gems3600: { name: 'Vault of Gems', price: 49.99, gems: 3600 },
-  gems7800: { name: 'Kaiju Hoard', price: 99.99, gems: 7800 },
-};
-export const GEM_PACKS = ['gems60', 'gems330', 'gems680', 'gems1400', 'gems3600', 'gems7800'];
 
 // ---------------------------------------------------------------- time helpers
 const pad = (n) => String(n).padStart(2, '0');
@@ -276,19 +253,9 @@ export function normalize(s, now = Date.now()) {
   const pass = def(s, 'pass', {});
   def(pass, 'season', 1);
   def(pass, 'xp', 0);
-  def(pass, 'premium', false);
   def(pass, 'free', {});
   def(pass, 'prem', {});
   def(s, 'patrol', { since: now });
-  def(s, 'piggy', 0);
-  const buy = def(s, 'purchases', {});
-  def(buy, 'bought', {}); // sku -> count
-  def(buy, 'spent', 0);
-  def(buy, 'ledger', []);
-  def(buy, 'gemFirst', {});
-  def(buy, 'growthClaimed', {});
-  def(buy, 'cards', {}); // id -> expiry time
-  def(buy, 'starterUntil', 0);
   const skins = def(s, 'skins', {});
   def(skins, 'owned', {});
   def(skins, 'equipped', null);
@@ -333,22 +300,19 @@ export function genDeals(day) {
 export function rollover(s, now = Date.now()) {
   const day = dayKey(now);
   if (s.daily.day !== day) {
-    s.daily = { day, progress: {}, claimed: {}, bonus: false, ads: {}, deals: genDeals(day), dealsBought: {}, energyBuys: 0, quickPatrols: 0, cardClaims: {} };
+    s.daily = { day, progress: {}, claimed: {}, bonus: false, ads: {}, deals: genDeals(day), dealsBought: {}, energyBuys: 0, quickPatrols: 0 };
   }
   const week = weekKey(now);
   if (s.weekly.week !== week) s.weekly = { week, progress: {}, claimed: {}, bonus: false, ads: {} };
   // Seasons of the pass run back to back from the day the save was made.
   const season = Math.floor((now - s.created) / (PASS.seasonDays * DAY)) + 1;
-  if (s.pass.season !== season) s.pass = { season, xp: 0, premium: false, free: {}, prem: {} };
+  if (s.pass.season !== season) s.pass = { season, xp: 0, free: {}, prem: {} };
   syncEnergy(s, now);
 }
 
 // ---------------------------------------------------------------- energy
-export function cardActive(s, id, now = Date.now()) {
-  return (s.purchases.cards[id] || 0) > now;
-}
-export function energyCap(s, now = Date.now()) {
-  return ECONOMY.energyCap + (cardActive(s, 'apex', now) ? ECONOMY.apexEnergyCap : 0);
+export function energyCap() {
+  return ECONOMY.energyCap;
 }
 export function syncEnergy(s, now = Date.now()) {
   const cap = energyCap(s, now);
@@ -433,7 +397,7 @@ export function xpToLevel(level) {
 export function featureOpen(s, feature) {
   return s.settings.unlockAll || s.account.level >= (FEATURES[feature] || 1);
 }
-// Returns the levels gained; each pays energy and gems, and level 3 starts the starter offer.
+// Returns the levels gained; each pays energy and gems.
 export function addAccountXp(s, xp, now = Date.now()) {
   const a = s.account;
   a.xp += xp;
@@ -444,7 +408,6 @@ export function addAccountXp(s, xp, now = Date.now()) {
     gained.push(a.level);
     s.cur.energy += ECONOMY.levelUpEnergy;
     s.cur.gems += ECONOMY.levelUpGems;
-    if (a.level === FEATURES.starter && !s.purchases.starterUntil) s.purchases.starterUntil = now + 72 * HOUR;
     if (a.level === KAIJU_META.ember.level) s.unlocked.ember = true;
   }
   return gained;
@@ -670,7 +633,7 @@ export function runRewards(s, results, { chapter = 1, mode = 'normal' } = {}, rn
   const stage = results.stage || 1;
   const won = Boolean(results.won);
   const loot = mode === 'nightmare' ? 2.2 : mode === 'hard' ? 1.5 : 1;
-  const r = { scrap: 0, gems: 0, dna: {}, xp: 0, passXp: 0, items: [], geneCores: 0, keys: {}, piggy: 0, notes: [] };
+  const r = { scrap: 0, gems: 0, dna: {}, xp: 0, passXp: 0, items: [], geneCores: 0, keys: {}, notes: [] };
   r.scrap = Math.round(400 * Math.pow(1.25, chapter - 1) * (0.25 + 0.15 * stage) * (won ? 1.5 : 1) * loot);
   const dnaCount = 4 + stage + (won ? 2 : 0);
   const equippedSlots = GEAR_SLOTS.filter((sl) => equippedItem(s, sl.id)).map((sl) => sl.id);
@@ -689,7 +652,6 @@ export function runRewards(s, results, { chapter = 1, mode = 'normal' } = {}, rn
       r.gems += 20;
       r.firstBosses = (r.firstBosses || 0) + 1;
     }
-    r.piggy += 2;
   }
   // First time reaching sizes 3, 5 and Apex in this chapter: a milestone chest.
   for (const st of [3, 5, 6]) {
@@ -707,7 +669,6 @@ export function runRewards(s, results, { chapter = 1, mode = 'normal' } = {}, rn
     r.firstClear = true;
     r.gems += MODES[mode].firstClearGems;
     r.geneCores += 1;
-    r.piggy += 10;
     const ch = CHAPTERS[Math.min(CHAPTERS.length, chapter) - 1];
     const options = GEAR_IDS.filter((id) => GEAR[id].slot === ch.featured);
     r.items.push([rng.pick(options), mode === 'normal' ? 2 : 3]);
@@ -721,7 +682,6 @@ export function applyRun(s, results, ctx, rewards, { doubled = false } = {}, now
   const m = doubled ? 2 : 1;
   const dna = Object.fromEntries(Object.entries(rewards.dna).map(([k, v]) => [k, v * m]));
   const out = grant(s, { scrap: rewards.scrap * m, gems: rewards.gems, dna, geneCores: rewards.geneCores, items: rewards.items, xp: rewards.xp, passXp: rewards.passXp * m, keys: rewards.keys });
-  s.piggy = Math.min(ECONOMY.piggyCap, s.piggy + rewards.piggy);
   for (const st of results.gateKills || []) s.chapter.bossFirsts[`${chapter}:${mode}:${st}`] = true;
   for (const st of rewards.milestones || []) s.chapter.milestones[`${chapter}:${st}`] = true;
   if (results.won) {
@@ -824,10 +784,11 @@ export function passReward(tier, premium) {
   if (tier % 2 === 0) return { dnaAny: 6 };
   return { scrap: 800 };
 }
-export function claimPass(s, tier, premium, rng) {
+// The bonus track pays a tier at a time for a rewarded ad, which the hub plays first.
+export function claimPass(s, tier, premium, rng, now = Date.now()) {
   if (tier > passTier(s) || tier < 1) return null;
   const book = premium ? s.pass.prem : s.pass.free;
-  if (book[tier] || (premium && !s.pass.premium)) return null;
+  if (book[tier] || (premium && !useAd(s, 'pass', now))) return null;
   book[tier] = true;
   return grant(s, passReward(tier, premium), rng);
 }
@@ -835,7 +796,7 @@ export function passWaiting(s) {
   let n = 0;
   for (let t = 1; t <= passTier(s); t++) {
     if (!s.pass.free[t]) n++;
-    if (s.pass.premium && !s.pass.prem[t]) n++;
+    if (!s.pass.prem[t]) n++;
   }
   return n;
 }
@@ -852,7 +813,7 @@ export function bestChapter(s) {
 }
 export function patrolRate(s, now = Date.now()) {
   return {
-    scrap: (300 + 60 * bestChapter(s)) * (cardActive(s, 'monthly', now) ? 1.1 : 1),
+    scrap: 300 + 60 * bestChapter(s),
     dna: 1,
     xp: 20,
   };
@@ -868,15 +829,12 @@ export function claimPatrol(s, now = Date.now(), rng) {
   s.patrol.since = now;
   return grant(s, { scrap: p.scrap, dnaAny: p.dna, xp: p.xp }, rng);
 }
-// Two hours of Patrol at once: for energy (3 a day), by ad (1 a day) or free with the Apex Card.
+// Two hours of Patrol at once: for energy (3 a day) or by ad (1 a day).
 export function quickPatrol(s, how, now = Date.now(), rng) {
   rollover(s, now);
   if (how === 'energy') {
     if (s.daily.quickPatrols >= ECONOMY.quickPatrolPerDay || !spendEnergy(s, ECONOMY.quickPatrolEnergy, now)) return null;
     s.daily.quickPatrols++;
-  } else if (how === 'apex') {
-    if (!cardActive(s, 'apex', now) || (s.daily.apexPatrols || 0) >= 3) return null;
-    s.daily.apexPatrols = (s.daily.apexPatrols || 0) + 1;
   } else if (how === 'ad') {
     if (!useAd(s, 'patrol', now)) return null;
   } else return null;
@@ -898,17 +856,13 @@ export function useAd(s, id, now = Date.now()) {
   book[id] = (book[id] || 0) + 1;
   return true;
 }
-// The Apex Card skips the ad itself but keeps the reward.
-export function adsSkipped(s, now = Date.now()) {
-  return cardActive(s, 'apex', now);
-}
 export function adEnergy(s, now = Date.now()) {
   if (!useAd(s, 'energy', now)) return null;
   return grant(s, { energy: ECONOMY.energyAd });
 }
 export function adGems(s, now = Date.now()) {
   if (!useAd(s, 'gems', now)) return null;
-  return grant(s, { gems: 30 });
+  return grant(s, { gems: ECONOMY.adGems });
 }
 export function buyEnergy(s, now = Date.now()) {
   rollover(s, now);
@@ -998,71 +952,7 @@ export function buyDeal(s, i, now = Date.now(), rng) {
   return grant(s, d.give, rng);
 }
 
-// ---------------------------------------------------------------- store
-export function productVisible(s, sku, now = Date.now()) {
-  const p = PRODUCTS[sku];
-  const bought = s.purchases.bought[sku] || 0;
-  const cleared = (n) => Boolean(s.chapter.cleared[`${n}:normal`]);
-  switch (sku) {
-    case 'first': return !bought && featureOpen(s, 'firstPack');
-    case 'starter': return !bought && featureOpen(s, 'starter') && now < s.purchases.starterUntil;
-    case 'chapter1': return !bought && cleared(1);
-    case 'chapter2': return !bought && cleared(3) && Boolean(s.purchases.bought.chapter1);
-    case 'chapter3': return !bought && cleared(5) && Boolean(s.purchases.bought.chapter2);
-    case 'pass': case 'passPlus': return !s.pass.premium && featureOpen(s, 'pass');
-    case 'growth': return !bought && featureOpen(s, 'growthFund');
-    case 'piggy': return s.piggy >= ECONOMY.piggyBreak;
-    default: return Boolean(p);
-  }
-}
-
-// A purchase. The prototype grants immediately; the app would wait for the store's receipt and
-// the server's validation before calling this.
-export function purchase(s, sku, now = Date.now(), rng) {
-  const p = PRODUCTS[sku];
-  if (!p) return null;
-  if (['first', 'starter', 'chapter1', 'chapter2', 'chapter3', 'growth', 'piggy', 'pass', 'passPlus'].includes(sku) && !productVisible(s, sku, now)) return null;
-  s.purchases.bought[sku] = (s.purchases.bought[sku] || 0) + 1;
-  s.purchases.spent = Math.round((s.purchases.spent + p.price) * 100) / 100;
-  s.purchases.ledger.push({ sku, price: p.price, at: now });
-  let out = {};
-  if (p.grant) out = grant(s, p.grant, rng);
-  if (p.gems) {
-    const first = !s.purchases.gemFirst[sku];
-    s.purchases.gemFirst[sku] = true;
-    out = grant(s, { gems: first ? p.gems * 2 : p.gems }, rng);
-  }
-  if (p.card) s.purchases.cards[p.card] = Math.max(now, s.purchases.cards[p.card] || 0) + p.days * DAY;
-  if (p.pass !== undefined) {
-    s.pass.premium = true;
-    if (p.pass) addPassXp(s, p.pass * PASS.xpPerTier);
-  }
-  if (p.piggy) {
-    out = grant(s, { gems: s.piggy }, rng);
-    s.piggy = 0;
-  }
-  syncEnergy(s, now);
-  return out;
-}
-export function claimCardDaily(s, id, now = Date.now()) {
-  rollover(s, now);
-  if (!cardActive(s, id, now) || s.daily.cardClaims[id]) return null;
-  s.daily.cardClaims[id] = true;
-  return grant(s, { gems: PRODUCTS[id].daily });
-}
-export function growthClaimable(s) {
-  if (!s.purchases.bought.growth) return [];
-  return GROWTH_FUND.filter(([lvl]) => s.account.level >= lvl && !s.purchases.growthClaimed[lvl]);
-}
-export function claimGrowth(s) {
-  const ready = growthClaimable(s);
-  let gems = 0;
-  for (const [lvl, g] of ready) {
-    s.purchases.growthClaimed[lvl] = true;
-    gems += g;
-  }
-  return gems ? grant(s, { gems }) : null;
-}
+// ---------------------------------------------------------------- skins
 export function buySkin(s, id) {
   const sk = SKINS[id];
   if (!sk || s.skins.owned[id] || !sk.gems || !pay(s, { gems: sk.gems })) return false;
@@ -1079,8 +969,6 @@ export function notifications(s, now = Date.now()) {
     pass: featureOpen(s, 'pass') ? passWaiting(s) : 0,
     patrol: featureOpen(s, 'patrol') && patrolPending(s, now).hours >= 1 ? 1 : 0,
     wheel: featureOpen(s, 'wheel') ? adsLeft(s, 'wheel', now) : 0,
-    cards: ['monthly', 'apex'].filter((id) => cardActive(s, id, now) && !s.daily.cardClaims[id]).length,
-    growth: growthClaimable(s).length,
     freeCrate: adsLeft(s, 'crate', now) + (s.crates.freeFirst ? 0 : 1) + (s.cur.keys.supply || 0) + (s.cur.keys.egg || 0),
   };
 }

@@ -116,7 +116,8 @@ export class UI {
     this.growthFill.style.width = `${growth * 100}%`;
     this.growthText.textContent = `Size ${k.stage} · ${s.name}`;
     const gated = k.stage < MAX_STAGE && growth >= 1 && !game.gateCleared[k.stage];
-    this.growthPct.textContent = k.stage >= MAX_STAGE ? 'MAX' : gated ? 'BOSS' : `${Math.floor(growth * 100)}%`;
+    // At full size the full bar says it all (and "MAX" would crowd the size name on a phone).
+    this.growthPct.textContent = k.stage >= MAX_STAGE ? '' : gated ? 'BOSS' : `${Math.floor(growth * 100)}%`;
     this.stageNum.textContent = k.level;
     this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
     this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';

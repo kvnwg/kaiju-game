@@ -54,6 +54,9 @@ export class Terrain {
     this.uGrain = { value: 0.5 };
     this.night = 0;
     this.waterColor = new THREE.Color(0x3a8ac0);
+    // Water materials are reused, never disposed: freeing the last one would throw its shader
+    // away, and the next lake to stream in would compile it again mid-game.
+    this.waterPool = [];
     // Wave normal map shared by every water tile (420 / 140: tiles seamlessly).
     const n = 256;
     const nc = document.createElement('canvas');
@@ -99,7 +102,7 @@ export class Terrain {
     if (t.water) {
       this.scene.remove(t.water);
       t.water.geometry.dispose();
-      t.water.material.dispose();
+      this.waterPool.push(t.water.material);
       t.field.dispose();
     }
   }
@@ -580,24 +583,11 @@ export class Terrain {
       field.magFilter = THREE.LinearFilter;
       field.minFilter = THREE.LinearFilter;
       field.needsUpdate = true;
-      const wm = new THREE.MeshPhongMaterial({ color: this.waterColor, specular: 0x4a5a6a, shininess: 45, transparent: true, opacity: 0.9, normalMap: this.waterNormal, normalScale: new THREE.Vector2(0.5, 0.5), depthWrite: false });
-      const fs = N / n1;
-      const fo = 0.5 / n1;
-      wm.onBeforeCompile = (shader) => {
-        shader.uniforms.uField = { value: field };
-        shader.vertexShader = shader.vertexShader
-          .replace('#include <common>', '#include <common>\nvarying vec2 vTUv;')
-          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTUv = uv;');
-        shader.fragmentShader = shader.fragmentShader
-          .replace('#include <common>', '#include <common>\nuniform sampler2D uField;\nvarying vec2 vTUv;')
-          .replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
-            float fWet = texture2D(uField, vTUv * ${fs.toFixed(6)} + ${fo.toFixed(6)}).r;
-            float fAA = fwidth(fWet) * 0.9 + 0.002;
-            diffuseColor.a *= smoothstep(0.5 - fAA, 0.5 + fAA, fWet);
-            float foam = 1.0 - smoothstep(0.5, 0.54, fWet);`)
-          .replace('#include <output_fragment>', 'outgoingLight += vec3(0.32) * foam;\n#include <output_fragment>');
-      };
-      wm.customProgramCacheKey = () => 'water-tile';
+      const wm = this.waterPool.pop() || this.makeWaterMaterial();
+      wm.color.copy(this.waterColor);
+      wm.userData.uField.value = field;
+      wm.userData.uFS.value = N / n1;
+      wm.userData.uFO.value = 0.5 / n1;
       const water = new THREE.Mesh(new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2), wm);
       water.position.set(x0 + size / 2, 1, y0 + size / 2);
       water.renderOrder = 2;
@@ -617,5 +607,28 @@ export class Terrain {
     }
     this.tiles.set(key, tile);
     return tile;
+  }
+
+  // The water surface: the tile's wet field (a texture) cuts the outline and adds foam.
+  makeWaterMaterial() {
+    const wm = new THREE.MeshPhongMaterial({ color: this.waterColor, specular: 0x4a5a6a, shininess: 45, transparent: true, opacity: 0.9, normalMap: this.waterNormal, normalScale: new THREE.Vector2(0.5, 0.5), depthWrite: false });
+    const u = { uField: { value: null }, uFS: { value: 1 }, uFO: { value: 0 } };
+    wm.userData = u;
+    wm.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, u);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vTUv;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTUv = uv;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D uField;\nuniform float uFS;\nuniform float uFO;\nvarying vec2 vTUv;')
+        .replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
+          float fWet = texture2D(uField, vTUv * uFS + uFO).r;
+          float fAA = fwidth(fWet) * 0.9 + 0.002;
+          diffuseColor.a *= smoothstep(0.5 - fAA, 0.5 + fAA, fWet);
+          float foam = 1.0 - smoothstep(0.5, 0.54, fWet);`)
+        .replace('#include <output_fragment>', 'outgoingLight += vec3(0.32) * foam;\n#include <output_fragment>');
+    };
+    wm.customProgramCacheKey = () => 'water-tile';
+    return wm;
   }
 }
