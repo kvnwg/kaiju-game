@@ -665,6 +665,7 @@ export class Game {
     const dir = norm(target.x - k.x, target.y - k.y);
     k.lastAttack = { kind: atk.kind, x: target.x, y: target.y, t: 0.25 };
     k.attackCount++;
+    this.fxEvent({ t: 'attack', kind: atk.kind });
     k.facing = k.moving ? k.facing : dir;
     if (atk.kind === 'bite') {
       this.damageTarget(target, dmg, dir, 'bite');
@@ -1077,8 +1078,8 @@ export class Game {
     const k = this.kaiju;
     const span = this.viewSpan();
     const want = k.stage <= 3 ? CROWD.people : Math.round(CROWD.people * 0.6);
-    const maxR = Math.max(120, span * (initial ? 1.4 : 0.9));
-    const minR = initial ? 10 : span * 0.5;
+    const maxR = Math.max(120, span * (initial ? 1.4 : 1.3));
+    const minR = initial ? 10 : span * 1.0;
     let tries = 0;
     while (this.people.length < want && tries++ < want * 4) {
       const a = this.rng.range(0, Math.PI * 2);
@@ -1112,7 +1113,8 @@ export class Game {
         const x = r.x0 + (r.x1 - r.x0) * t;
         const y = r.y0 + (r.y1 - r.y0) * t;
         const d = Math.hypot(x - k.x, y - k.y);
-        if (d > Math.max(400, span * 1.2) || (!initial && d < span * 0.4)) continue;
+        // New cars drive in from beyond the edge of the screen, never pop up in view.
+        if (d > Math.max(400, span * 1.6) || (!initial && d < span * 1.1)) continue;
         this.traffic.push({
           isCar: true, road: r, t, dir: this.rng.chance(0.5) ? 1 : -1, x, y, heading: 0,
           speed: this.rng.range(28, 44), hp: CROWD.carHp, maxHp: CROWD.carHp, tier: 2, dead: false,
@@ -1292,10 +1294,28 @@ export class Game {
       const dirx = (rr.x1 - rr.x0) * c.dir;
       const diry = (rr.y1 - rr.y0) * c.dir;
       const n = norm(dirx, diry);
-      // Drive on the right-hand lane.
-      c.x = rr.x0 + (rr.x1 - rr.x0) * c.t - n.y * 12;
-      c.y = rr.y0 + (rr.y1 - rr.y0) * c.t + n.x * 12;
-      c.heading = Math.atan2(n.y, n.x);
+      // Drive on the right-hand lane. The car steers toward its lane spot rather than snapping
+      // to it, so turns at junctions and U-turns at dead ends are smooth arcs.
+      const tx = rr.x0 + (rr.x1 - rr.x0) * c.t - n.y * 12;
+      const ty = rr.y0 + (rr.y1 - rr.y0) * c.t + n.x * 12;
+      const lag = Math.hypot(tx - c.x, ty - c.y);
+      if (!c.placed || lag > 60) {
+        c.x = tx;
+        c.y = ty;
+        c.heading = Math.atan2(n.y, n.x);
+        c.placed = true;
+      } else {
+        const f = Math.min(1, dt * 7);
+        const ox = c.x;
+        const oy = c.y;
+        c.x += (tx - c.x) * f;
+        c.y += (ty - c.y) * f;
+        const mvx = c.x - ox;
+        const mvy = c.y - oy;
+        const want = Math.hypot(mvx, mvy) > 0.02 ? Math.atan2(mvy, mvx) : Math.atan2(n.y, n.x);
+        const dh = Math.atan2(Math.sin(want - c.heading), Math.cos(want - c.heading));
+        c.heading += dh * Math.min(1, dt * 6);
+      }
       c.flash = Math.max(0, c.flash - dt);
       if (dk > Math.max(500, span * 1.8)) c.dead = true;
     }

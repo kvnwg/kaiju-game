@@ -141,8 +141,9 @@ export class Sfx {
 
   gulp() {
     if (!this.ok('gulp', 0.06)) return;
-    this.tone({ type: 'triangle', f0: 380, f1: 140, dur: 0.11, vol: 0.22 });
-    this.tone({ type: 'square', f0: 900, f1: 600, dur: 0.03, vol: 0.05 });
+    this.tone({ type: 'triangle', f0: 380, f1: 140, dur: 0.11, vol: 0.24 });
+    this.tone({ type: 'sine', f0: 220, f1: 90, dur: 0.16, vol: 0.2, delay: 0.05 });
+    this.noise({ dur: 0.06, vol: 0.08, f0: 1200, f1: 300, type: 'bandpass', q: 3, delay: 0.04 });
   }
 
   squeak() {
@@ -151,10 +152,36 @@ export class Sfx {
     this.tone({ type: 'square', f0: f, f1: f * 1.5, dur: 0.07, vol: 0.05 });
   }
 
+  // A meaty chomp: teeth clack, a wet crunch in a few quick bites, and a low thump, all a
+  // little deeper the bigger the kaiju is.
   chomp() {
     if (!this.ok('chomp', 0.06)) return;
-    this.noise({ dur: 0.07, vol: 0.2, f0: 2600, f1: 700, type: 'bandpass', q: 1.6 });
-    this.tone({ type: 'square', f0: 220, f1: 90, dur: 0.06, vol: 0.1 });
+    const deep = 1 - Math.min(0.6, (this.stage - 1) * 0.12);
+    const jit = () => 0.85 + Math.random() * 0.3;
+    this.noise({ dur: 0.025, vol: 0.32, f0: 4200 * deep * jit(), f1: 2600 * deep, type: 'bandpass', q: 4 });
+    for (let i = 0; i < 3; i++) {
+      this.noise({ dur: 0.05, vol: 0.24 - i * 0.05, f0: 2400 * deep * jit(), f1: 500 * deep, type: 'bandpass', q: 1.3, delay: 0.02 + i * 0.045 });
+    }
+    this.noise({ dur: 0.09, vol: 0.12, f0: 900 * deep, f1: 250, type: 'lowpass', q: 1, delay: 0.03 });
+    this.tone({ type: 'sine', f0: 150 * deep, f1: 55 * deep, dur: 0.12, vol: 0.3 });
+    this.tone({ type: 'square', f0: 260 * deep * jit(), f1: 90 * deep, dur: 0.05, vol: 0.07 });
+  }
+
+  // The kaiju's own swings: a jaw snap for bites, a heavy thump for pounds, a crackle for zaps.
+  attack(kind) {
+    if (!this.ok('attack', 0.07)) return;
+    const deep = 1 - Math.min(0.6, (this.stage - 1) * 0.12);
+    if (kind === 'bite') {
+      this.noise({ dur: 0.03, vol: 0.28, f0: 5000 * deep, f1: 3000 * deep, type: 'bandpass', q: 5 });
+      this.noise({ dur: 0.08, vol: 0.18, f0: 2200 * deep, f1: 600, type: 'bandpass', q: 1.4, delay: 0.015 });
+      this.tone({ type: 'sine', f0: 130 * deep, f1: 50, dur: 0.1, vol: 0.22 });
+    } else if (kind === 'pound') {
+      this.tone({ type: 'sine', f0: 120 * deep, f1: 38, dur: 0.22, vol: 0.4 });
+      this.noise({ dur: 0.16, vol: 0.2, f0: 1200, f1: 150, q: 0.7 });
+    } else {
+      this.noise({ dur: 0.12, vol: 0.14, f0: 7000, f1: 2500, type: 'highpass', q: 0.8 });
+      this.tone({ type: 'sawtooth', f0: 1800, f1: 300, dur: 0.1, vol: 0.05 });
+    }
   }
 
   burp() {
@@ -265,6 +292,7 @@ export class Sfx {
   handleVfx(events, game) {
     if (!this.ctx) return;
     const k = game.kaiju;
+    this.stage = k.stage;
     for (const e of events) {
       switch (e.t) {
         case 'destroy': {
@@ -297,6 +325,9 @@ export class Sfx {
           break;
         case 'chomp':
           this.chomp();
+          break;
+        case 'attack':
+          this.attack(e.kind);
           break;
         case 'swallow':
           this.gulp();
