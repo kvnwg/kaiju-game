@@ -165,7 +165,7 @@ export const THREAT = {
 };
 // The military keeps pace with your build: every level-up makes new units tougher and
 // harder-hitting.
-export const ENEMY_SCALING = { hpPerLevel: 0.05, dmgPerLevel: 0.036 };
+export const ENEMY_SCALING = { hpPerLevel: 0.05, dmgPerLevel: 0.032 };
 // One named elite per size, with a big reward.
 export const ELITES = [
   null,

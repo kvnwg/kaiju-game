@@ -680,6 +680,8 @@ export function runRewards(s, results, { chapter = 1, mode = 'normal' } = {}, rn
   }
   r.xp = 100 + 40 * stage;
   r.passXp = 20 + 5 * stage;
+  if (results.vaultGems) r.gems += results.vaultGems;
+  if (results.objectiveDone) r.keys = { supply: 1 };
   // First kills of each size boss in this chapter and mode.
   for (const st of results.gateKills || []) {
     const key = `${chapter}:${mode}:${st}`;
@@ -718,7 +720,7 @@ export function applyRun(s, results, ctx, rewards, { doubled = false } = {}, now
   const { chapter = 1, mode = 'normal' } = ctx;
   const m = doubled ? 2 : 1;
   const dna = Object.fromEntries(Object.entries(rewards.dna).map(([k, v]) => [k, v * m]));
-  const out = grant(s, { scrap: rewards.scrap * m, gems: rewards.gems, dna, geneCores: rewards.geneCores, items: rewards.items, xp: rewards.xp, passXp: rewards.passXp * m });
+  const out = grant(s, { scrap: rewards.scrap * m, gems: rewards.gems, dna, geneCores: rewards.geneCores, items: rewards.items, xp: rewards.xp, passXp: rewards.passXp * m, keys: rewards.keys });
   s.piggy = Math.min(ECONOMY.piggyCap, s.piggy + rewards.piggy);
   for (const st of results.gateKills || []) s.chapter.bossFirsts[`${chapter}:${mode}:${st}`] = true;
   for (const st of rewards.milestones || []) s.chapter.milestones[`${chapter}:${st}`] = true;

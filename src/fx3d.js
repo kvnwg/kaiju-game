@@ -236,6 +236,21 @@ export class FX {
     }
   }
 
+  // A wall of dust rolling outward from a shockwave, leaving the middle clear.
+  dustRing(x, z, r, n = 18, color = 0xcbbfa8) {
+    const c = rgb(color);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+      const sp = r * (1.1 + Math.random() * 0.5);
+      const l = 0.7 + Math.random() * 0.4;
+      this.dust.add({
+        x: x + Math.cos(a) * r * 0.35, y: r * 0.05, z: z + Math.sin(a) * r * 0.35,
+        vx: Math.cos(a) * sp, vy: r * 0.12, vz: Math.sin(a) * sp, drag: 2.4, lift: 0,
+        size: r * (0.16 + Math.random() * 0.1), grow: 1.5, life: l, max: l, a: 0.5, ...c,
+      });
+    }
+  }
+
   fireBurst(x, y, z, r, n = 10) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;

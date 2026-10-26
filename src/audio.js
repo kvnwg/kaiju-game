@@ -251,7 +251,10 @@ export class Sfx {
         this.tone({ type: 'square', f0: 1650, f1: 720, dur: 0.9, vol: 0.04 });
         break;
       case 'seismicSlam':
-        this.tone({ type: 'sine', f0: 200, f1: 500, dur: 0.35, vol: 0.06 });
+        // A grunt in the crouch, the whoosh of the leap, and the rush of the drop.
+        this.tone({ type: 'square', f0: 120, f1: 80, dur: 0.12, vol: 0.08 });
+        this.noise({ dur: 0.36, vol: 0.14, f0: 300, f1: 1600, type: 'bandpass', q: 1.6, delay: 0.12 });
+        this.noise({ dur: 0.12, vol: 0.16, f0: 2400, f1: 500, type: 'bandpass', q: 1.2, delay: 0.5 });
         break;
       case 'atomicBreath':
         this.tone({ type: 'sine', f0: 200, f1: 900, dur: 0.55, vol: 0.12 });
@@ -265,9 +268,13 @@ export class Sfx {
     }
   }
 
+  // Seismic Slam impact: the boom, a crunch of rock, a sub-bass thump and a long rumble.
   slam() {
-    this.boom(1.2);
-    this.vibrate(70);
+    this.boom(1.4);
+    this.noise({ dur: 0.25, vol: 0.3, f0: 2500, f1: 400, type: 'bandpass', q: 0.9 });
+    this.noise({ dur: 1.6, vol: 0.16, f0: 320, f1: 40, q: 0.7, delay: 0.08 });
+    this.tone({ type: 'sine', f0: 58, f1: 24, dur: 0.9, vol: 0.5 });
+    this.vibrate([80, 40, 40]);
   }
 
   levelUp() {

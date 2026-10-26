@@ -2,7 +2,7 @@ import {
   WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
   UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
-import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets } from './augments.js';
+import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
@@ -11,7 +11,23 @@ import { PERSON_VARIANTS, DOCTOR } from './models.js';
 import { HOSPITAL_TYPES } from './buildings.js';
 import { CHAPTER_MUL } from './meta.js';
 
+// One bonus objective per run; finishing it pays a Supply Crate.
+const OBJECTIVES = [
+  { id: 'combo', text: 'Reach a x40 combo', goal: 40, stat: (g) => g.combo.best },
+  { id: 'frenzy', text: 'Start 3 Feeding Frenzies', goal: 3, stat: (g) => g.stats.frenzies },
+  { id: 'towers', text: 'Topple 12 buildings your size or bigger', goal: 12, stat: (g) => g.stats.bigTopples },
+  { id: 'vaults', text: 'Crack 2 golden vaults', goal: 2, stat: (g) => g.stats.vaults },
+  { id: 'bosses', text: 'Beat 3 size bosses', goal: 3, stat: (g) => g.stats.gateKills.length },
+];
+// City events: one or two per run, from size 2.
+const CITY_EVENTS = {
+  evac: { name: 'Evacuation!', sub: 'Buses packed with people are fleeing. Catch them', minStage: 2, maxStage: 4 },
+  blackout: { name: 'Blackout!', sub: 'The power is out and the military can barely see you', minStage: 2, maxStage: 6 },
+  meteors: { name: 'Meteor shower!', sub: 'Dodge them: they wreck everything they hit', minStage: 3, maxStage: 6 },
+};
+
 // What a run gets from the meta game (gear, Mutations, kaiju stars). A plain run uses this.
+const SHIELD_CAP = 0.25; // most shield you can hold, as a share of max health
 const NEUTRAL_META = {
   atkMul: 1, hpMul: 1, speedMul: 1, xpMul: 1, pickupMul: 1, dashCdMul: 1, rerolls: 0, revives: 0, perks: {}, fangs: null, skin: null,
 };
@@ -117,9 +133,20 @@ export class Game {
       this.pendingPicks = 1;
     }
     this.perkT = { hook: 3, rocket: 5 };
+    this.maxHpPenalty = 1; // the Mutation Altar's devil pact
+    this.shieldBudget = 0; // Magnetic Hide's wreckage shield, refilled per second (see updateAugments)
+    this.frenzy = 0;
+    this.eatTimes = [];
+    this.cityEvent = null;
+    this.eventT = 75;
+    this.eventsUsed = [];
+    this.blackoutT = 0;
+    this.vault = null;
+    Object.assign(this.stats, { vaultGems: 0, vaults: 0, frenzies: 0, bigTopples: 0, objectiveDone: false });
     this.trainRespawn = 0;
     this.streamWorld(true);
     this.populate(true);
+    this.objective = { ...OBJECTIVES[Math.floor(createRng(seed ^ 0x5bd1e995).next() * OBJECTIVES.length)], done: false };
   }
 
   get objects() {
@@ -261,7 +288,7 @@ export class Game {
 
   // ---- stats from passives
   maxHpFor(stage = this.kaiju.stage) {
-    return STAGES[stage].maxHp * this.def.hpMult * this.meta.hpMul * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon'));
+    return STAGES[stage].maxHp * this.def.hpMult * this.meta.hpMul * (this.maxHpPenalty || 1) * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon'));
   }
 
   scrapMult() {
@@ -407,6 +434,7 @@ export class Game {
     this.updateKaiju(dt);
     this.updateAugments(dt);
     this.updateGearPerks(dt);
+    this.updateRunExtras(dt);
     this.updateDirector(dt);
     this.updateUnits(dt);
     this.updateAllies(dt);
@@ -607,7 +635,7 @@ export class Game {
       const target = this.findTarget();
       if (target) {
         this.performAttack(target);
-        k.attackCd = this.def.attack.cooldown;
+        k.attackCd = this.def.attack.cooldown * (this.frenzy > 0 ? 0.5 : 1);
       } else k.attackCd = 0.1;
     }
 
@@ -822,7 +850,164 @@ export class Game {
         });
       }
     }
-    if (perks.mossHide && this.time - (k.lastHitAt ?? -9) > 4) this.addShield(0.01 * dt);
+    if (perks.mossHide && this.time - (k.lastHitAt ?? -9) > 4) this.addShield(0.01 * dt, false);
+  }
+
+  // ---------------------------------------------------------------- run extras
+  // Five bites inside 3 seconds start a Feeding Frenzy: faster bites and a pull on nearby people.
+  noteEat() {
+    const t = this.time;
+    this.eatTimes = this.eatTimes.filter((x) => t - x < 3);
+    this.eatTimes.push(t);
+    if (this.eatTimes.length >= 5 && this.frenzy <= 0) {
+      this.frenzy = 4;
+      this.eatTimes = [];
+      this.stats.frenzies++;
+      const k = this.kaiju;
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 3, text: 'FEEDING FRENZY!', color: '#ff5a5a', life: 1.6, max: 1.6 });
+      this.emit('frenzy');
+    }
+  }
+
+  updateRunExtras(dt) {
+    const k = this.kaiju;
+    if (this.frenzy > 0) {
+      this.frenzy -= dt;
+      for (const p of this.people) {
+        if (p.taken) continue;
+        const d = Math.hypot(k.x - p.x, k.y - p.y);
+        if (d < k.r * 8 && d > k.r * 0.6) {
+          p.x += ((k.x - p.x) / d) * k.r * 3 * dt;
+          p.y += ((k.y - p.y) / d) * k.r * 3 * dt;
+        }
+      }
+    }
+    // The run's bonus objective.
+    const ob = this.objective;
+    if (!ob.done && ob.stat(this) >= ob.goal) {
+      ob.done = true;
+      this.stats.objectiveDone = true;
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 3, text: 'OBJECTIVE COMPLETE!', color: '#ffd84a', life: 1.8, max: 1.8 });
+      this.emit('objective', { text: ob.text });
+    }
+    // City events, from size 2.
+    if (this.blackoutT > 0) this.blackoutT -= dt;
+    if (this.cityEvent && this.cityEvent.t > 0) {
+      this.cityEvent.t -= dt;
+      if (this.cityEvent.id === 'meteors') this.meteorTick(dt);
+      if (this.cityEvent.t <= 0) this.cityEvent = null;
+    }
+    if (k.stage >= 2 && !this.boss && this.gateTimer === null && this.eventsUsed.length < 2) {
+      this.eventT -= dt;
+      if (this.eventT <= 0) {
+        this.eventT = this.rng.range(80, 130);
+        const options = Object.keys(CITY_EVENTS).filter((id) => !this.eventsUsed.includes(id) && k.stage >= CITY_EVENTS[id].minStage && k.stage <= CITY_EVENTS[id].maxStage);
+        if (options.length) this.startCityEvent(this.rng.pick(options));
+      }
+    }
+  }
+
+  startCityEvent(id) {
+    const k = this.kaiju;
+    const ev = CITY_EVENTS[id];
+    this.eventsUsed.push(id);
+    this.cityEvent = { id, t: id === 'blackout' ? 30 : id === 'meteors' ? 18 : 1, tick: 0 };
+    if (id === 'blackout') this.blackoutT = 30;
+    if (id === 'evac') {
+      const roads = this.city.roads.filter((r) => Math.hypot((r.x0 + r.x1) / 2 - k.x, (r.y0 + r.y1) / 2 - k.y) < this.viewSpan() * 0.9);
+      for (let i = 0; i < 4 && roads.length; i++) {
+        const r = this.rng.pick(roads);
+        const t = this.rng.next();
+        this.traffic.push({
+          isCar: true, road: r, t, dir: this.rng.chance(0.5) ? 1 : -1, x: r.x0 + (r.x1 - r.x0) * t, y: r.y0 + (r.y1 - r.y0) * t, heading: 0,
+          speed: 34, hp: CROWD.carHp * 2, maxHp: CROWD.carHp * 2, tier: 2, dead: false, model: 'bus', variant: 0, flash: 0, evac: true,
+        });
+      }
+    }
+    this.emit('cityEvent', { id, name: ev.name, sub: ev.sub });
+  }
+
+  // Meteor shower: rocks land around the view; they hurt the kaiju and flatten what they hit.
+  meteorTick(dt) {
+    const ev = this.cityEvent;
+    ev.tick -= dt;
+    if (ev.tick > 0) return;
+    ev.tick = 0.55;
+    const k = this.kaiju;
+    const span = this.viewSpan();
+    const x = k.x + this.rng.range(-0.5, 0.5) * span;
+    const y = k.y + this.rng.range(-0.4, 0.4) * span;
+    const r = k.r * 1.4;
+    this.hazards.push({
+      kind: 'circle', x, y, r, t: 0, delay: 1.3, dmg: this.stage.maxHp * 0.06, type: 'explosive', meteor: true,
+      onHit: () => {
+        for (const o of this.objectsNear(x, y, r)) if (canDamage(o.tier, k.stage, o.landmark)) this.damageObject(o, o.maxHp * 2, norm(o.x - x, o.y - y), 'hit', { x, y });
+        for (const u of this.units) if (!u.dead && Math.hypot(u.x - x, u.y - y) < r + u.r) this.damageUnit(u, u.maxHp);
+        this.shake = Math.max(this.shake, 0.4);
+      },
+    });
+  }
+
+  // A golden vault: a building your size that pays gems when it falls.
+  placeVault() {
+    if (this.vault && this.vault.state === 'intact') return;
+    const k = this.kaiju;
+    const span = this.viewSpan();
+    const options = this.grid.query(k.x - span, k.y - span, k.x + span, k.y + span).filter((o) => o.structure && o.state === 'intact' && !o.landmark
+      && !HOSPITAL_TYPES.has(o.type) && o.tier >= k.stage && o.tier <= k.stage + 1 && Math.hypot(o.x - k.x, o.y - k.y) > span * 0.3);
+    if (!options.length) return;
+    const o = options.find((x) => x.type === 'bank') || this.rng.pick(options);
+    o.golden = true;
+    this.vault = o;
+    this.emit('vault');
+  }
+
+  crackVault(o) {
+    const k = this.kaiju;
+    const gems = 10 + 5 * k.stage;
+    o.golden = false;
+    this.vault = null;
+    this.stats.vaults++;
+    this.stats.vaultGems += gems;
+    this.stats.scrap += lootFor(o.tier, k.stage).scrap * 5;
+    this.fx.floaters.push({ x: o.x, y: o.y, h: o.height, text: `VAULT! +${gems} GEMS`, color: '#ffd84a', life: 2, max: 2 });
+    this.fx.rings.push({ x: o.x, y: o.y, r0: k.r, r1: k.r * 4, life: 0.7, max: 0.7, color: 0xffd84a, width: k.r * 0.4 });
+    this.spawnOrbs(o.x, o.y, 12, false);
+    this.emit('vaultCracked', { gems });
+  }
+
+  // Mutation Altar, after each size boss: an angel (heal and a free reroll) or a devil's pact (a big
+  // augment boost for 15% of your max health this run).
+  openAltar() {
+    if (this.state !== 'playing' || this.kaiju.stage >= MAX_STAGE) return;
+    const held = this.held;
+    const pool = offerAugments({ held, rng: this.rng }).filter((id) => AUGMENT_BY_ID[id] && AUGMENT_BY_ID[id].kind !== 'filler' && AUGMENT_BY_ID[id].kind !== 'evolution');
+    const devil = pool.find((id) => AUGMENT_BY_ID[id].kind === 'move') || pool[0] || null;
+    this.altar = { devil };
+    this.state = 'altar';
+    this.emit('altar', { altar: this.altar });
+  }
+
+  altarChoose(choice) {
+    if (this.state !== 'altar') return false;
+    const k = this.kaiju;
+    if (choice === 'devil' && this.altar.devil) {
+      const id = this.altar.devil;
+      const a = AUGMENT_BY_ID[id];
+      for (let i = 0; i < 2; i++) if ((this.held.get(id) || 0) < maxLevel(a)) applyPick(this.held, id);
+      const frac = k.hp / k.maxHp;
+      this.maxHpPenalty *= 0.85;
+      k.maxHp = this.maxHpFor();
+      k.hp = Math.min(k.maxHp, k.maxHp * frac);
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 3, text: `PACT: ${a.name} +2`, color: '#ff5a8a', life: 1.8, max: 1.8 });
+    } else {
+      this.bigHeal(0.35, 'BLESSING', k.x, k.y);
+      this.rerolls++;
+    }
+    this.altar = null;
+    this.state = 'playing';
+    this.emit('altarDone', { choice });
+    return true;
   }
 
   nearestChainTarget(from, exclude, reach) {
@@ -956,9 +1141,16 @@ export class Game {
     return { hp: 1 + ENEMY_SCALING.hpPerLevel * l, dmg: 1 + ENEMY_SCALING.dmgPerLevel * l };
   }
 
-  addShield(fraction) {
+  // Wreckage shield (`capped`) draws on a per-second budget, so a late-game demolition spree
+  // can't keep it topped up under fire; it builds up between fights instead.
+  addShield(fraction, capped = true) {
     const k = this.kaiju;
-    k.shield = Math.min(k.maxHp * 0.3, k.shield + k.maxHp * fraction);
+    let gain = k.maxHp * fraction;
+    if (capped) {
+      gain = Math.min(gain, this.shieldBudget);
+      this.shieldBudget -= gain;
+    }
+    k.shield = Math.min(k.maxHp * SHIELD_CAP, k.shield + gain);
   }
 
   takeDamage(amount, type = 'bullet') {
@@ -1044,14 +1236,20 @@ export class Game {
     const s = this.stage;
     k.maxHp = this.maxHpFor();
     k.hp = Math.min(k.maxHp, k.maxHp * frac + k.maxHp * 0.15);
-    k.shield = Math.min(k.shield * 2, k.maxHp * 0.3);
+    k.shield = Math.min(k.shield * 2, k.maxHp * SHIELD_CAP);
     this.stats.stageTimes[k.stage] = this.time;
     this.director.spawnT = 2;
     if (THREAT.waveEvery[k.stage]) this.director.waveT = THREAT.firstWave;
     if (ELITES[k.stage]) this.director.eliteT = ELITE.first;
     this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: s.radius * 2.5, life: 0.8, max: 0.8, color: 0x9cff7a, width: s.radius * 0.25 });
-    this.shake = Math.max(this.shake, 0.5);
+    this.fx.rings.push({ x: k.x, y: k.y, r0: s.radius, r1: s.radius * 4.5, life: 1.1, max: 1.1, color: 0xffffff, width: s.radius * 0.4 });
+    this.shake = Math.max(this.shake, 0.9);
+    // Size-up: a beat of slow motion and a shockwave that flattens everything far smaller.
+    this.slowmo = Math.max(this.slowmo, 1.1);
+    for (const o of this.objectsNear(k.x, k.y, s.radius * 4)) if (o.tier <= k.stage - 2 && !o.landmark) this.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'crush');
+    for (const u of this.units) if (!u.dead && u.tier < k.stage && Math.hypot(u.x - k.x, u.y - k.y) < s.radius * 4) this.killUnit(u);
     this.emit('grow', { stage: k.stage, name: s.name, size: s.size });
+    if (k.stage >= 2 && k.stage <= 5) this.schedule(18, () => this.placeVault());
     if (k.stage === MAX_STAGE) this.bossTimer = BOSS.arriveDelay;
   }
 
@@ -1163,6 +1361,8 @@ export class Game {
       this.stats.scrap += scrap;
       this.stats.destroyed++;
       if (o.structure) this.stats.buildings++;
+      if (o.structure && o.tier >= k.stage) this.stats.bigTopples++;
+      if (o.golden) this.crackVault(o);
       if (o.tier >= 5 && this.stats.firstSkyscraperAt === null) this.stats.firstSkyscraperAt = this.time;
       this.spawnOrbs(o.x, o.y, Math.min(10, 1 + o.tier * 2), biomass > 0);
       if (o.structure && o.tier >= k.stage) {
@@ -1350,6 +1550,7 @@ export class Game {
     if (this.has('ironStomach')) this.addBiomass(lootFor(u.tier, k.stage).biomass * 0.25 * this.level('ironStomach'));
     this.killUnit(u);
     this.xpBoost = 1;
+    this.noteEat();
     return true;
   }
 
@@ -1369,6 +1570,7 @@ export class Game {
     this.xpBoost = this.meta.perks.gluttonHeart ? 1.2 : 1;
     this.addBiomass(loot.biomass * (1 + 0.25 * this.level('ironStomach')));
     this.xpBoost = 1;
+    this.noteEat();
     this.onKill();
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
@@ -1479,6 +1681,15 @@ export class Game {
     if (c.dead) return;
     c.dead = true;
     const k = this.kaiju;
+    if (c.evac) {
+      // An evacuation bus: a feast, and its passengers scatter.
+      this.addBiomass(lootFor(k.stage, k.stage).biomass * 0.5);
+      this.fx.floaters.push({ x: c.x, y: c.y, h: k.r * 2, text: 'EVACUEES!', color: '#ffd84a', life: 1.2, max: 1.2 });
+      for (let i = 0; i < 6; i++) {
+        const a = this.rng.range(0, Math.PI * 2);
+        this.people.push({ isPerson: true, x: c.x + Math.cos(a) * 3, y: c.y + Math.sin(a) * 3, heading: a, speed: this.rng.range(5, 8), state: 'flee', t: 2, variant: this.rng.int(0, PERSON_VARIANTS - 1), tier: 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: this.rng.range(0, 6) });
+      }
+    }
     if (!c.silent) this.shake = Math.max(this.shake, k.stage <= 2 ? 0.2 : 0.1);
     if (k.stage <= 2) this.impact(0.04, 0.2);
     this.bumpCombo();
@@ -1497,8 +1708,10 @@ export class Game {
   updateAugments(dt) {
     const k = this.kaiju;
     this.moves.update(dt);
+    // Magnetic Hide: 0.6/0.85/1.1% of max health per second of wreckage shield, banking up to 3%.
+    if (this.has('magneticHide')) this.shieldBudget = Math.min(k.maxHp * 0.03, this.shieldBudget + k.maxHp * (0.0035 + 0.0025 * this.level('magneticHide')) * dt);
     // Unkillable set bonus: the debris shield regenerates while standing still.
-    if (k.stillTime > 0.5 && completedSets(this.held).some((s) => s.id === 'unkillable')) this.addShield(0.04 * dt);
+    if (k.stillTime > 0.5 && completedSets(this.held).some((s) => s.id === 'unkillable')) this.addShield(0.02 * dt, false);
   }
 
   nearestEnemy(reach) {
@@ -1582,7 +1795,7 @@ export class Game {
     const dir = this.director;
     const th = this.threat / 100;
     // Threat speeds up reinforcements and lets more of them on the field at once.
-    dir.spawnT -= dt * (1 + th * 1.2) * (this.boss && this.boss.gate ? 0.5 : 1);
+    dir.spawnT -= dt * (1 + th * 1.2) * (this.boss && this.boss.gate ? 0.5 : 1) * (this.blackoutT > 0 ? 0.6 : 1);
     const alive = this.units.filter((u) => !u.dead && u.type !== 'jet').length;
     if (dir.spawnT <= 0) {
       dir.spawnT = esc.interval * this.rng.range(0.7, 1.3);
@@ -1877,7 +2090,7 @@ export class Game {
         // Telegraphed shot: the shooter aims (shown as a sight line) before the round leaves.
         u.windup -= dt;
         if (u.windup <= 0) this.unitFire(u, dist);
-      } else if (u.cd <= 0 && dist - k.r <= def.range && u.stress < 0.12) {
+      } else if (u.cd <= 0 && dist - k.r <= def.range * (this.blackoutT > 0 ? 0.6 : 1) && u.stress < 0.12) {
         u.cd = def.cd * this.rng.range(0.85, 1.15);
         const w = WINDUP[def.attack];
         if (w) {
@@ -2676,6 +2889,7 @@ export class Game {
     // Clear the boss after the death throes; the full growth bar then grows the kaiju.
     this.schedule(1.4, () => {
       if (this.boss === b) this.boss = null;
+      this.openAltar();
     });
     return true;
   }
@@ -2894,7 +3108,8 @@ export class Game {
       augments: [...this.held.entries()].map(([id, level]) => ({ id, name: AUGMENT_BY_ID[id].name, level })),
       sets: sets.map((x) => x.name), title: sets.length ? sets.map((x) => x.name).join(' + ') : null,
       score, firstSkyscraperAt: s.firstSkyscraperAt, stageTimes: s.stageTimes,
-      gateKills: [...s.gateKills], chapter: this.chapter,
+      gateKills: [...s.gateKills], chapter: this.chapter, vaultGems: s.vaultGems, vaults: s.vaults, objectiveDone: s.objectiveDone,
+      objective: this.objective.text, frenzies: s.frenzies,
     };
     this.emit('end', { results: this.results });
   }

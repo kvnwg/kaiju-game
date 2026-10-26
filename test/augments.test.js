@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   AUGMENTS, AUGMENT_BY_ID, MOVES, PASSIVES, SYNERGY_SETS, MOVE_SLOTS, PASSIVE_SLOTS,
   offerAugments, applyPick, completedSets, maxLevel, moveStats, levelText, readyEvolutions, EVOLUTIONS, movesHeld,
+  evolutionFor, recipeState,
 } from '../src/augments.js';
 import { createRng } from '../src/rng.js';
 
@@ -104,4 +105,17 @@ test('completedSets detects a full set', () => {
   assert.equal(completedSets(held).length, 0);
   held.set('meteorCall', 1);
   assert.deepEqual(completedSets(held).map((s) => s.id), ['demolition']);
+});
+
+test('each evolution is found from its move, its partner passive and itself, with its progress', () => {
+  for (const e of EVOLUTIONS) for (const id of [e.id, e.move, e.passive]) assert.equal(evolutionFor(id), e, id);
+  assert.equal(evolutionFor('glassCannon'), null);
+  const held = new Map([['laserEyes', 7], ['might', 1]]);
+  const omega = AUGMENT_BY_ID.omegaBeam;
+  assert.deepEqual(recipeState(held, omega), { level: 7, max: 8, passive: true, done: false, ready: false });
+  assert.equal(recipeState(held, omega, 'laserEyes').ready, true, 'taking the last level completes the recipe');
+  assert.equal(recipeState(new Map([['laserEyes', 8]]), omega, 'might').ready, true, 'so does taking the passive');
+  held.set('laserEyes', 8);
+  held.set('omegaBeam', 1);
+  assert.equal(recipeState(held, omega).done, true);
 });

@@ -13,6 +13,7 @@ export class MoveSystem {
     this.g = game;
     this.timers = {};
     this.active = [];
+    this.slamUntil = -1; // game time a Seismic Slam in the air lands
   }
 
   get k() {
@@ -451,16 +452,31 @@ export class MoveSystem {
     const S = this.size() * s.area;
     const radius = k.r * 4.6 * S;
     if (!this.targets(radius * 1.2).length) return false;
-    const up = 0.42;
-    this.anim('slam', up + 0.25);
+    // An echo that comes up mid-leap waits for this slam to land.
+    if (g.time < this.slamUntil) {
+      g.schedule(this.slamUntil - g.time + 0.12, () => this.cast('seismicSlam', true));
+      return true;
+    }
+    // Crouch, leap, hang at the top, then drop: squash, a hit-stop, shockwave rings, a burst of
+    // flung rock, glowing cracks and a second ripple running out after the first.
+    const T = { crouch: 0.14, rise: 0.3, hang: 0.08, drop: 0.09 };
+    const landAt = T.crouch + T.rise + T.hang + T.drop;
+    const top = k.r * 2.8;
+    this.slamUntil = g.time + landAt;
+    this.anim('slam', landAt + 0.34, T);
     const color = echo ? GHOST : 0xffc36b;
     const land = () => {
       g.areaDamage(k.x, k.y, radius, this.base() * s.dmg * 4.5, 'hit');
       g.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.6, r1: radius, life: 0.5, max: 0.5, color, width: k.r * 0.45 });
       g.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.3, r1: radius * 0.6, life: 0.35, max: 0.35, color: 0xffffff, width: k.r * 0.3 });
-      g.fxEvent({ t: 'dust', x: k.x, y: k.y, r: radius });
+      g.fxEvent({ t: 'slam', x: k.x, y: k.y, r: radius, kr: k.r, echo });
       g.fx.cracks.push({ x: k.x, y: k.y, r: radius * 0.8, life: 2.5, max: 2.5, seed: Math.random() * 100 });
-      g.shake = Math.max(g.shake, 0.7);
+      g.shake = Math.max(g.shake, 0.8);
+      g.impact(0.07, 0.9);
+      g.schedule(0.16, () => {
+        g.fx.rings.push({ x: k.x, y: k.y, r0: radius * 0.7, r1: radius * 1.35, life: 0.45, max: 0.45, color, width: k.r * 0.22 });
+        g.fxEvent({ t: 'dustRing', x: k.x, y: k.y, r: radius * 1.2 });
+      });
       g.emit('slam');
       for (let i = 0; i < s.aftershock; i++) {
         g.schedule(0.55 * (i + 1), () => {
@@ -480,13 +496,17 @@ export class MoveSystem {
       t: 0,
       update(dt) {
         this.t += dt;
-        if (this.t < up) k.z = Math.sin((this.t / up) * Math.PI * 0.5) * k.r * 1.6;
-        else if (!this.landed) {
-          this.landed = true;
+        const t = this.t;
+        const up = T.crouch + T.rise;
+        if (t < T.crouch) k.z = 0;
+        else if (t < up) k.z = top * (1 - (1 - (t - T.crouch) / T.rise) ** 2);
+        else if (t < up + T.hang) k.z = top * (1 + 0.04 * Math.sin(((t - up) / T.hang) * Math.PI));
+        else if (t < landAt) k.z = top * (1 - ((t - up - T.hang) / T.drop) ** 2);
+        else {
           k.z = 0;
           land();
+          this.done = true;
         }
-        if (this.t >= up + 0.05) this.done = true;
       },
     });
     return true;
@@ -582,7 +602,7 @@ export class MoveSystem {
     const k = this.k;
     const ok = g.callMeteor();
     if (!ok) return false;
-    this.anim('roar', 0.8);
+    this.anim('summon', 1);
     const s = this.st('meteorCall');
     if (s.count > 1) {
       const span = g.viewSpan() * 0.35;
@@ -662,7 +682,7 @@ export class MoveSystem {
     const S = this.size() * s.area;
     const [first] = this.targets(k.r * 7 * S);
     if (!first) return false;
-    this.anim('breath', 0.4, { charge: 0.1 });
+    this.anim('breath', 0.4, { charge: 0.1, tint: 'lightning' });
     const color = echo ? GHOST : 0x9fe8ff;
     const hit = [];
     const chain = (from, t, n, dmg) => {
@@ -702,19 +722,24 @@ export class MoveSystem {
     const near = g.objectsNear(k.x, k.y, k.r * 3).filter((o) => o.structure && !o.walkable && !o.landmark && o.tier <= k.stage && canDamage(o.tier, k.stage, false));
     near.sort((a, b) => b.w * b.h * b.height - a.w * a.h * a.height);
     if (!near.length) return false;
-    this.anim('throw', 0.45);
+    this.anim('heave', 0.6);
     const colors = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96 };
     for (let i = 0; i < s.count; i++) {
       const b = near[i % near.length];
       const t = targets[i % targets.length];
-      g.schedule(i * 0.25, () => {
+      // The building is torn up as the kaiju reaches down, then flies from its hands at the
+      // top of the heave.
+      if (i < near.length && b.state === 'intact') g.destroyObject(b, norm(t.x - b.x, t.y - b.y), 'hit');
+      g.schedule(0.32 + i * 0.25, () => {
         const size = Math.max(b.w, b.h);
         if (b.state === 'intact') g.destroyObject(b, norm(t.x - b.x, t.y - b.y), 'hit');
         const sp = g.stage.speed * 2.2 + 30;
-        const d = norm(t.x - b.x, t.y - b.y);
+        const x0 = k.x + k.facing.x * k.r * 0.6;
+        const y0 = k.y + k.facing.y * k.r * 0.6;
+        const d = norm(t.x - x0, t.y - y0);
         g.projectiles.push({
-          friendly: true, kind: 'slab', x: b.x, y: b.y, x0: b.x, y0: b.y, vx: d.x * sp, vy: d.y * sp, speed: sp,
-          r: size * 0.3, size: Math.min(size * 0.7, k.r * 2.2), arc: k.r * 3, h0: Math.min(b.height, k.r * 2) * 0.6, dmg: this.base() * s.dmg * 6, life: 3, target: t, age: 0,
+          friendly: true, kind: 'slab', x: x0, y: y0, x0, y0, vx: d.x * sp, vy: d.y * sp, speed: sp,
+          r: size * 0.3, size: Math.min(size * 0.7, k.r * 2.2), arc: k.r * 3, h0: k.r * 2.4, dmg: this.base() * s.dmg * 6, life: 3, target: t, age: 0,
           color: echo ? GHOST : colors[b.style] || 0x9a948a,
           onHit: (p) => {
             const r = Math.max(k.r * 1.6, size * 0.9) * S;
@@ -742,7 +767,7 @@ export class MoveSystem {
     const S = this.size() * s.area;
     const targets = this.targets(k.r * 9, s.count);
     if (!targets.length) return false;
-    this.anim('breath', 0.3, { charge: 0.08 });
+    this.anim('breath', 0.3, { charge: 0.08, tint: 'acid' });
     const puddle = (x, y, scale = 1) => g.fires.push({ x, y, r: k.r * 1.1 * S * scale, t: 4 * s.duration, max: 4 * s.duration, tick: 0, acid: true, dmgMul: 1.7 * s.dmg });
     targets.forEach((t, i) => {
       g.schedule(i * 0.1, () => {
@@ -780,7 +805,7 @@ export class MoveSystem {
     const arc = 1.0;
     const color = echo ? GHOST : 0xcff6ff;
     const freezeFor = 2 * s.duration;
-    this.anim('breath', charge + dur, { charge });
+    this.anim('breath', charge + dur, { charge, tint: 'ice' });
     const freeze = (u) => {
       if (u.dead || u.type === 'jet' || u.frozen > 0) return;
       g.damageUnit(u, this.base() * 0.6 * s.dmg);
@@ -828,7 +853,7 @@ export class MoveSystem {
     const S = this.size() * s.area;
     const targets = this.targets(k.r * 10 * S, s.count);
     if (!targets.length) return false;
-    this.anim('roar', 0.5);
+    this.anim('belch', 0.6);
     const dur = 3 * s.duration;
     for (const t of targets) {
       const v = { x: t.x, y: t.y, r: k.r * 3.5 * S };
@@ -920,7 +945,7 @@ export class MoveSystem {
     const parked = g.objectsNear(k.x, k.y, radius).filter((o) => o.vehicle && o.state === 'intact' && canDamage(o.tier, k.stage, false));
     const vehicles = g.units.filter((u) => !u.dead && u.def.vehicle && !u.flying && Math.hypot(u.x - k.x, u.y - k.y) < radius);
     if (!cars.length && !parked.length && !vehicles.length) return false;
-    this.anim('roar', 0.7);
+    this.anim('roar', 0.7, { tint: [0.3, 0.1, 0.45] });
     const color = echo ? GHOST : 0xc58bff;
     for (let i = 0; i < 3; i++) g.fx.rings.push({ x: k.x, y: k.y, r0: radius * (1 - i * 0.15), r1: k.r * 1.5, life: 0.5 + i * 0.12, max: 0.5 + i * 0.12, color, width: k.r * 0.3 });
     let shown = 0;
@@ -990,7 +1015,7 @@ export class MoveSystem {
     const k = this.k;
     const s = this.st('broodCall');
     if (!this.targets(k.r * 12).length) return false;
-    this.anim('roar', 0.5);
+    this.anim('howl', 0.7);
     for (let i = 0; i < s.count && g.allies.length < 30; i++) {
       const a = Math.random() * Math.PI * 2;
       g.allies.push({

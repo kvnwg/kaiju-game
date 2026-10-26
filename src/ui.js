@@ -1,5 +1,5 @@
 import { STAGES, MAX_STAGE, STAGE_INFO, KAIJU, CITIES, DIFFICULTIES, xpToNext } from './config.js';
-import { AUGMENT_BY_ID, setsFor, SYNERGY_SETS, levelText, maxLevel, movesHeld, passivesHeld, MOVE_SLOTS, PASSIVE_SLOTS } from './augments.js';
+import { AUGMENTS, AUGMENT_BY_ID, EVOLUTIONS, evolutionFor, recipeState, setsFor, SYNERGY_SETS, levelText, maxLevel, movesHeld, passivesHeld, MOVE_SLOTS, PASSIVE_SLOTS } from './augments.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -15,6 +15,33 @@ function iconFor(a) {
 
 function icon(a) {
   return `<i class="aug-ico ico-${iconFor(a)}"></i>`;
+}
+
+const RARITY_OF_TIER = { silver: 0, gold: 2, prismatic: 4 };
+const REEL_POOL = AUGMENTS.filter((a) => a.kind !== 'evolution');
+
+// Evolution recipe strip: move (level/max) + partner passive = evolution, as it would stand
+// after taking `pickId`. Parts you have light up; a complete recipe glows.
+function recipe(held, e, pickId = null) {
+  const st = recipeState(held, e, pickId);
+  const move = AUGMENT_BY_ID[e.move];
+  const pas = AUGMENT_BY_ID[e.passive];
+  const part = (a, have, label) => `<span class="ing${have ? ' have' : ''}${pickId === a.id ? ' this' : ''}">${icon(a)}<em>${label}</em></span>`;
+  return `<div class="recipe${st.ready ? ' ready' : ''}${st.done ? ' done' : ''}" title="${move.name} (max) + ${pas.name} = ${e.name}">
+      ${part(move, st.level >= st.max, st.level >= st.max ? 'Max' : `${st.level}/${st.max}`)}<b>+</b>${part(pas, st.passive, st.passive ? 'Got' : 'Need')}<b>=</b>
+      <span class="ing evo${st.ready || st.done ? ' have' : ''}">${icon(e)}</span>
+    </div>`;
+}
+
+// Every evolution recipe, for the pause menu and the pick screen.
+function codex(held) {
+  return `<div class="codex">${EVOLUTIONS.map((e) => `<div class="codex-row">${recipe(held, e)}<span class="codex-name">${e.name}<small>${e.text}</small></span></div>`).join('')}</div>`;
+}
+
+// A slot reel: the result on top, random augments below it; the strip rolls down to the result.
+function reel(a, i) {
+  const syms = Array.from({ length: 10 + i * 5 }, () => REEL_POOL[Math.floor(Math.random() * REEL_POOL.length)]);
+  return `<div class="reel"><div class="strip">${icon(a)}${syms.map(icon).join('')}</div></div>`;
 }
 
 function fmtNum(n) {
@@ -38,6 +65,8 @@ export class UI {
     this.stageNum = $('#stageBadge b');
     this.hpBar = $('#hp');
     this.scrapEl = $('#scrap');
+    this.objWrap = $('#objective');
+    this.objEl = $('#objective span');
     this.timerEl = $('#timer');
     this.bossbar = $('#bossbar');
     this.bossFill = $('#bossbar .fill');
@@ -91,6 +120,12 @@ export class UI {
     this.stageNum.textContent = k.level;
     this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
     this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';
+    const ob = game.objective;
+    if (ob) {
+      const objText = ob.done ? `${ob.text} · done` : `${ob.text} (${Math.min(ob.goal, Math.floor(ob.stat(game)))}/${ob.goal})`;
+      if (this.objEl.textContent !== objText) this.objEl.textContent = objText;
+      this.objWrap.classList.toggle('done', ob.done);
+    }
     // Damage $: rolls up toward the real figure like a slot counter, and flashes every billion.
     const target = Math.floor(game.stats.scrap);
     if (target < (this.dmgShown || 0)) this.dmgShown = 0;
@@ -149,8 +184,13 @@ export class UI {
       // Moves on top (with a cooldown meter), passives in a smaller row below.
       const tile = ([id, level]) => {
           const a = AUGMENT_BY_ID[id];
-          return `<div class="tile tier-${a.tier} kind-${a.kind}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${a.name}: ${a.text}">
-            ${icon(a)}${a.kind === 'move' ? '<span class="cd"></span>' : ''}<b class="lvl${level >= maxLevel(a) ? ' max' : ''}">${level}</b></div>`;
+          // A move shows its partner passive in the corner (lit once held) and glows when it can evolve.
+          const evo = a.kind === 'move' ? evolutionFor(id) : null;
+          const st = evo && !game.held.has(evo.id) ? recipeState(game.held, evo) : null;
+          const hint = st ? `<i class="evo-hint aug-ico ico-${evo.passive}${st.passive ? ' have' : ''}"></i>` : '';
+          const title = st ? `${a.name}: ${a.text}. Max it and hold ${AUGMENT_BY_ID[evo.passive].name} to evolve into ${evo.name}` : `${a.name}: ${a.text}`;
+          return `<div class="tile tier-${a.tier} kind-${a.kind}${st && st.ready ? ' evo-ready' : ''}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${title}">
+            ${icon(a)}${hint}${a.kind === 'move' ? '<span class="cd"></span>' : ''}<b class="lvl${level >= maxLevel(a) ? ' max' : ''}">${level}</b></div>`;
       };
       const held = [...game.held.entries()].filter(([id]) => AUGMENT_BY_ID[id]);
       const row = (kind) => held.filter(([id]) => AUGMENT_BY_ID[id].kind === kind).map(tile).join('');
@@ -224,6 +264,22 @@ export class UI {
     this.banner(`Stage ${stage} · ${s.name}`, `${s.size}-sized. Now breaks: ${info.destroys.toLowerCase()}. Incoming: ${info.military.toLowerCase()}.`, 'grow');
   }
 
+  // Mutation Altar: the angel heals and gives a free reroll; the devil boosts an augment for health.
+  showAltar(game, onChoose) {
+    const el = this.modals.pick;
+    const devil = game.altar && game.altar.devil ? AUGMENT_BY_ID[game.altar.devil] : null;
+    el.innerHTML = `<div class="panel pick-panel altar-panel">
+        <div class="eyebrow">Mutation Altar</div>
+        <h2>Choose your blessing</h2>
+        <div class="altar-cards">
+          <button class="altar-card angel" data-c="angel"><i class="halo"></i><b>Blessing</b><span>Heal 35% of your health</span><small>Plus one free reroll</small></button>
+          ${devil ? `<button class="altar-card devil" data-c="devil"><i class="horns"></i><b>Devil's pact</b><span>${devil.name} +2 levels</span><small>Costs 15% of your max health for this run</small></button>` : ''}
+        </div>
+      </div>`;
+    el.querySelectorAll('.altar-card').forEach((c) => c.addEventListener('click', () => onChoose(c.dataset.c)));
+    this.show('pick');
+  }
+
   showPick(game, { onChoose, onReroll }) {
     const p = game.pick;
     const el = this.modals.pick;
@@ -241,12 +297,16 @@ export class UI {
           })
           .join('');
         const pips = max > 1 ? `<div class="pips">${Array.from({ length: max }, (_, j) => `<i class="${j < level ? 'on' : j === level ? 'next' : ''}"></i>`).join('')}</div>` : '';
+        const evo = evolutionFor(id);
+        const st = evo && recipeState(game.held, evo, id);
+        const evoLine = !evo ? '' : a.kind === 'evolution' ? 'Evolution!' : st.ready ? `Unlocks ${evo.name}!` : st.done ? `Evolved: ${evo.name}` : `Evolves into ${evo.name}`;
         return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}" data-id="${id}" style="--i:${i}">
           <div class="card-top"><span class="tier">${a.kind === 'filler' ? 'Bonus' : a.kind}</span><span class="cat">${tag}</span></div>
-          <div class="card-main">${icon(a)}<div class="name">${a.name}</div></div>
+          <div class="card-main">${reel(a, i)}<div class="name">${a.name}</div></div>
           <div class="text">${level ? levelText(id, level) : a.text}</div>
           ${pips}
           ${sets ? `<div class="sets">${sets}</div>` : ''}
+          ${evo ? `<div class="recipe-wrap${st.ready || a.kind === 'evolution' ? ' ready' : ''}">${recipe(game.held, evo, id)}<span class="recipe-name">${evoLine}</span></div>` : ''}
         </button>`;
       })
       .join('');
@@ -261,11 +321,81 @@ export class UI {
           <button class="btn ghost" id="rerollFree" ${game.rerolls > 0 ? '' : 'disabled'}>Reroll (${game.rerolls} left)</button>
           <button class="btn ghost ad" id="rerollAd" ${game.rerolls === 0 && game.adRerollAvailable ? '' : 'disabled'}>Reroll · watch ad</button>
         </div>
+        <details class="recipes-help"><summary>Evolution recipes</summary>${codex(game.held)}</details>
       </div>`;
-    el.querySelectorAll('.card').forEach((c) => c.addEventListener('click', () => onChoose(c.dataset.id)));
+    const cardEls = [...el.querySelectorAll('.card')];
+    const spin = this.spinReels(el, cardEls);
+    cardEls.forEach((c) => c.addEventListener('click', () => spin.canPick(c) && onChoose(c.dataset.id)));
     el.querySelector('#rerollFree').addEventListener('click', () => onReroll(false));
     el.querySelector('#rerollAd').addEventListener('click', () => onReroll(true));
     this.show('pick');
+  }
+
+  // Slot-machine reveal: every card's icon spins on a reel and the reels land left to right, each
+  // with a ding pitched by rarity and a click per symbol on the way. A tap skips ahead; a card
+  // can be picked once it has landed.
+  spinReels(el, cards) {
+    const sfx = this.sfx;
+    const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let guardUntil = 0;
+    let lastTick = 0;
+    const spins = cards.map((card, i) => {
+      const strip = card.querySelector('.strip');
+      const s = { card, strip, n: strip.children.length - 1, tier: AUGMENT_BY_ID[card.dataset.id].tier, landed: false, anim: null, last: -1 };
+      s.land = (quiet) => {
+        if (s.landed) return;
+        s.landed = true;
+        card.classList.remove('spinning');
+        card.classList.add('landed');
+        if (!quiet && sfx) sfx.ding(RARITY_OF_TIER[s.tier] ?? 0);
+      };
+      if (reduce || !strip.animate) {
+        s.land(true);
+        return s;
+      }
+      card.classList.add('spinning');
+      s.anim = strip.animate([
+        { transform: `translateY(${(-100 * s.n) / (s.n + 1)}%)`, easing: 'cubic-bezier(.2,.62,.35,1)' },
+        { transform: `translateY(${24 / (s.n + 1)}%)`, offset: 0.9, easing: 'ease-in-out' },
+        { transform: 'translateY(0)' },
+      ], { duration: 950 + i * 420, fill: 'both' });
+      s.anim.onfinish = () => s.land(false);
+      return s;
+    });
+    const frame = () => {
+      if (!el.isConnected || el.classList.contains('hidden')) return;
+      let spinning = false;
+      for (const s of spins) {
+        if (s.landed || !s.anim) continue;
+        spinning = true;
+        const ty = new DOMMatrixReadOnly(getComputedStyle(s.strip).transform).m42;
+        const idx = Math.floor(-ty / (s.strip.offsetHeight / (s.n + 1)));
+        if (idx !== s.last) {
+          s.last = idx;
+          const now = performance.now();
+          if (now - lastTick > 45 && sfx) {
+            lastTick = now;
+            sfx.tick();
+          }
+        }
+      }
+      if (spinning) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+    const skip = () => {
+      const left = spins.filter((s) => !s.landed);
+      if (!left.length) return;
+      guardUntil = performance.now() + 300;
+      for (const s of left) {
+        if (s.anim) s.anim.finish();
+        s.land(true);
+      }
+      if (sfx) sfx.ding(Math.max(...left.map((s) => RARITY_OF_TIER[s.tier] ?? 0)));
+    };
+    if (this.reelSkip) el.removeEventListener('pointerdown', this.reelSkip, true);
+    this.reelSkip = skip;
+    el.addEventListener('pointerdown', skip, true);
+    return { canPick: (card) => card.classList.contains('landed') && performance.now() > guardUntil };
   }
 
   showRevive({ onRevive, onGiveUp }) {
@@ -284,7 +414,7 @@ export class UI {
     this.show('revive');
   }
 
-  showPause({ quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit }) {
+  showPause({ held = new Map(), quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
     el.innerHTML = `<div class="panel small">
@@ -293,6 +423,7 @@ export class UI {
           <button class="btn primary" id="resume">Resume</button>
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
+        <details class="recipes-help"><summary>Evolution recipes</summary>${codex(held)}</details>
         <h3>Sound</h3>
         <div class="segs" id="soundSegs"><button class="seg ${sound ? 'on' : ''}" data-s="1">On</button><button class="seg ${sound ? '' : 'on'}" data-s="0">Off</button></div>
         <h3>Music</h3>

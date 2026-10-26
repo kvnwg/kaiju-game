@@ -324,16 +324,23 @@ test('a small kaiju eats people whole: snatch, chomp, swallow', () => {
   assert.ok(!g.people.includes(p), 'swallowed');
 });
 
+const settle = (g) => {
+  while (g.state === 'picking' || g.state === 'altar') {
+    if (g.state === 'altar') g.altarChoose('angel');
+    else g.choose(g.pick.options[0]);
+  }
+};
+
 test('a full growth bar sends a boss for your size; growing waits until it is beaten', () => {
   const g = new Game({ seed: 7 });
   g.addBiomass(STAGES[1].biomassToNext * 1.5);
-  while (g.state === 'picking') g.choose(g.pick.options[0]);
+  settle(g);
   g.update(1 / 30);
   assert.equal(g.kaiju.stage, 1, 'no size-up before the boss');
   assert.equal(g.kaiju.biomass, STAGES[1].biomassToNext, 'growth bar holds at full');
   for (let i = 0; i < 120 && !g.boss; i++) {
     g.update(1 / 30);
-    while (g.state === 'picking') g.choose(g.pick.options[0]);
+    settle(g);
   }
   const b = g.boss;
   assert.ok(b && b.gate === 1 && b.name === GATE_BOSSES[1].name, 'Agent Kilowatt arrives');
@@ -342,7 +349,7 @@ test('a full growth bar sends a boss for your size; growing waits until it is be
   assert.ok(b.dead && g.gateCleared[1]);
   for (let i = 0; i < 90 && g.kaiju.stage === 1; i++) {
     g.update(1 / 30);
-    while (g.state === 'picking') g.choose(g.pick.options[0]);
+    settle(g);
   }
   assert.equal(g.kaiju.stage, 2, 'beating it grows the kaiju');
   assert.equal(g.boss, null);
@@ -387,4 +394,52 @@ test('no augment heals; hospitals and the rare doctor do', () => {
   d.kaiju.hp = d.kaiju.maxHp * 0.5;
   d.eatPerson(p);
   assert.ok(d.kaiju.hp / d.kaiju.maxHp > 0.6, 'eating a doctor heals');
+});
+
+test('Seismic Slam crouches, leaps and lands; an Echo mid-leap waits for the landing', () => {
+  const g = new Game({ seed: 5 });
+  const k = g.kaiju;
+  // House size in the suburbs, as in the move test above: plenty in reach.
+  k.stage = 3;
+  k.r = 14;
+  k.invuln = 999;
+  g.held.set('seismicSlam', 1);
+  g.moves.timers.seismicSlam = 99; // cast by hand only
+  assert.ok(g.moves.cast('seismicSlam', false), 'something in reach');
+  let peak = 0;
+  let slams = 0;
+  for (let i = 0; i < 45; i++) {
+    if (i === 12) {
+      // Mid-leap: the echo is queued for after the landing, not started on top of this leap.
+      const anim = k.anim;
+      const lands = g.moves.slamUntil;
+      assert.ok(k.z > 0, 'in the air');
+      assert.ok(g.moves.cast('seismicSlam', true));
+      assert.equal(k.anim, anim);
+      assert.equal(g.moves.slamUntil, lands);
+    }
+    g.update(1 / 60);
+    settle(g);
+    peak = Math.max(peak, k.z || 0);
+    slams += g.drainEvents().filter((e) => e.type === 'slam').length;
+    g.drainVfx();
+  }
+  assert.ok(peak > k.r * 2 && peak < k.r * 3.2, 'a clear leap');
+  assert.equal(slams, 1, 'lands with a slam');
+  assert.equal(k.z, 0, 'back on the ground');
+});
+
+test('Magnetic Hide turns wreckage into a shield, but only so fast', () => {
+  const g = wide(new Game({ seed: 5 }));
+  for (let s = 1; s < 3; s++) g.grow();
+  settle(g);
+  const k = g.kaiju;
+  g.held.set('magneticHide', 1);
+  k.shield = 0;
+  g.updateAugments(10); // bank the per-second budget
+  const pile = g.city.objects.filter((o) => o.state === 'intact' && o.structure && !o.landmark).slice(0, 30);
+  assert.ok(pile.length >= 10, 'buildings to wreck');
+  for (const o of pile) g.destroyObject(o, { x: 1, y: 0 }, 'hit');
+  assert.ok(k.shield > 0, 'wreckage gives shield');
+  assert.ok(k.shield <= k.maxHp * 0.03 + 1e-6, 'a demolition spree only cashes in the banked budget');
 });

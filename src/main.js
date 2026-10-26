@@ -23,6 +23,7 @@ const persist = () => writeSave(save);
 rollover(save, now());
 const settings = save.settings;
 const sfx = new Sfx();
+ui.sfx = sfx;
 sfx.setMuted(settings.sound === false);
 const music = new Music(sfx);
 music.setEnabled(settings.music !== false);
@@ -39,7 +40,8 @@ function musicState() {
   let level = k.stage <= 1 ? 1 : k.stage <= 3 ? 2 : 3;
   if (game.threat > 60) level++;
   if (boss) level = 4;
-  return { level: Math.min(4, level), boss, bpm: (boss ? 164 : 140 + k.stage * 3), paused: paused || game.state === 'picking' };
+  if (game.frenzy > 0) level = Math.max(level, 3);
+  return { level: Math.min(4, level), boss, bpm: (boss ? 164 : 140 + k.stage * 3), paused: paused || game.state === 'picking' || game.state === 'altar' };
 }
 // Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
 for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', 'touchstart', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
@@ -135,6 +137,14 @@ function showTitle() {
 }
 
 const CALLOUTS = ['Smashing!', 'Rampage!', 'Unstoppable!', 'Kaiju-geddon!', 'Extinction event!'];
+const appEl = document.getElementById('app');
+const classTimers = {};
+// Briefly adds a class to the app (letterbox bars on a size-up, red edges in a frenzy).
+function flashClass(name, ms) {
+  appEl.classList.add(name);
+  clearTimeout(classTimers[name]);
+  classTimers[name] = setTimeout(() => appEl.classList.remove(name), ms);
+}
 
 function handleEvents(events) {
   for (const e of events) {
@@ -144,6 +154,7 @@ function handleEvents(events) {
         ui.callout(CALLOUTS[Math.min(CALLOUTS.length, e.tier) - 1], e.tier);
         break;
       case 'grow':
+        flashClass('cine', 1700);
         ui.flash(1);
         hintUntil = 0;
         ui.hint('');
@@ -164,6 +175,30 @@ function handleEvents(events) {
         ui.show('pick', false);
         if (pendingGrowBanner) ui.growBanner(pendingGrowBanner);
         pendingGrowBanner = null;
+        break;
+      case 'altar':
+        ui.showAltar(game, (c) => game.altarChoose(c));
+        break;
+      case 'altarDone':
+        ui.show('pick', false);
+        break;
+      case 'frenzy':
+        ui.callout('Feeding frenzy!', 4);
+        flashClass('frenzy', 4000);
+        break;
+      case 'vault':
+        ui.banner('A golden vault!', 'Smash the glowing gold building for gems', 'synergy');
+        break;
+      case 'vaultCracked':
+        ui.callout(`Vault cracked! +${e.gems} gems`, 4);
+        sfx.cash();
+        break;
+      case 'objective':
+        ui.banner('Bonus objective done!', `${e.text}: a Supply Crate is yours`, 'synergy');
+        sfx.ding(3);
+        break;
+      case 'cityEvent':
+        ui.banner(e.name, e.sub, 'warning');
         break;
       case 'synergy':
         ui.banner(`Synergy: ${e.set.name}`, e.set.bonus, 'synergy');
@@ -282,6 +317,7 @@ function togglePause(force) {
   if (paused) {
     input.release();
     ui.showPause({
+      held: game.held,
       quality: renderer.qualityName,
       pixelArt: renderer.pixelArt,
       sound: !sfx.muted,
@@ -385,19 +421,25 @@ function frame(now) {
 
 const preyArrow = document.getElementById('preyArrow');
 function updatePreyArrow() {
-  const p = game.prey;
+  // A golden vault outranks food: the arrow turns gold and points at it while it is off screen.
+  const vault = game.vault && game.vault.state === 'intact' ? game.vault : null;
+  const p = vault || game.prey;
   const k = game.kaiju;
   const far = p && Math.hypot(p.x - k.x, p.y - k.y) > game.viewSpan() * 0.55;
   if (!far || game.state !== 'playing' || game.boss) {
     preyArrow.classList.add('hidden');
     return;
   }
+  preyArrow.classList.toggle('gold', Boolean(vault));
   const s = renderer.project(p.x, p.y, 0);
+  // Ride an ellipse between the HUD at the top and the augment bar at the bottom.
+  const top = 140;
+  const bottom = renderer.h - 120;
   const cx = renderer.w / 2;
-  const cy = renderer.h / 2;
+  const cy = (top + bottom) / 2;
   const a = Math.atan2(s.y - cy, s.x - cx);
   const rx = cx - 40;
-  const ry = cy - 90;
+  const ry = (bottom - top) / 2;
   const t = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
   preyArrow.classList.remove('hidden');
   preyArrow.style.transform = `translate(${cx + Math.cos(a) * t}px, ${cy + Math.sin(a) * t}px) rotate(${a}rad)`;

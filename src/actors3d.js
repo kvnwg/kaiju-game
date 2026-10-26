@@ -67,6 +67,9 @@ function partsGroup(model, mat) {
 }
 
 // Walk cycle, tail sway, bite and punch poses for a parts rig.
+// Breath glow per element (rgb at full charge).
+const BREATH_TINT = { atomic: [0.02, 0.2, 0.26], lightning: [0.24, 0.28, 0.36], acid: [0.1, 0.32, 0.02], ice: [0.14, 0.24, 0.32] };
+
 function animateRig(rig, phase, moving, t, attack, extra = {}) {
   const swingAmt = moving ? 0.7 : 0.05;
   for (const g of Object.values(rig.nodes)) {
@@ -302,14 +305,159 @@ export class Actors {
         return [0, 0, 0];
       }
       case 'slam': {
-        // Tuck on the way up, stamp down hard.
+        // Seismic Slam: crouch, spring up stretched, tuck at the top with the arms raised, drop
+        // stretched, then squash flat on impact and wobble back.
+        const e = a.max - a.t;
+        const c = a.crouch ?? 0.14;
+        const r = c + (a.rise ?? 0.3);
+        const h = r + (a.hang ?? 0.08);
+        const d = h + (a.drop ?? 0.09);
+        let sx = 1;
+        let sy = 1;
+        let arm = 0;
+        let leg = 0;
+        let tilt = 0;
+        let head = 0;
+        let jaw = -0.2;
+        let glow = 0;
+        // Signs: +pitch lifts the nose; +limb swings forward and up.
+        if (e < c) {
+          const u = e / c;
+          sy = 1 - 0.2 * u;
+          sx = 1 + 0.1 * u;
+          arm = -0.7 * u;
+          leg = -0.3 * u;
+          tilt = -0.15 * u;
+          head = -0.2 * u;
+        } else if (e < r) {
+          const u = (e - c) / (r - c);
+          sy = 1.16 - 0.16 * u;
+          sx = 0.94 + 0.06 * u;
+          arm = -0.7 + 3.3 * u;
+          leg = -0.4 + 0.9 * u;
+          tilt = 0.3 - 0.2 * u;
+          head = 0.35 * u;
+          jaw = -0.2 - 0.5 * u;
+        } else if (e < h) {
+          arm = 2.6;
+          leg = 0.8;
+          tilt = 0.1;
+          head = 0.35;
+          jaw = -0.7;
+          glow = 0.12;
+        } else if (e < d) {
+          const u = (e - h) / (d - h);
+          sy = 1 + 0.18 * u;
+          sx = 1 - 0.08 * u;
+          arm = 2.6 - 3.1 * u;
+          leg = 0.8 - 0.8 * u;
+          tilt = 0.1 - 0.45 * u;
+          head = 0.35 - 0.65 * u;
+          jaw = -0.9;
+          glow = 0.12 + 0.2 * u;
+        } else {
+          const u = Math.min(1, (e - d) / Math.max(0.01, a.max - d));
+          const w = Math.exp(-4.5 * u) * Math.cos(u * 13);
+          sy = 1 - 0.28 * w;
+          sx = 1 + 0.16 * w;
+          arm = -0.5 * (1 - u);
+          tilt = -0.35 * (1 - u);
+          head = -0.3 * (1 - u);
+          jaw = -0.9 * (1 - u);
+          glow = 0.35 * (1 - u);
+        }
+        const s0 = rig.root.scale.x;
+        rig.root.scale.set(s0 * sx, s0 * sy, s0 * sx);
         each((g, p) => {
-          if (p.swing) g.rotation.z = f < 0.6 ? -0.9 : 0.4;
-          if (p.arm) g.rotation.z = f < 0.6 ? -2.4 : -0.4;
-          if (p.name === 'jaw') g.rotation.z = -0.5;
+          if (p.arm) g.rotation.z = arm;
+          if (p.swing) g.rotation.z = leg;
+          if (p.punch) g.rotation.z = arm;
+          if (p.name === 'head') g.rotation.z = head;
+          if (p.name === 'jaw') g.rotation.z = jaw;
         });
-        rig.root.rotation.z = f < 0.6 ? -0.25 : 0.2;
-        return [0.2, 0.12, 0];
+        rig.root.rotation.z = tilt;
+        return [glow, glow * 0.75, glow * 0.25];
+      }
+      case 'summon': {
+        // Meteor Call: rear back with the arms to the sky and roar upward as the glow builds.
+        const p = Math.sin(Math.min(1, f * 3) * Math.PI * 0.5) * (f > 0.8 ? (1 - f) / 0.2 : 1);
+        const pulse = 0.6 + 0.4 * Math.sin(t * 22);
+        each((g, q) => {
+          if (q.arm || q.punch) g.rotation.z = 2.7 * p;
+          if (q.name === 'head') g.rotation.z = 0.6 * p;
+          if (q.name === 'jaw') g.rotation.z = -0.8 * p;
+        });
+        rig.root.rotation.z = 0.32 * p;
+        return [0.4 * p * pulse, 0.14 * p * pulse, 0.02 * p];
+      }
+      case 'belch': {
+        // Vortex Belch: a deep breath swells the chest, then a forward heave with the jaw wide.
+        let head = 0;
+        let jaw = -0.1;
+        let lean = 0;
+        let swell = 0;
+        if (f < 0.45) {
+          const u = f / 0.45;
+          swell = u;
+          head = 0.35 * u;
+          lean = 0.15 * u;
+        } else {
+          const u = (f - 0.45) / 0.55;
+          const p = Math.sin(Math.min(1, u * 2.5) * Math.PI * 0.5) * (1 - u * 0.6);
+          swell = Math.max(0, 1 - u * 3);
+          head = 0.35 - 0.75 * p;
+          jaw = -1.1 * p;
+          lean = 0.15 - 0.4 * p;
+        }
+        if (n.body) n.body.scale.set(1 + 0.08 * swell, 1 + 0.1 * swell, 1 + 0.14 * swell);
+        each((g, q) => {
+          if (q.name === 'head') g.rotation.z = head;
+          if (q.name === 'jaw') g.rotation.z = jaw;
+        });
+        rig.root.rotation.z = lean;
+        return [0.05 * swell, 0.22 * swell, 0.1 * swell];
+      }
+      case 'howl': {
+        // Brood Call: the head thrown back in a long, quavering call to the hatchlings.
+        const p = Math.sin(Math.min(1, f * 2.5) * Math.PI * 0.5) * (f > 0.75 ? (1 - f) / 0.25 : 1);
+        const quaver = Math.sin(t * 40) * 0.05 * p;
+        each((g, q) => {
+          if (q.name === 'head') g.rotation.z = 0.9 * p + quaver;
+          if (q.name === 'jaw') g.rotation.z = -0.75 * p;
+          if (q.arm) g.rotation.z = 0.5 * p;
+        });
+        rig.root.rotation.z = 0.15 * p;
+        return [0.1 * p, 0.26 * p, 0.05 * p];
+      }
+      case 'heave': {
+        // Building Hurl: reach down, rip it up over the head, and hurl it forward.
+        let arm;
+        let tilt;
+        let head = 0;
+        if (f < 0.3) {
+          const u = f / 0.3;
+          arm = 0.8 * u;
+          tilt = -0.3 * u;
+        } else if (f < 0.55) {
+          const u = (f - 0.3) / 0.25;
+          arm = 0.8 + 2.0 * u;
+          tilt = -0.3 + 0.55 * u;
+          head = 0.3 * u;
+        } else {
+          const u = (f - 0.55) / 0.45;
+          const p = Math.sin(Math.min(1, u * 2.2) * Math.PI * 0.5);
+          arm = 2.8 - 2.3 * p;
+          tilt = 0.25 - 0.5 * p + 0.25 * u;
+          head = 0.3 - 0.5 * p;
+        }
+        each((g, q) => {
+          if (q.arm || q.punch) g.rotation.z = arm;
+          if (q.name === 'head') g.rotation.z = head;
+          if (q.name === 'jaw') g.rotation.z = f > 0.55 ? -0.7 : -0.2;
+        });
+        rig.root.rotation.z = tilt;
+        const flare = f > 0.55 ? 0.16 * (1 - f) / 0.45 : 0;
+        return [flare, flare * 0.6, 0];
       }
       case 'laser': {
         const pulse = 0.5 + 0.5 * Math.sin(t * 40);
@@ -326,17 +474,21 @@ export class Actors {
           if (p.name === 'jaw') g.rotation.z = charging ? -0.15 : -0.9;
           if (p.name === 'body') g.rotation.z += charging ? -0.15 * c : 0.1;
         });
-        const flick = 0.85 + 0.15 * Math.sin(t * 50);
-        return [0.02 * c, 0.2 * c * flick, 0.26 * c * flick];
+        // The glow takes the element's colour; lightning strobes.
+        const tint = BREATH_TINT[a.tint] || BREATH_TINT.atomic;
+        const flick = a.tint === 'lightning' ? (Math.sin(t * 90) > 0 ? 1 : 0.35) : 0.85 + 0.15 * Math.sin(t * 50);
+        return [tint[0] * c * flick, tint[1] * c * flick, tint[2] * c * flick];
       }
       case 'roar': {
         const r = Math.sin(Math.min(1, f * 2.5) * Math.PI * 0.5);
+        const shake = Math.sin(t * 34) * 0.06 * r;
         each((g, p) => {
-          if (p.name === 'head') g.rotation.z = 0.45 * r;
+          if (p.name === 'head') g.rotation.z = 0.45 * r + shake;
           if (p.name === 'jaw') g.rotation.z = -1.0 * r;
           if (p.arm) g.rotation.z = 0.8 * r;
         });
-        return [0.15 * r, 0.12 * r, 0];
+        const tint = a.tint || [0.15, 0.12, 0];
+        return [tint[0] * r, tint[1] * r, tint[2] * r];
       }
       case 'throw': {
         const s = Math.sin(f * Math.PI);

@@ -76,7 +76,7 @@ export const AUGMENTS = [
 
   // ---- perk passives
   { id: 'gasMain', kind: 'passive', name: 'Gas Main', tier: 'gold', max: 3, text: '20% of buildings explode', levelText: '+10% explode chance' },
-  { id: 'magneticHide', kind: 'passive', name: 'Magnetic Hide', tier: 'gold', max: 3, text: 'Wreckage becomes a shield', levelText: '+50% shield gain' },
+  { id: 'magneticHide', kind: 'passive', name: 'Magnetic Hide', tier: 'gold', max: 3, text: 'Wreckage becomes a shield', levelText: 'Shield builds faster' },
   { id: 'rageMode', kind: 'passive', name: 'Rage Mode', tier: 'gold', max: 3, text: 'Up to +40% damage when hurt', levelText: '+20% max rage' },
   { id: 'echo', kind: 'passive', name: 'Echo', tier: 'prismatic', max: 3, text: '30% of moves repeat', levelText: '+30% repeat chance' },
   { id: 'perfectRhythm', kind: 'passive', name: 'Perfect Rhythm', tier: 'gold', max: 3, text: 'Perfect dodges blast a shockwave', levelText: '+25% shockwave size' },
@@ -102,6 +102,20 @@ export const EVOLUTIONS = AUGMENTS.filter((a) => a.kind === 'evolution');
 // Evolutions whose move is maxed and whose partner passive is held, not yet taken.
 export function readyEvolutions(held) {
   return EVOLUTIONS.filter((e) => !held.has(e.id) && held.get(e.move) >= maxLevel(AUGMENT_BY_ID[e.move]) && held.has(e.passive));
+}
+
+// The evolution an augment belongs to: as its move, its partner passive, or itself.
+export function evolutionFor(id) {
+  return EVOLUTIONS.find((e) => e.id === id || e.move === id || e.passive === id) || null;
+}
+
+// Where a recipe stands, optionally as if `pickId` were taken too.
+export function recipeState(held, e, pickId = null) {
+  const max = maxLevel(AUGMENT_BY_ID[e.move]);
+  const level = Math.min(max, (held.get(e.move) || 0) + (pickId === e.move ? 1 : 0));
+  const passive = held.has(e.passive) || pickId === e.passive;
+  const done = held.has(e.id) || pickId === e.id;
+  return { level, max, passive, done, ready: !done && level >= max && passive };
 }
 
 // When everything is maxed, picks fall back to these (Vampire Survivors' chicken and coins).

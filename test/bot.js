@@ -27,6 +27,10 @@ export function botStep(game) {
     game.choose(opts[0]);
     return;
   }
+  if (game.state === 'altar') {
+    game.altarChoose('angel');
+    return;
+  }
   if (game.state === 'dead') {
     if (!game.revive()) game.giveUp();
     return;

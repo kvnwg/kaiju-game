@@ -332,6 +332,50 @@ export class Renderer3D {
     this.hospitalMarks.delete(o);
   }
 
+  // The golden vault: a pulsing gold frame and a spinning gem above the building.
+  updateVaultMark(game) {
+    const o = game.vault && game.vault.state === 'intact' ? game.vault : null;
+    if (this.vaultMark && this.vaultMark.userData.obj !== o) {
+      this.scene.remove(this.vaultMark);
+      this.vaultMark.traverse((c) => c.geometry && c.geometry.dispose());
+      this.vaultMark = null;
+    }
+    if (!o) return;
+    if (!this.vaultMark) {
+      if (!this.goldMat) this.goldMat = new THREE.MeshBasicMaterial({ color: 0xffd84a, toneMapped: false, transparent: true, opacity: 0.9 });
+      const g = new THREE.Group();
+      const t = Math.max(1, Math.min(o.w, o.h) * 0.07);
+      const W = o.w + 2;
+      const D = o.h + 2;
+      const H = o.height + 1;
+      const bar = (w, h, d, x, y, z) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.goldMat);
+        m.position.set(x, y, z);
+        g.add(m);
+      };
+      for (const y of [0.3, H]) {
+        const h = y < 1 ? 0.6 : t * 0.5;
+        bar(W + t * 2, h, t, 0, y, (D + t) / 2);
+        bar(W + t * 2, h, t, 0, y, -(D + t) / 2);
+        bar(t, h, D, (W + t) / 2, y, 0);
+        bar(t, h, D, -(W + t) / 2, y, 0);
+      }
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) bar(t * 0.5, H, t * 0.5, sx * (W + t) / 2, H / 2, sz * (D + t) / 2);
+      const s = Math.max(o.w, o.h) * 0.28;
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), this.goldMat);
+      gem.position.y = o.height + s * 1.6;
+      g.add(gem);
+      g.userData = { obj: o, gem, baseY: gem.position.y, s };
+      g.position.set(o.x, 0, o.y);
+      this.scene.add(g);
+      this.vaultMark = g;
+    }
+    const u = this.vaultMark.userData;
+    u.gem.rotation.y = this.t * 2.2;
+    u.gem.position.y = u.baseY + Math.sin(this.t * 3) * u.s * 0.2;
+    this.goldMat.opacity = 0.6 + 0.35 * Math.sin(this.t * 5);
+  }
+
   updateHospitalMarks() {
     if (!this.hospitalMarks) return;
     const pulse = 0.6 + 0.4 * Math.sin(this.t * 4);
@@ -1069,6 +1113,33 @@ export class Renderer3D {
         case 'dust':
           this.fx.dustCloud(e.x, 0, e.y, e.r, 6);
           break;
+        case 'dustRing':
+          this.fx.dustRing(e.x, e.y, e.r);
+          break;
+        case 'slam': {
+          // Seismic Slam lands: chunks of road and rock flung out in a ring, a rolling dust wall,
+          // and a hot flash at the feet. Speeds are solved from the wanted arc so it reads the
+          // same at every size.
+          const n = 18;
+          const cols = e.echo ? [0xc58bff, 0x9a7ad9, 0xe0d0ff] : [0x8a7a6a, 0x6a5a4a, 0xa89880, 0x5a5048, 0x3a3d42];
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2 + Math.random() * 0.35;
+            const sz = e.kr * (0.12 + Math.random() * 0.2);
+            const g = 40 + sz * 18;
+            const vy = Math.sqrt(2 * g * e.kr * (0.7 + Math.random() * 1.1));
+            const air = (2 * vy) / g;
+            const out = e.r * (0.35 + Math.random() * 0.65);
+            const d0 = e.r * 0.2;
+            this.fx.addDebris({
+              x: e.x + Math.cos(a) * d0, y: sz, z: e.y + Math.sin(a) * d0,
+              vx: (Math.cos(a) * out) / air, vy, vz: (Math.sin(a) * out) / air,
+              sx: sz, sy: sz * 0.7, sz, size: sz, color: cols[i % cols.length], life: 2.5 + Math.random() * 2,
+            });
+          }
+          this.fx.dustRing(e.x, e.y, e.r);
+          this.fx.flash(e.x, e.kr * 0.6, e.y, e.echo ? 0xc58bff : 0xffc36b, 1.5, Math.min(e.r * 2.5, 600), 0.32);
+          break;
+        }
         case 'explode':
           this.fx.fireBurst(e.x, 0, e.y, e.r, 8);
           break;
@@ -1236,7 +1307,7 @@ export class Renderer3D {
     // Time of day follows run progress (a cinematic shot picks its own).
     const cine = this.cinematic;
     if (cine && cine.dusk !== undefined) this.dusk = cine.dusk;
-    else this.dusk += (game.dusk - this.dusk) * Math.min(1, dt * 0.6);
+    else this.dusk += ((game.blackoutT > 0 ? 1 : game.dusk) - this.dusk) * Math.min(1, dt * (game.blackoutT > 0 ? 2 : 0.6));
     const key = lerpKey(this.dusk);
     this.uniforms.uNight.value = key.night;
     this.hemi.color.copy(key.hemiS);
@@ -1331,6 +1402,7 @@ export class Renderer3D {
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
     this.updateHospitalMarks();
+    this.updateVaultMark(game);
     this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Charge trail
     if (k.dashT > 0 && Math.random() < 0.7) this.fx.dustCloud(k.x - k.facing.x * k.r, 0, k.y - k.facing.y * k.r, k.r * 0.5, 2, 0xdfe6ee);
