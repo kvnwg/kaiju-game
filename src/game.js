@@ -9,6 +9,7 @@ import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
 import { PERSON_VARIANTS, DOCTOR } from './models.js';
 import { HOSPITAL_TYPES } from './buildings.js';
+import { propDims } from './props.js';
 import { CHAPTER_MUL } from './meta.js';
 
 // One bonus objective per run; finishing it pays a Supply Crate.
@@ -36,6 +37,55 @@ const NEUTRAL_META = {
 // already telegraph with ground markers.
 const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6, net: 0.8, volley: 1 };
 const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
+
+// Traffic keeps to the right-hand lane, this far from the middle of the road.
+const LANE = 12;
+// A junction is the area this far around where its roads meet (see Game.claimJunction).
+const JUNCTION_R = 22;
+// Road vehicles as boxes: length along the heading by width across, from their voxel models
+// (traffic uses its prop's size). See Game.roadSpace.
+const VEHICLE_BOX = { police: [12.8, 6.4], swat: [19.2, 9.6], tank: [30.8, 19.8], artillery: [38.4, 16.8], roadblock: [22.4, 6.4] };
+function vehicleBox(v) {
+  if (!v.box) {
+    const d = v.isCar ? propDims(v.model) : null;
+    const [len, wid] = d ? [d.w, d.h] : VEHICLE_BOX[v.def.model || v.type] || [v.r * 2, v.r];
+    const m = v.elite ? 1.5 : 1;
+    v.box = { hl: (len * m) / 2, hw: (wid * m) / 2 };
+  }
+  return v.box;
+}
+
+// How deep two vehicle boxes overlap (0 or less: they don't touch). Each is a centre, a facing
+// as cos/sin, and half sizes {hl, hw}.
+function boxDepth(x, y, c, s, a, ox, oy, oc, os, b) {
+  let depth = Infinity;
+  for (let i = 0; i < 4; i++) {
+    const ax = i === 0 ? c : i === 1 ? -s : i === 2 ? oc : -os;
+    const ay = i === 0 ? s : i === 1 ? c : i === 2 ? os : oc;
+    const reach = a.hl * Math.abs(c * ax + s * ay) + a.hw * Math.abs(c * ay - s * ax)
+      + b.hl * Math.abs(oc * ax + os * ay) + b.hw * Math.abs(oc * ay - os * ax);
+    depth = Math.min(depth, reach - Math.abs((ox - x) * ax + (oy - y) * ay));
+    if (depth <= 0) return depth;
+  }
+  return depth;
+}
+
+// Whether two routes through a junction (polylines of {x, y}) come within `clear` of each other.
+function routesMeet(p, q, clear) {
+  for (let i = 1; i < p.length; i++) {
+    for (let j = 1; j < q.length; j++) {
+      const a = p[i - 1];
+      const b = p[i];
+      const c = q[j - 1];
+      const d = q[j];
+      const side = (o, e, f) => (e.x - o.x) * (f.y - o.y) - (e.y - o.y) * (f.x - o.x);
+      if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) return true;
+      if (Math.min(distToSegment(c.x, c.y, a.x, a.y, b.x, b.y), distToSegment(d.x, d.y, a.x, a.y, b.x, b.y),
+        distToSegment(a.x, a.y, c.x, c.y, d.x, d.y), distToSegment(b.x, b.y, c.x, c.y, d.x, d.y)) < clear) return true;
+    }
+  }
+  return false;
+}
 
 export { distToRect, distToSegment };
 
@@ -88,6 +138,8 @@ export class Game {
     this.allies = []; // hatchlings from Brood Call
     this.people = [];
     this.traffic = [];
+    this.roadVehicles = []; // everything on the streets this frame (see listRoadVehicles)
+    this.junctions = new Map(); // junction key -> claims on it: [{ v, route, until }]
     this.trains = [];
     this.projectiles = [];
     this.hazards = [];
@@ -326,13 +378,16 @@ export class Game {
 
   // Keep right: the lane offset slides across when a unit turns around, and the position
   // eases through corners, so road units never teleport.
-  placeOnRoad(u, dt = 0) {
+  // `keepLane` holds it in the lane it is in (when something is in the way of moving across).
+  placeOnRoad(u, dt = 0, keepLane = false) {
     const r = u.road;
     const n0 = norm(r.x1 - r.x0, r.y1 - r.y0);
     const lane = u.type === 'roadblock' ? 0 : Math.min(12 * (u.scale || 1), 26) * u.dir;
-    u.lane = dt && u.lane !== undefined ? u.lane + (lane - u.lane) * Math.min(1, dt * 3) : lane;
+    if (!keepLane) u.lane = dt && u.lane !== undefined ? u.lane + (lane - u.lane) * Math.min(1, dt * 3) : lane;
     const tx = r.x0 + (r.x1 - r.x0) * u.t - n0.y * u.lane;
     const ty = r.y0 + (r.y1 - r.y0) * u.t + n0.x * u.lane;
+    u.laneX = tx;
+    u.laneY = ty;
     const heading = u.type === 'roadblock' ? Math.atan2(n0.x, -n0.y) : Math.atan2(n0.y * u.dir, n0.x * u.dir);
     if (!dt) {
       u.x = tx;
@@ -348,11 +403,167 @@ export class Game {
     u.heading += dh * Math.min(1, dt * 8);
   }
 
+  // The last word on vehicles never driving through each other: whether vehicle v, which was at
+  // (x, y) facing `heading` before this frame's move, has now run into another vehicle (or
+  // closer into one it was already touching). The caller then undoes the move.
+  rammed(v, x, y, heading) {
+    const a = vehicleBox(v);
+    let c = null;
+    let s = null;
+    for (const o of this.roadVehicles) {
+      if (o === v || o.dead) continue;
+      const b = vehicleBox(o);
+      const reach = a.hl + b.hl + 1;
+      if (Math.abs(o.x - v.x) > reach || Math.abs(o.y - v.y) > reach) continue;
+      if (c === null) {
+        c = Math.cos(v.heading);
+        s = Math.sin(v.heading);
+      }
+      const oc = Math.cos(o.heading);
+      const os = Math.sin(o.heading);
+      const now = boxDepth(v.x, v.y, c, s, a, o.x, o.y, oc, os, b);
+      if (now <= 0.3) continue;
+      const before = boxDepth(x, y, Math.cos(heading), Math.sin(heading), a, o.x, o.y, oc, os, b);
+      // (Pulling away from a vehicle it is grazing is fine, as long as it doesn't swing into it.)
+      if (now > before + 0.01 && (now > 1 || Math.hypot(o.x - v.x, o.y - v.y) < Math.hypot(o.x - x, o.y - y))) return true;
+    }
+    return false;
+  }
+
+  // The room around (x, y) on the streets: how far it is to the nearest vehicle's end.
+  roadClearance(x, y) {
+    let near = Infinity;
+    for (const o of this.traffic) if (!o.dead) near = Math.min(near, Math.hypot(o.x - x, o.y - y) - vehicleBox(o).hl);
+    for (const o of this.units) if (!o.dead && o.road) near = Math.min(near, Math.hypot(o.x - x, o.y - y) - vehicleBox(o).hl);
+    return near;
+  }
+
+  // Whether a vehicle `length` long can appear at (x, y) without landing on another one.
+  roadSpotFree(x, y, length) {
+    return this.roadClearance(x, y) >= length / 2 + 8;
+  }
+
+  // Everything on the streets this frame: traffic, and police, SWAT vans, tanks and roadblocks.
+  listRoadVehicles() {
+    const list = this.roadVehicles;
+    list.length = 0;
+    if (this.junctions.size > 64) for (const [key, holds] of this.junctions) if (holds.every((h) => h.until < this.time)) this.junctions.delete(key);
+    for (const c of this.traffic) if (!c.dead) list.push(c);
+    for (const u of this.units) if (!u.dead && u.road && !u.flying) list.push(u);
+    // Facings as of the start of the frame, for looking ahead (see roadSpace).
+    for (const v of list) {
+      v.hc = Math.cos(v.heading);
+      v.hs = Math.sin(v.heading);
+    }
+    return list;
+  }
+
+  // How freely vehicle v may drive on along its lane, heading (fx, fy), as a share of its speed:
+  // 1 with the way clear, easing to 0 over `ramp` as it closes on whatever is in its path, so
+  // vehicles queue behind each other instead of driving through one another. The path is the
+  // lane it is steering for (laneX, laneY), so a car making a U-turn isn't held up by the one
+  // that was behind it.
+  roadSpace(v, fx, fy, ramp) {
+    const a = vehicleBox(v);
+    const lx = v.laneX ?? v.x;
+    const ly = v.laneY ?? v.y;
+    let space = 1;
+    let by = null;
+    for (const o of this.roadVehicles) {
+      if (o === v || o.dead) continue;
+      const ahead = (o.x - v.x) * fx + (o.y - v.y) * fy;
+      if (ahead <= 0 || ahead > 100) continue;
+      // The other vehicle's box measured along our path and across it.
+      const b = vehicleBox(o);
+      const ox = o.hc;
+      const oy = o.hs;
+      const across = b.hl * Math.abs(oy * fx - ox * fy) + b.hw * Math.abs(ox * fx + oy * fy);
+      if (Math.abs((o.y - ly) * fx - (o.x - lx) * fy) >= a.hw + across - 0.5) continue;
+      const along = b.hl * Math.abs(ox * fx + oy * fy) + b.hw * Math.abs(oy * fx - ox * fy);
+      const s = Math.max(0, Math.min(1, (ahead - a.hl - along - 2.5) / ramp));
+      if (s < space) {
+        space = s;
+        by = o;
+      }
+    }
+    v.blockedBy = space < 0.05 ? by : null;
+    return space;
+  }
+
+  // Traffic takes a junction by claiming its route through it (see planTurn; a car without one,
+  // turning round at a dead end, claims all of it). Police and military don't queue for
+  // junctions (see driveUnit), though they still brake for what is in their way. A claim is
+  // granted when no route claimed by another vehicle comes near it (or that vehicle is going
+  // the same way) and nobody whose route it would cross has been waiting at the line for longer:
+  // first come, first served. Claims and places in line lapse soon after their vehicle stops
+  // renewing them. `dry` only asks; `wait` queues up when the claim is refused.
+  claimJunction(v, x, y, route, { dry = false, wait = false } = {}) {
+    const key = `${Math.round(x)},${Math.round(y)}`;
+    let holds = this.junctions.get(key);
+    const live = (h) => h.until >= this.time && !h.v.dead;
+    const mine = holds && holds.find((h) => h.v === v && live(h));
+    if (mine && !mine.waiting) {
+      if (!dry) mine.until = this.time + 0.15;
+      return true;
+    }
+    if (holds) {
+      for (const h of holds) {
+        if (h.v === v || !live(h)) continue;
+        // Queued behind us, or not yet a matter for a vehicle only asking.
+        if (h.waiting && (dry || (mine && mine.since <= h.since))) continue;
+        if (h.route && route && h.route.from === route.from && h.route.to === route.to) continue;
+        if (!h.route || !route || routesMeet(h.route.points, route.points, vehicleBox(h.v).hw + vehicleBox(v).hw + 3)) {
+          if (wait && !dry) {
+            if (mine) mine.until = this.time + 0.15;
+            else this.junctions.set(key, [...holds.filter(live), { v, route, since: this.time, until: this.time + 0.15, waiting: true }]);
+          }
+          return false;
+        }
+      }
+    }
+    if (dry) return true;
+    holds = (holds || []).filter((h) => live(h) && h.v !== v);
+    holds.push({ v, route, until: this.time + 0.15 });
+    this.junctions.set(key, holds);
+    return true;
+  }
+
+  // Heading for the junction at (x, y), `along` away by road on `route`: a vehicle claims it
+  // once it is close enough to have to brake (if it is first in line) or about to drive in, and
+  // renews the claim all the way through. While it can't have it, it slows to wait short of it.
+  // Returns the share of its speed it may use.
+  junctionSpace(v, x, y, along, ramp, firstInLine, route = null) {
+    const reach = JUNCTION_R + vehicleBox(v).hl;
+    if (along > reach + ramp + 4) return 1;
+    const claim = firstInLine || along <= reach + 2;
+    if (this.claimJunction(v, x, y, route, { dry: !claim, wait: claim })) return 1;
+    // Someone is crossing its way: wait short of the junction, but never stop in the middle of one.
+    return along < reach - 2 ? 1 : Math.max(0, Math.min(1, (along - reach - 1) / ramp));
+  }
+
+  // A vehicle keeps its claim on a junction it is still inside, on the route it came by.
+  holdJunction(v, x, y, route = null) {
+    if (Math.hypot(v.x - x, v.y - y) <= JUNCTION_R + vehicleBox(v).hl) this.claimJunction(v, x, y, route);
+  }
+
+  // Waiting with nowhere to go (a roadblock, a jam, two vehicles nose to nose): true once it is
+  // time to give up and turn around. Nose to nose, one of them gives way quickly.
+  stuckOnRoad(v, space, dt) {
+    v.stuck = space < 0.05 || v.jammed ? (v.stuck || 0) + dt : 0;
+    if (!v.patience) v.patience = this.rng.range(2, 4);
+    const faceOff = v.blockedBy && v.blockedBy.blockedBy === v;
+    if (v.stuck < (faceOff ? v.patience * 0.2 : v.patience)) return false;
+    v.stuck = 0;
+    v.blockedBy = null;
+    return true;
+  }
+
   // Drive along the road network: toward the kaiju until in firing distance, away when scared.
   driveUnit(u, dt, dist, want, flee = false, speedMul = 1) {
     const k = this.kaiju;
     const r = u.road;
     const len = Math.hypot(r.x1 - r.x0, r.y1 - r.y0) || 1;
+    const was = { x: u.x, y: u.y, heading: u.heading, t: u.t, road: u.road, dir: u.dir, lane: u.lane, dirHold: u.dirHold, backoff: u.backoff };
     const away = flee || u.fear > 0 || dist < want * 0.75;
     let move = 0;
     if (away) {
@@ -367,10 +578,30 @@ export class Game {
     // Commit to a direction for a moment before reversing (unless bolting in fear).
     u.dirHold = Math.max(0, (u.dirHold || 0) - dt);
     if (move && move !== u.dir && u.dirHold > 0 && !flee && !(u.fear > 0)) move = 0;
+    // Backing out of a jam: keep going the other way for a moment.
+    if (u.backoff > 0) {
+      u.backoff -= dt;
+      move = u.dir;
+    }
     if (move) {
       if (move !== u.dir) u.dirHold = 0.9;
       u.dir = move;
-      u.t += (move * u.def.speed * (u.fear > 0 ? 1.3 : 1) * speedMul * dt) / len;
+      // Police and military drive like emergency vehicles: they don't wait their turn at
+      // junctions, but they still brake for whatever is in their lane. Queued behind another
+      // unit they just wait (they can shoot from there); nose to nose with something, or wedged,
+      // they back out of it.
+      const speed = u.def.speed * (u.fear > 0 ? 1.3 : 1) * speedMul;
+      const n = norm(r.x1 - r.x0, r.y1 - r.y0);
+      const space = this.roadSpace(u, n.x * move, n.y * move, Math.max(8, speed * 0.4));
+      const faceOff = u.blockedBy && u.blockedBy.blockedBy === u;
+      u.stuck = faceOff || u.jammed ? (u.stuck || 0) + dt : 0;
+      if (u.stuck > 1.2) {
+        u.stuck = 0;
+        u.dir = -u.dir;
+        u.dirHold = 1.5;
+        u.backoff = 1.5;
+      }
+      u.t += (move * speed * space * dt) / len;
       if (u.t > 1 || u.t < 0) {
         const nx = u.t > 1 ? r.x1 : r.x0;
         const ny = u.t > 1 ? r.y1 : r.y0;
@@ -395,8 +626,23 @@ export class Game {
           u.dir = pick.atStart ? 1 : -1;
         }
       }
+    } else {
+      u.stuck = 0;
+      u.blockedBy = null;
     }
     this.placeOnRoad(u, dt);
+    u.jammed = this.rammed(u, was.x, was.y, was.heading);
+    if (u.jammed) {
+      // Often only the move across to the other lane is in the way: try going on without it.
+      const { t, road, dir } = u;
+      Object.assign(u, was);
+      if (road === was.road && dir === was.dir) {
+        u.t = t;
+        this.placeOnRoad(u, dt, true);
+        u.jammed = this.rammed(u, was.x, was.y, was.heading);
+        if (u.jammed) Object.assign(u, was);
+      }
+    }
   }
 
   // The nearest thing worth eating at this size: guides the player when the area is cleared.
@@ -463,6 +709,7 @@ export class Game {
     this.updateGearPerks(dt);
     this.updateRunExtras(dt);
     this.updateDirector(dt);
+    this.listRoadVehicles();
     this.updateUnits(dt);
     this.updateAllies(dt);
     this.updatePeople(dt);
@@ -942,9 +1189,13 @@ export class Game {
     if (id === 'blackout') this.blackoutT = 30;
     if (id === 'evac') {
       const roads = this.city.roads.filter((r) => Math.hypot((r.x0 + r.x1) / 2 - k.x, (r.y0 + r.y1) / 2 - k.y) < this.viewSpan() * 0.9);
-      for (let i = 0; i < 4 && roads.length; i++) {
+      // Four buses, each on a clear stretch of street.
+      let buses = 0;
+      for (let tries = 0; buses < 4 && roads.length && tries < 40; tries++) {
         const r = this.rng.pick(roads);
-        const t = this.rng.next();
+        const t = 0.15 + this.rng.next() * 0.7;
+        if (!this.roadSpotFree(r.x0 + (r.x1 - r.x0) * t, r.y0 + (r.y1 - r.y0) * t, propDims('bus').w)) continue;
+        buses++;
         this.traffic.push({
           isCar: true, road: r, t, dir: this.rng.chance(0.5) ? 1 : -1, x: r.x0 + (r.x1 - r.x0) * t, y: r.y0 + (r.y1 - r.y0) * t, heading: 0,
           speed: 34, hp: CROWD.carHp * 2, maxHp: CROWD.carHp * 2, tier: 2, dead: false, model: 'bus', variant: 0, flash: 0, evac: true,
@@ -1476,16 +1727,21 @@ export class Game {
       tries = 0;
       while (this.traffic.length < wantCars && tries++ < wantCars * 6) {
         const r = roads[this.rng.int(0, roads.length - 1)];
-        const t = this.rng.next();
+        // Somewhere along the street, clear of the junctions at either end.
+        const rlen = Math.hypot(r.x1 - r.x0, r.y1 - r.y0) || 1;
+        const edge = Math.min(0.45, (JUNCTION_R + 12) / rlen);
+        const t = edge + this.rng.next() * (1 - 2 * edge);
         const x = r.x0 + (r.x1 - r.x0) * t;
         const y = r.y0 + (r.y1 - r.y0) * t;
         const d = Math.hypot(x - k.x, y - k.y);
-        // New cars drive in from beyond the edge of the screen, never pop up in view.
-        if (d > Math.max(400, span * 1.6) || (!initial && d < span * 1.1)) continue;
+        // New cars drive in from beyond the edge of the screen, never pop up in view, and never
+        // on top of another vehicle.
+        const model = this.rng.pick(['car', 'car', 'hatchback', 'taxi', 'van', 'pickup', 'bus']);
+        if (d > Math.max(400, span * 1.6) || (!initial && d < span * 1.1) || !this.roadSpotFree(x, y, propDims(model).w)) continue;
         this.traffic.push({
           isCar: true, road: r, t, dir: this.rng.chance(0.5) ? 1 : -1, x, y, heading: 0,
           speed: this.rng.range(28, 44), hp: CROWD.carHp, maxHp: CROWD.carHp, tier: 2, dead: false,
-          model: this.rng.pick(['car', 'car', 'hatchback', 'taxi', 'van', 'pickup', 'bus']), variant: this.rng.int(0, 2), flash: 0,
+          model, variant: this.rng.int(0, 2), flash: 0,
         });
       }
     }
@@ -1640,37 +1896,49 @@ export class Game {
   updateTraffic(dt) {
     const k = this.kaiju;
     const span = this.viewSpan();
-    const { graph, key } = this.city.roadGraph;
     for (const c of this.traffic) {
       if (c.dead) continue;
+      const was = c.placed && { x: c.x, y: c.y, heading: c.heading, t: c.t, road: c.road, dir: c.dir, plan: c.plan, lastTurn: c.lastTurn };
+      if (!c.plan || c.plan.road !== c.road || c.plan.dir !== c.dir) c.plan = this.planTurn(c);
       const r = c.road;
+      const p = c.plan;
       const len = Math.hypot(r.x1 - r.x0, r.y1 - r.y0);
       const dk = Math.hypot(c.x - k.x, c.y - k.y);
       const flee = dk < k.r * 8 + 30;
-      c.t += (c.dir * c.speed * (flee ? 1.8 : 1) * dt) / len;
-      if (c.t > 1 || c.t < 0) {
-        const endX = c.t > 1 ? r.x1 : r.x0;
-        const endY = c.t > 1 ? r.y1 : r.y0;
-        const options = (graph.get(key(endX, endY)) || []).filter((o) => o !== r);
-        if (!options.length) {
+      const speed = c.speed * (flee ? 1.8 : 1);
+      const d0 = norm(r.x1 - r.x0, r.y1 - r.y0);
+      let space = 1;
+      if (c.placed) {
+        const ramp = Math.max(8, speed * 0.4);
+        if (c.lastTurn) this.holdJunction(c, c.lastTurn.nodeX, c.lastTurn.nodeY, c.lastTurn.route);
+        const cars = this.roadSpace(c, d0.x * c.dir, d0.y * c.dir, ramp);
+        const cross = this.junctionSpace(c, p.nodeX, p.nodeY, Math.abs(p.nodeT - c.t) * len, ramp, cars > 0.99, p.route);
+        space = Math.min(cars, cross);
+        // Stuck behind a roadblock or in a jam: make a U-turn (a busy junction takes longer to give up on).
+        if (this.stuckOnRoad(c, space, cars < 0.05 ? dt : dt * 0.5)) c.dir *= -1;
+      }
+      c.t += (c.dir * speed * space * dt) / len;
+      if (c.dir === p.dir && (c.dir > 0 ? c.t >= p.exitT : c.t <= p.exitT)) {
+        c.lastTurn = p;
+        if (!p.next) {
+          // A dead end: turn around.
           c.dir *= -1;
-          c.t = Math.max(0, Math.min(1, c.t));
+          c.t = p.exitT;
         } else {
-          const n = this.rng.pick(options);
-          c.road = n;
-          const atStart = Math.round(n.x0) === Math.round(endX) && Math.round(n.y0) === Math.round(endY);
-          c.dir = atStart ? 1 : -1;
-          c.t = atStart ? 0 : 1;
+          const over = Math.abs(c.t - p.exitT) * len;
+          c.road = p.next;
+          c.dir = p.nextDir;
+          c.t = p.entryT + (c.dir * over) / Math.hypot(p.next.x1 - p.next.x0, p.next.y1 - p.next.y0);
         }
       }
       const rr = c.road;
-      const dirx = (rr.x1 - rr.x0) * c.dir;
-      const diry = (rr.y1 - rr.y0) * c.dir;
-      const n = norm(dirx, diry);
+      const n = norm((rr.x1 - rr.x0) * c.dir, (rr.y1 - rr.y0) * c.dir);
       // Drive on the right-hand lane. The car steers toward its lane spot rather than snapping
-      // to it, so turns at junctions and U-turns at dead ends are smooth arcs.
-      const tx = rr.x0 + (rr.x1 - rr.x0) * c.t - n.y * 12;
-      const ty = rr.y0 + (rr.y1 - rr.y0) * c.t + n.x * 12;
+      // to it, so turns and U-turns are smooth arcs.
+      const tx = rr.x0 + (rr.x1 - rr.x0) * c.t - n.y * LANE;
+      const ty = rr.y0 + (rr.y1 - rr.y0) * c.t + n.x * LANE;
+      c.laneX = tx;
+      c.laneY = ty;
       const lag = Math.hypot(tx - c.x, ty - c.y);
       if (!c.placed || lag > 60) {
         c.x = tx;
@@ -1689,10 +1957,52 @@ export class Game {
         const dh = Math.atan2(Math.sin(want - c.heading), Math.cos(want - c.heading));
         c.heading += dh * Math.min(1, dt * 6);
       }
+      c.jammed = was && this.rammed(c, was.x, was.y, was.heading);
+      if (c.jammed) Object.assign(c, was);
       c.flash = Math.max(0, c.flash - dt);
       if (dk > Math.max(500, span * 1.8)) c.dead = true;
     }
     this.traffic = this.traffic.filter((c) => !c.dead);
+  }
+
+  // Where a car leaves its road and joins the next one: a random street out of the junction
+  // ahead, taken where the two lanes cross, so the car turns from lane to lane instead of
+  // cutting across the junction. With no way on (a dead end) it turns around at the end.
+  planTurn(c) {
+    const r = c.road;
+    const len = Math.hypot(r.x1 - r.x0, r.y1 - r.y0) || 1;
+    const nodeT = c.dir > 0 ? 1 : 0;
+    const nodeX = c.dir > 0 ? r.x1 : r.x0;
+    const nodeY = c.dir > 0 ? r.y1 : r.y0;
+    const plan = { road: r, dir: c.dir, nodeT, nodeX, nodeY, exitT: nodeT, next: null };
+    const { graph, key } = this.city.roadGraph;
+    const options = (graph.get(key(nodeX, nodeY)) || []).filter((o) => o !== r);
+    if (!options.length) return plan;
+    const n = this.rng.pick(options);
+    const atStart = Math.round(n.x0) === Math.round(nodeX) && Math.round(n.y0) === Math.round(nodeY);
+    const nextDir = atStart ? 1 : -1;
+    // Lane lines: node + d * dist + side(d) * LANE, with side(d) = (-d.y, d.x). Solve
+    // d1 * a - d2 * b = (side(d2) - side(d1)) * LANE for how far past the node the car turns
+    // (a, along this road) and where it joins the next (b, along that one).
+    const d1 = norm((r.x1 - r.x0) * c.dir, (r.y1 - r.y0) * c.dir);
+    const d2 = norm((n.x1 - n.x0) * nextDir, (n.y1 - n.y0) * nextDir);
+    const det = d1.y * d2.x - d1.x * d2.y;
+    let a = 0;
+    let b = 0;
+    if (Math.abs(det) > 0.2) {
+      const cx = (d1.y - d2.y) * LANE;
+      const cy = (d2.x - d1.x) * LANE;
+      a = Math.max(-30, Math.min(30, (cy * d2.x - cx * d2.y) / det));
+      b = Math.max(-30, Math.min(30, (d1.x * cy - d1.y * cx) / det));
+    }
+    plan.exitT = nodeT + (c.dir * a) / len;
+    plan.next = n;
+    plan.nextDir = nextDir;
+    plan.entryT = (atStart ? 0 : 1) + (nextDir * b) / (Math.hypot(n.x1 - n.x0, n.y1 - n.y0) || 1);
+    // The route through the junction, for claiming it: in along this lane, the turn, out along the next.
+    const lane = (d, dist) => ({ x: nodeX + d.x * dist - d.y * LANE, y: nodeY + d.y * dist + d.x * LANE });
+    plan.route = { from: r, to: n, points: [lane(d1, -JUNCTION_R - 8), lane(d1, a), lane(d2, JUNCTION_R + 8)] };
+    return plan;
   }
 
   damageCar(c, amount) {
@@ -1961,9 +2271,26 @@ export class Game {
     if ((def.vehicle && !def.flying) || type === 'roadblock') {
       const nr = this.nearestRoad(x, y);
       if (nr) {
-        u.road = nr.road;
-        u.t = nr.t;
         u.dir = 1;
+        // The nearest spot on the streets around there that is clear of other vehicles (a squad
+        // spreads out along them), or failing that the clearest one.
+        const length = (VEHICLE_BOX[def.model || type] || [u.r * 2])[0];
+        let best = null;
+        for (let i = 0; i < 12 && !(best && best.free); i++) {
+          const a = i * 2.4;
+          const at = i ? this.nearestRoad(x + Math.cos(a) * 60 * Math.sqrt(i), y + Math.sin(a) * 60 * Math.sqrt(i)) : nr;
+          if (!at || isWater(at.road.x, at.road.y)) continue;
+          for (const off of [0, 0.08, -0.08, 0.16, -0.16]) {
+            u.road = at.road;
+            u.t = Math.max(0.03, Math.min(0.97, at.t + off));
+            this.placeOnRoad(u);
+            const gap = this.roadClearance(u.x, u.y);
+            if (!best || gap > best.gap) best = { road: u.road, t: u.t, gap, free: gap >= length / 2 + 8 };
+            if (best.free) break;
+          }
+        }
+        u.road = best ? best.road : nr.road;
+        u.t = best ? best.t : nr.t;
         this.placeOnRoad(u);
       }
     }
