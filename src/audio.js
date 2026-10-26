@@ -346,3 +346,256 @@ export class Sfx {
     this.tone({ type: 'sine', f0: 1320, f1: 2640, dur: 0.22, vol: 0.16, delay: 0.06 });
   }
 }
+
+// ---------------------------------------------------------------- music
+// An adaptive soundtrack synthesised on the fly: E minor, driving drums, a gallop bass,
+// arpeggios and a lead. Layers come in as the rampage escalates (size, threat) and a boss
+// fight switches to a heavier Phrygian loop with stabs and a faster tempo. Changes land on
+// bar lines so it never stumbles.
+const PROGRESSIONS = {
+  // [semitones from E, minor?] per bar
+  rampage: [[0, true], [-4, false], [-2, false], [-5, false]], // Em C D B
+  boss: [[0, true], [1, false], [0, true], [-5, false]], // Em F Em B
+};
+const RIFF = [0, null, 2, 1, null, 0, 2, null, 3, null, 2, 1, 0, null, 1, null];
+const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+export class Music {
+  constructor(sfx) {
+    this.sfx = sfx;
+    this.enabled = true;
+    this.level = 0;
+    this.want = { level: 0, boss: false, bpm: 140, paused: false };
+    this.cur = { level: 0, boss: false, bpm: 140 };
+    this.step = 0;
+    this.bar = 0;
+    this.next = 0;
+    this.timer = null;
+  }
+
+  // Build the music bus the first time audio is running.
+  ensure() {
+    const c = this.sfx.ctx;
+    if (!c || c.state !== 'running') return false;
+    if (this.bus) return true;
+    this.bus = c.createGain();
+    this.bus.gain.value = 0;
+    this.tone = c.createBiquadFilter(); // muffled while paused
+    this.tone.type = 'lowpass';
+    this.tone.frequency.value = 18000;
+    const comp = c.createDynamicsCompressor();
+    comp.threshold.value = -14;
+    comp.ratio.value = 4;
+    this.bus.connect(this.tone).connect(comp).connect(c.destination);
+    // A dotted-eighth echo for the lead and arps.
+    this.echo = c.createDelay(1);
+    const fb = c.createGain();
+    fb.gain.value = 0.28;
+    const wet = c.createGain();
+    wet.gain.value = 0.3;
+    this.echo.connect(fb).connect(this.echo);
+    this.echo.connect(wet).connect(this.bus);
+    // Grit for the bass once things get heavy.
+    this.drive = c.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) curve[i] = Math.tanh(((i / 1023) * 2 - 1) * 3.5);
+    this.drive.curve = curve;
+    this.drive.connect(this.bus);
+    this.next = c.currentTime + 0.1;
+    this.timer = setInterval(() => this.tick(), 25);
+    return true;
+  }
+
+  // Called every frame with what the game is doing.
+  update({ level, boss = false, bpm = 140, paused = false }) {
+    this.want = { level, boss, bpm, paused };
+    if (!this.ensure()) return;
+    const c = this.sfx.ctx;
+    const vol = this.sfx.muted || !this.enabled || level < 0 ? 0 : 0.42;
+    this.bus.gain.setTargetAtTime(vol, c.currentTime, 0.4);
+    this.tone.frequency.setTargetAtTime(paused ? 700 : 18000, c.currentTime, 0.15);
+  }
+
+  setEnabled(on) {
+    this.enabled = on;
+  }
+
+  stepDur() {
+    return 60 / this.cur.bpm / 4;
+  }
+
+  tick() {
+    const c = this.sfx.ctx;
+    if (!c || c.state !== 'running') return;
+    if (this.next < c.currentTime - 0.3) this.next = c.currentTime + 0.05; // the tab was asleep
+    while (this.next < c.currentTime + 0.15) {
+      if (this.step % 16 === 0) {
+        // New bar: take on the wanted intensity, boss mode and tempo.
+        const w = this.want;
+        if (w.boss !== this.cur.boss || w.level > this.cur.level + 0) this.riser(this.next);
+        this.cur = { level: w.level, boss: w.boss, bpm: w.bpm };
+        this.bar = (this.bar + 1) % 4;
+      }
+      if (this.cur.level >= 0 && !this.sfx.muted && this.enabled) this.play(this.step % 16, this.next);
+      this.next += this.stepDur();
+      this.step++;
+    }
+  }
+
+  play(s, t) {
+    const { level, boss } = this.cur;
+    const prog = PROGRESSIONS[boss ? 'boss' : 'rampage'];
+    const [root, minor] = prog[this.bar];
+    const chord = [0, minor ? 3 : 4, 7].map((n) => n + root);
+    const lastBar = this.bar === 3;
+    const beat = this.stepDur() * 4;
+    // Drums
+    if (level >= 1) {
+      const kicks = level >= 4 ? [0, 3, 4, 8, 10, 11, 12, 14] : level >= 3 ? [0, 4, 8, 10, 12] : [0, 4, 8, 12];
+      if (kicks.includes(s)) this.kick(t);
+    }
+    if (level >= 2) {
+      if (s === 4 || s === 12) this.snare(t, 0.32);
+      if (lastBar && level >= 3 && s >= 13) this.snare(t, 0.12 + (s - 13) * 0.06); // fill
+      if (level >= 3 ? true : s % 2 === 0) this.hat(t, s % 4 === 2 ? 0.11 : 0.05, s % 4 === 2 && level >= 3);
+    }
+    // Bass: eighths at first, a gallop when it gets heavy.
+    if (level >= 1) {
+      const gallop = level >= 3 ? [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15] : [0, 2, 4, 6, 8, 10, 12, 14];
+      if (gallop.includes(s)) this.bass(28 + root + (level >= 3 && s % 4 === 3 ? 12 : 0), t, this.stepDur() * 1.6, level >= 3);
+    }
+    // Arpeggio over two octaves
+    if (level >= 0 && (level >= 2 || s % 2 === 0)) {
+      const n = chord[s % 3] + 12 * (Math.floor(s / 3) % 2) + 64;
+      this.pluck(n, t, level >= 2 ? 0.045 : 0.035);
+    }
+    // Pad on each bar
+    if (s === 0) this.pad(chord.map((n) => n + 52), t, beat * 4, level >= 3 ? 0.035 : 0.05);
+    // Lead riff
+    if (level >= 3) {
+      const r = RIFF[(s + this.bar * 4) % 16];
+      if (r !== null) {
+        const n = (chord[r % 3] ?? chord[0]) + (r === 3 ? 12 : 0) + 76;
+        this.lead(n, t, this.stepDur() * 1.8, boss ? 0.05 : 0.04);
+      }
+    }
+    // Boss stabs on the off-beat accents
+    if (boss && [0, 6, 12].includes(s)) this.stab(chord.map((n) => n + 64), t);
+  }
+
+  // ---- instruments
+  voice(type, f, t, dur, vol, { attack = 0.005, dest = this.bus, filter = 0, detune = 0 } = {}) {
+    const c = this.sfx.ctx;
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.value = f;
+    o.detune.value = detune;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let node = o;
+    if (filter) {
+      const fl = c.createBiquadFilter();
+      fl.type = 'lowpass';
+      fl.frequency.setValueAtTime(filter, t);
+      fl.frequency.exponentialRampToValueAtTime(Math.max(80, filter * 0.25), t + dur);
+      o.connect(fl);
+      node = fl;
+    }
+    node.connect(g).connect(dest);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+    return g;
+  }
+
+  kick(t) {
+    const c = this.sfx.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    g.gain.setValueAtTime(0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(g).connect(this.bus);
+    o.start(t);
+    o.stop(t + 0.32);
+  }
+
+  noiseHit(t, dur, vol, type, f, q = 0.8) {
+    const c = this.sfx.ctx;
+    const s = c.createBufferSource();
+    s.buffer = this.sfx.noiseBuf;
+    const fl = c.createBiquadFilter();
+    fl.type = type;
+    fl.frequency.value = f;
+    fl.Q.value = q;
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(fl).connect(g).connect(this.bus);
+    s.start(t, Math.random() * 0.5);
+    s.stop(t + dur + 0.02);
+  }
+
+  snare(t, vol) {
+    this.noiseHit(t, 0.18, vol, 'bandpass', 1900, 0.7);
+    this.voice('triangle', 190, t, 0.1, vol * 0.6);
+  }
+
+  hat(t, vol, open) {
+    this.noiseHit(t, open ? 0.14 : 0.04, vol, 'highpass', 8000);
+  }
+
+  bass(m, t, dur, heavy) {
+    const f = midiHz(m);
+    this.voice('sawtooth', f, t, dur, heavy ? 0.16 : 0.2, { filter: heavy ? 1600 : 900, dest: heavy ? this.drive : this.bus });
+    this.voice('sine', f, t, dur, 0.22);
+  }
+
+  pluck(m, t, vol) {
+    const g = this.voice('square', midiHz(m), t, this.stepDur() * 1.5, vol, { filter: 3200 });
+    g.connect(this.echo);
+  }
+
+  pad(notes, t, dur, vol) {
+    for (const n of notes) {
+      for (const d of [-9, 9]) this.voice('sawtooth', midiHz(n), t, dur, vol, { attack: dur * 0.3, filter: 1400, detune: d });
+    }
+  }
+
+  lead(m, t, dur, vol) {
+    for (const d of [-7, 7]) {
+      const g = this.voice('sawtooth', midiHz(m), t, dur, vol, { filter: 4200, detune: d });
+      g.connect(this.echo);
+    }
+  }
+
+  stab(notes, t) {
+    for (const n of notes) this.voice('sawtooth', midiHz(n), t, 0.16, 0.06, { filter: 2600 });
+  }
+
+  // A noise sweep up into the next bar when the music steps up.
+  riser(t) {
+    const c = this.sfx.ctx;
+    const s = c.createBufferSource();
+    s.buffer = this.sfx.noiseBuf;
+    s.loop = true;
+    const fl = c.createBiquadFilter();
+    fl.type = 'bandpass';
+    fl.Q.value = 3;
+    const t0 = Math.max(c.currentTime, t - this.stepDur() * 8);
+    if (t - t0 < 0.1) return;
+    fl.frequency.setValueAtTime(400, t0);
+    fl.frequency.exponentialRampToValueAtTime(6000, t);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    s.connect(fl).connect(g).connect(this.bus);
+    s.start(t0);
+    s.stop(t + 0.15);
+    this.kick(t);
+    this.noiseHit(t, 0.8, 0.12, 'lowpass', 3000);
+  }
+}

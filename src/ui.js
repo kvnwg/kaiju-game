@@ -276,7 +276,7 @@ export class UI {
     this.show('revive');
   }
 
-  showPause({ quality, pixelArt, sound, onQuality, onPixelArt, onSound, onResume, onQuit }) {
+  showPause({ quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
     el.innerHTML = `<div class="panel small">
@@ -287,6 +287,8 @@ export class UI {
         </div>
         <h3>Sound</h3>
         <div class="segs" id="soundSegs"><button class="seg ${sound ? 'on' : ''}" data-s="1">On</button><button class="seg ${sound ? '' : 'on'}" data-s="0">Off</button></div>
+        <h3>Music</h3>
+        <div class="segs" id="musicSegs"><button class="seg ${musicOn ? 'on' : ''}" data-m="1">On</button><button class="seg ${musicOn ? '' : 'on'}" data-m="0">Off</button></div>
         <h3>Look</h3>
         <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Voxel</button><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Retro pixel</button></div>
         <h3>Graphics</h3>
@@ -302,6 +304,10 @@ export class UI {
     el.querySelectorAll('#soundSegs .seg').forEach((b) => b.addEventListener('click', () => {
       onSound(b.dataset.s === '1');
       el.querySelectorAll('#soundSegs .seg').forEach((x) => x.classList.toggle('on', x === b));
+    }));
+    el.querySelectorAll('#musicSegs .seg').forEach((b) => b.addEventListener('click', () => {
+      onMusic(b.dataset.m === '1');
+      el.querySelectorAll('#musicSegs .seg').forEach((x) => x.classList.toggle('on', x === b));
     }));
     el.querySelectorAll('#lookSegs .seg').forEach((b) => b.addEventListener('click', () => {
       onPixelArt(b.dataset.px === '1');

@@ -4,7 +4,7 @@ import { Input } from './input.js';
 import { UI } from './ui.js';
 import { loadProfile, saveProfile, recordRun } from './storage.js';
 import { KAIJU } from './config.js';
-import { Sfx } from './audio.js';
+import { Sfx, Music } from './audio.js';
 
 const canvas = document.getElementById('game');
 const input = new Input(canvas, document.getElementById('stick'));
@@ -16,6 +16,22 @@ const loading = document.getElementById('loading');
 let profile = loadProfile();
 const sfx = new Sfx();
 sfx.setMuted(profile.sound === false);
+const music = new Music(sfx);
+music.setEnabled(profile.music !== false);
+
+// How hard the soundtrack should hit right now: menu 0, then by size and threat, bosses 4.
+function musicState() {
+  const inRun = game && !ui.hud.classList.contains('hidden');
+  if (!inRun) return { level: 0, bpm: 128 };
+  if (game.state === 'won' || game.state === 'lost') return { level: -1, bpm: 128 };
+  if (game.state === 'dead') return { level: 0, bpm: 120 };
+  const k = game.kaiju;
+  const boss = Boolean(game.boss && !game.boss.dead) || game.gateTimer !== null || game.bossTimer !== null;
+  let level = k.stage <= 1 ? 1 : k.stage <= 3 ? 2 : 3;
+  if (game.threat > 60) level++;
+  if (boss) level = 4;
+  return { level: Math.min(4, level), boss, bpm: (boss ? 164 : 140 + k.stage * 3), paused: paused || game.state === 'picking' };
+}
 // Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
 for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', 'touchstart', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
 let renderer = null;
@@ -175,6 +191,12 @@ function togglePause(force) {
       quality: renderer.qualityName,
       pixelArt: renderer.pixelArt,
       sound: !sfx.muted,
+      musicOn: music.enabled,
+      onMusic: (on) => {
+        music.setEnabled(on);
+        profile.music = on;
+        saveProfile(profile);
+      },
       onSound: (on) => {
         sfx.setMuted(!on);
         profile.sound = on;
@@ -249,6 +271,7 @@ function frame(now) {
       }
     }
     renderer.render(game, inRun && !paused ? dt : dt * 0.25);
+    music.update(musicState());
     if (inRun) {
       ui.updateHud(game);
       updatePreyArrow();
