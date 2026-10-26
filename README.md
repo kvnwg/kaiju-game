@@ -2,18 +2,19 @@
 
 A playable browser prototype of the **Kaiju Rampage** core run loop, built from the game design doc. It is rendered as an endless, procedurally generated voxel city that is built around you as you move. Every run gets a new world, and you always start human-sized in a suburban backyard, eating people your own size (and hopping over the garden fences). You grow through backyards, houses, apartment blocks and towers until you are skyline-sized. The run ends in a boss fight against the Coast Guard Mech. The light goes from golden hour at the start of a run to neon night by the boss.
 
-It is plain ES modules with no build step. three.js r147 (with bloom) loads from jsDelivr, so the page needs an internet connection.
+It is plain ES modules; three.js r147 (with bloom) and the fonts are in `vendor/`, so the dev page needs no build and no internet. `npm run build` makes the minified release for CrazyGames (see [LAUNCH.md](LAUNCH.md)).
 
 ## Run it
 
 ```sh
 npm start            # serves the folder on http://localhost:8080 (or use any static server)
 npm test             # unit tests + headless autopilot runs (Node 20+)
+npm ci && npm run build   # the release: dist/ and dist/kaiju-rampage.zip for CrazyGames
 ```
 
 - **Move:** drag anywhere for a floating virtual stick, or use WASD / arrow keys. Movement is relative to the tilted camera. Attacks fire automatically at the nearest target.
-- **Pause:** the II button, Esc or P. The pause menu has a graphics setting (High, Medium or Low). The game also steps down on its own if frames run slow.
-- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed (and with it the world), `?q=low` sets quality, `?look=pixel` turns on the optional retro pixel filter. `?debug=1` enables G (grow a stage, skipping its size boss), N (fill the growth bar to call the size boss), B (summon the boss early at Apex), K (kill the boss) and H (heal).
+- **Pause:** the II button or P (not Escape: on CrazyGames it leaves fullscreen). The pause menu has a graphics setting (High, Medium or Low). The game also steps down on its own if frames run slow.
+- **URL flags:** `?play` skips the menu, `?kaiju=volt` picks a kaiju, `?seed=7` fixes the run seed (and with it the world), `?q=low` sets quality, `?look=pixel` turns on the optional retro pixel filter. `?debug=1` enables G (grow a stage, skipping its size boss), N (fill the growth bar to call the size boss), B (summon the boss early at Apex), K (kill the boss), H (heal) and the dev buttons in the account panel; release builds ignore it.
 
 ## What's in it
 
@@ -36,7 +37,9 @@ npm test             # unit tests + headless autopilot runs (Node 20+)
 | Augments | Vampire Survivors-style levelling. Eating and smashing fill an **XP bar** (separate from size); every level-up is a pick of 3, about every 10-20 seconds, ~40 per run. Hold up to **6 moves and 6 passives**. **Moves** (Claw Strike, Tail Spin, Spine Missiles, Car Toss, Roar, Laser Eyes, Seismic Slam, Atomic Breath, Meteor Call) level 1-8: most levels are stat bumps, key levels add the signature upgrade (Claw Lv3 strikes twice, Laser Lv5 splits in 3, Tail Spin Lv6 becomes a cyclone...). **Moves** also include Lightning Breath (chains through metal), Building Hurl, Acid Spit (melting puddles), Ice Breath (frozen units shatter in one hit), Vortex Belch, Orbiting Spines (always on), Magnetic Roar (yanks vehicles into a heap), Frenzy Bite and Brood Call (hatchling allies). **Passives** level 1-5: stat passives (Might, Kaiju-Sized area, Adrenaline cooldown, Long Legs speed, Toughness, Appetite XP, Scavenger scrap, Thick Hide, Glass Cannon, Momentum, Spiked Hide, Big Bones crush radius, Iron Stomach, Magnet Jaws orb range, Steady Footing, Overclock) and perks (Gas Main, Magnetic Hide, Rage Mode, Echo, Perfect Rhythm, Bloodlust, Power Surge). **Evolutions**: a maxed move plus its partner passive is offered as an evolution at the next level-up, taking no slot: Omega Beam (Laser Eyes + Might), Cyclone King (Tail Spin + Long Legs), Spine Storm (Spine Missiles + Echo), Meltdown (Atomic Breath + Rage Mode), Extinction Event (Meteor Call + Kaiju-Sized), Earthbreaker (Seismic Slam + Toughness), Junkyard Storm (Car Toss + Magnetic Hide) and Doom Roar (Roar + Adrenaline). Kills scatter loot orbs that pay a little XP or scrap when you walk close. When everything is maxed, picks offer a growth spurt or scrap. 3 rerolls per run |
 | Run loop | 2 synergy sets, rerolls, escalating military, the boss, revive, results, difficulty tiers and local best scores |
 
-Not built yet: the lair, eggs, gems, the shop, live ops, the other cities, and real ad or IAP SDKs.
+Between runs there is a hub (gear, kaiju, mutations, a shop with crates and daily deals, a pass, quests, patrols and a lucky wheel). It earns through CrazyGames video ads only: an ad break after each match, and optional rewarded ads (no real-money purchases). Saves go through the CrazyGames SDK's Data module on CrazyGames and to localStorage elsewhere (`src/platform.js`).
+
+Not built yet: the other cities.
 
 ## Code map
 
