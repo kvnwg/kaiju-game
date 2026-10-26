@@ -21,7 +21,7 @@ export class MoveSystem {
 
   // Global area from the Kaiju-Sized passive.
   size() {
-    return 1 + 0.1 * this.g.level('area');
+    return 1 + 0.1 * this.g.level('area') + (this.g.meta && this.g.meta.perks.crystalSpines ? 0.15 : 0);
   }
 
   st(id) {
@@ -30,7 +30,7 @@ export class MoveSystem {
 
   cooldown(id) {
     const m = MOVES.find((mv) => mv.id === id);
-    let cd = m.cd * Math.max(0.3, this.st(id).cd) * (1 - 0.08 * this.g.level('adrenaline'));
+    let cd = m.cd * Math.max(0.3, this.st(id).cd) * (1 - 0.08 * this.g.level('adrenaline')) * (this.g.meta && this.g.meta.perks.atomicHeart ? 0.9 : 1);
     if (id === 'spineMissiles' && this.g.has('spineStorm')) cd *= 0.35;
     if (id === 'tailSpin' && this.g.has('cycloneKing')) cd = 3;
     return cd;

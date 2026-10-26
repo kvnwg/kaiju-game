@@ -365,6 +365,29 @@ export class Sfx {
     else if (e.type === 'multikill') this.comboTier(Math.min(3, e.tier));
   }
 
+  // A bell ding that climbs with rarity (0 common .. 5 mythic): crate reveals, augment reels.
+  ding(rarity = 0) {
+    if (!this.ok('ding', 0.05)) return;
+    const base = 660 * Math.pow(2, Math.min(5, rarity) / 6);
+    this.tone({ type: 'triangle', f0: base, f1: base, dur: 0.5 + rarity * 0.08, vol: 0.16, attack: 0.002 });
+    this.tone({ type: 'sine', f0: base * 2.01, f1: base * 2.01, dur: 0.35, vol: 0.08, attack: 0.002 });
+    this.tone({ type: 'sine', f0: base * 3.02, f1: base * 3.02, dur: 0.2, vol: 0.04, attack: 0.002 });
+    if (rarity >= 3) [1.25, 1.5, 2].forEach((m, i) => this.tone({ type: 'square', f0: base * m, f1: base * m, dur: 0.12, vol: 0.05, delay: 0.08 + i * 0.07 }));
+  }
+
+  // One reel click as a slot spins.
+  tick() {
+    if (!this.ok('tick', 0.03)) return;
+    this.noise({ dur: 0.025, vol: 0.12, f0: 5000, f1: 3000, type: 'bandpass', q: 4 });
+  }
+
+  // Cash register: a purchase or a big payout.
+  cash() {
+    if (!this.ok('cash', 0.2)) return;
+    [1320, 1760, 2640].forEach((f, i) => this.tone({ type: 'square', f0: f, f1: f, dur: 0.07, vol: 0.06, delay: i * 0.05 }));
+    this.noise({ dur: 0.18, vol: 0.08, f0: 7000, f1: 4000, type: 'bandpass', q: 2, delay: 0.12 });
+  }
+
   // Charge: a whoosh. Perfect dodge: a bright rising chime.
   dash() {
     if (!this.ok('dash', 0.1)) return;

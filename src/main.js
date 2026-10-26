@@ -2,9 +2,11 @@ import { Game } from './game.js';
 import { Renderer3D } from './render3d.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
-import { loadProfile, saveProfile, recordRun } from './storage.js';
-import { KAIJU } from './config.js';
+import { loadSave, writeSave, clearSave } from './storage.js';
+import { KAIJU, WORLD } from './config.js';
 import { Sfx, Music } from './audio.js';
+import { Hub } from './hub.js';
+import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 
 const canvas = document.getElementById('game');
 const input = new Input(canvas, document.getElementById('stick'));
@@ -13,15 +15,22 @@ const params = new URLSearchParams(location.search);
 const debug = params.has('debug');
 const loading = document.getElementById('loading');
 
-let profile = loadProfile();
+// The save holds the whole meta game (currencies, gear, quests...); see meta.js.
+let save = loadSave();
+let hub = null;
+const now = () => Date.now() + (hub ? hub.timeShift || 0 : 0);
+const persist = () => writeSave(save);
+rollover(save, now());
+const settings = save.settings;
 const sfx = new Sfx();
-sfx.setMuted(profile.sound === false);
+sfx.setMuted(settings.sound === false);
 const music = new Music(sfx);
-music.setEnabled(profile.music !== false);
+music.setEnabled(settings.music !== false);
 
 // How hard the soundtrack should hit right now: menu 0, then by size and threat, bosses 4.
 function musicState() {
   const inRun = game && !ui.hud.classList.contains('hidden');
+  if (titleActive) return { level: 2, bpm: 132 };
   if (!inRun) return { level: 0, bpm: 128 };
   if (game.state === 'won' || game.state === 'lost') return { level: -1, bpm: 128 };
   if (game.state === 'dead') return { level: 0, bpm: 120 };
@@ -37,21 +46,34 @@ for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', '
 let renderer = null;
 let game = null;
 let paused = false;
-let lastSettings = { kaijuId: 'rex', difficulty: 'normal' };
+let lastSettings = { kaijuId: 'rex', chapter: 1, mode: 'normal' };
+let titleActive = false;
+let runCtx = null;
 let hintUntil = 0;
 let movedFor = 0;
 let pendingGrowBanner = null;
 
 function defaultQuality() {
-  const saved = profile.quality;
+  const saved = settings.quality;
   if (saved) return saved;
   const mobile = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   return params.get('q') || (mobile ? 'medium' : 'high');
 }
 
-function startRun({ kaijuId, difficulty, firstRun = false }) {
-  lastSettings = { kaijuId, difficulty };
-  game = new Game({ kaijuId, difficulty, firstRun, seed: Number(params.get('seed')) || Date.now() });
+// A chapter run: costs energy (the very first run is free), carries the meta loadout in.
+function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
+  if (!firstRun && !spendEnergy(save, ECONOMY.energyPerRun, now())) {
+    showHub();
+    hub.openEnergy();
+    return;
+  }
+  persist();
+  lastSettings = { kaijuId, chapter, mode };
+  runCtx = { chapter, mode, kaijuId };
+  renderer.cinematic = null;
+  titleActive = false;
+  hub.hide();
+  game = new Game({ kaijuId, difficulty: mode, firstRun, chapter, meta: loadout(save, kaijuId), seed: Number(params.get('seed')) || Date.now() });
   renderer.startRun(game);
   paused = false;
   ui.hideModals();
@@ -59,20 +81,57 @@ function startRun({ kaijuId, difficulty, firstRun = false }) {
   ui.augSig = null;
   movedFor = 0;
   pendingGrowBanner = null;
-  hintUntil = firstRun || profile.runs < 2 ? performance.now() + 7000 : 0;
+  hintUntil = firstRun || save.runs < 2 ? performance.now() + 7000 : 0;
   ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');
 }
 
-function showMenu() {
-  // Keep the city on screen behind the menu.
-  if (!game || game.state === 'playing') {
-    game = new Game({ seed: 1 });
+// The hub, with the city (or the wreckage of the last run) behind it.
+function showHub(tab) {
+  renderer.cinematic = null;
+  titleActive = false;
+  if (!game || game.state === 'playing' || game.state === 'dead' || game.state === 'picking') {
+    game = new Game({ seed: 1, kaijuId: save.lastKaiju, meta: { skin: save.skins.equipped } });
     renderer.startRun(game);
   }
   ui.show('hud', false);
   ui.hint('');
   ui.hideModals();
-  ui.showMenu(profile, { onStart: (s) => startRun(s) });
+  hub.show(tab);
+  // Habby-style: the daily reward greets the player once a day.
+  if (loginReady(save, now()) && save.tutorialDone) hub.openLogin();
+}
+
+// The title: a live cinematic of a kaiju wrecking a skyline in the distance.
+function showTitle() {
+  game = new Game({ seed: 11, kaijuId: 'rex' });
+  // Set the scene downtown, among the towers.
+  let best = null;
+  for (let r = -12; r <= 12; r++) {
+    for (let c = -12; c <= 12; c++) {
+      const z = game.city.zoneFor(c, r);
+      if (z.style === 'neon' && z.density > 0.6 && (!best || c * c + r * r < best.d)) best = { c, r, d: c * c + r * r };
+    }
+  }
+  if (best) {
+    game.kaiju.x = (best.c + 0.5) * WORLD.cell;
+    game.kaiju.y = (best.r + 0.5) * WORLD.cell;
+  }
+  for (let i = 1; i < 5; i++) game.grow();
+  game.streamWorld(true);
+  game.kaiju.r = game.stage.radius;
+  game.kaiju.level = 999;
+  game.director.spawnT = 3;
+  renderer.startRun(game);
+  game.diff = { ...game.diff, enemyDmg: 0 };
+  renderer.cinematic = { yaw: 0.6, dist: 13, height: 0.9, lookH: 1.4, side: 0.3, dusk: 0.92 };
+  titleActive = true;
+  ui.show('hud', false);
+  hub.showTitle(() => {
+    titleActive = false;
+    renderer.cinematic = null;
+    if (!save.tutorialDone) startRun({ kaijuId: 'rex', firstRun: true });
+    else showHub('battle');
+  });
 }
 
 const CALLOUTS = ['Smashing!', 'Rampage!', 'Unstoppable!', 'Kaiju-geddon!', 'Extinction event!'];
@@ -99,7 +158,7 @@ function handleEvents(events) {
         if (game.state !== 'picking') break;
         hintUntil = 0;
         ui.hint('');
-        ui.showPick(game, { onChoose: (id) => game.choose(id), onReroll: (ad) => game.reroll(ad) });
+        showPick();
         break;
       case 'picked':
         ui.show('pick', false);
@@ -142,11 +201,18 @@ function handleEvents(events) {
       case 'bossDefeated':
         ui.banner('City claimed!', `${e.name} defeated`, 'grow');
         break;
-      case 'dead':
-        ui.showRevive({ onRevive: () => game.revive(), onGiveUp: () => game.giveUp() });
+      case 'dead': {
+        const paid = game.revives - (game.reviveAvailable ? 0 : 1) - (game.meta.revives - game.freeRevives) || 0;
+        const price = ECONOMY.reviveGems[Math.max(0, paid)] || null;
+        hub.showRevive({
+          free: game.freeRevives > 0, ad: game.reviveAvailable, gems: price,
+          onRevive: (how) => game.revive(how === 'gems'),
+          onGiveUp: () => game.giveUp(),
+        });
         break;
+      }
       case 'revived':
-        ui.show('revive', false);
+        hub.closeModal();
         break;
       case 'end':
         onRunEnd(e.results);
@@ -157,29 +223,57 @@ function handleEvents(events) {
   }
 }
 
+// The run is booked the moment it ends (so closing the tab loses nothing); the doubling ad adds
+// the second half on top.
 function onRunEnd(results) {
   ui.show('revive', false);
   ui.hint('');
-  const { newBest, unlocked } = recordRun(profile, results);
-  saveProfile(profile);
-  const showIt = () =>
-    ui.showResults(game.results, {
-      best: profile.best[`${results.cityId}:${results.difficulty}`] || 0,
-      newBest,
-      unlocked,
-      onDouble: () => {
-        if (game.doubleLoot()) showIt();
-      },
-      onAgain: () => startRun(lastSettings),
-      onMenu: () => showMenu(),
-    });
-  showIt();
+  hub.closeModal();
+  const ctx = runCtx || { chapter: 1, mode: 'normal' };
+  const rewards = runRewards(save, results, ctx);
+  const levelsBefore = save.account.level;
+  applyRun(save, results, ctx, rewards, {}, now());
+  persist();
+  let doubled = false;
+  const show = () => hub.showRunResults(results, rewards, ctx, {
+    doubled,
+    onDouble: () => {
+      if (doubled || !useAd(save, 'double', now())) return;
+      doubled = true;
+      grant(save, { scrap: rewards.scrap, dna: rewards.dna, passXp: rewards.passXp });
+      persist();
+      sfx.cash();
+      show();
+    },
+    onContinue: () => {
+      showHub('battle');
+      if (save.account.level > levelsBefore) hub.toast(`Account level ${save.account.level}! +${ECONOMY.levelUpEnergy} energy, +${ECONOMY.levelUpGems} gems`);
+    },
+    onAgain: () => startRun(lastSettings),
+  });
+  show();
+}
+
+// The augment pick, with the extra reroll behind a rewarded ad.
+function showPick() {
+  ui.showPick(game, {
+    onChoose: (id) => game.choose(id),
+    onReroll: (ad) => {
+      if (!ad) {
+        if (game.reroll(false)) showPick();
+        return;
+      }
+      hub.watchAd('reroll', () => {
+        if (game.reroll(true)) showPick();
+      });
+    },
+  });
 }
 
 function setQuality(q) {
   renderer.setQuality(q);
-  profile.quality = q;
-  saveProfile(profile);
+  settings.quality = q;
+  persist();
 }
 
 function togglePause(force) {
@@ -194,25 +288,25 @@ function togglePause(force) {
       musicOn: music.enabled,
       onMusic: (on) => {
         music.setEnabled(on);
-        profile.music = on;
-        saveProfile(profile);
+        settings.music = on;
+        persist();
       },
       onSound: (on) => {
         sfx.setMuted(!on);
-        profile.sound = on;
-        saveProfile(profile);
+        settings.sound = on;
+        persist();
         showSound();
       },
       onQuality: (q) => setQuality(q),
       onPixelArt: (on) => {
         renderer.setPixelArt(on);
-        profile.pixelArt = on;
-        saveProfile(profile);
+        settings.pixelArt = on;
+        persist();
       },
       onResume: () => togglePause(false),
       onQuit: () => {
         paused = false;
-        showMenu();
+        showHub('battle');
       },
     });
   } else ui.show('pause', false);
@@ -225,8 +319,8 @@ const showSound = () => soundBtn.classList.toggle('muted', sfx.muted);
 showSound();
 soundBtn.addEventListener('click', () => {
   sfx.setMuted(!sfx.muted);
-  profile.sound = !sfx.muted;
-  saveProfile(profile);
+  settings.sound = !sfx.muted;
+  persist();
   showSound();
   if (!sfx.muted) sfx.click();
 });
@@ -255,6 +349,15 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  if (game && renderer && titleActive) {
+    // The title's kaiju wanders in a slow loop through the city, wrecking it.
+    const t = now / 1000;
+    game.setInput(Math.cos(t * 0.45), Math.sin(t * 0.45));
+    game.kaiju.hp = game.kaiju.maxHp;
+    game.kaiju.biomass = 0;
+    if (game.state === 'playing') game.update(dt);
+    game.drainEvents();
+  }
   if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
     if (inRun && !paused) {
@@ -303,19 +406,28 @@ function updatePreyArrow() {
 function boot() {
   try {
     if (!window.THREE) throw new Error('three.js did not load');
-    renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || profile.pixelArt === true, floaterLayer: document.getElementById('floaters') });
+    renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || settings.pixelArt === true, floaterLayer: document.getElementById('floaters') });
     renderer.onVfx = (list, g) => sfx.handleVfx(list, g);
     renderer.onQualityChange = (q) => {
-      profile.quality = q;
-      saveProfile(profile);
+      settings.quality = q;
+      persist();
     };
   } catch (err) {
     loading.innerHTML = `<div class="panel small"><h2>3D isn't available</h2><p class="muted">This browser couldn't start WebGL (${err.message}). Try a recent Chrome, Safari or Firefox.</p></div>`;
     return;
   }
   // The very first session drops straight into the suburbs as Rex: no login, no menus.
-  if (!profile.tutorialDone || params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', difficulty: 'normal', firstRun: !profile.tutorialDone });
-  else showMenu();
+  hub = new Hub({ app: document.getElementById('app'), getSave: () => save, persist, onPlay: (opts) => startRun(opts), sfx, getNow: now });
+  hub.debug = debug;
+  hub.onReset = () => {
+    clearSave();
+    save = loadSave();
+    location.reload();
+  };
+  // `?play` skips straight into a run; otherwise the cinematic title comes first.
+  if (params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', firstRun: true });
+  else if (params.has('hub')) showHub('battle');
+  else showTitle();
   loading.classList.add('hidden');
   requestAnimationFrame(frame);
 }
@@ -325,4 +437,4 @@ window.addEventListener('resize', () => renderer && renderer.resize());
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, sfx, startRun, showMenu, profile: () => profile };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, sfx, startRun, showHub, save: () => save, persist };

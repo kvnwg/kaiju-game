@@ -9,6 +9,12 @@ import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
 import { PERSON_VARIANTS, DOCTOR } from './models.js';
 import { HOSPITAL_TYPES } from './buildings.js';
+import { CHAPTER_MUL } from './meta.js';
+
+// What a run gets from the meta game (gear, Mutations, kaiju stars). A plain run uses this.
+const NEUTRAL_META = {
+  atkMul: 1, hpMul: 1, speedMul: 1, xpMul: 1, pickupMul: 1, dashCdMul: 1, rerolls: 0, revives: 0, perks: {}, fangs: null, skin: null,
+};
 
 // Aim time before a projectile leaves the barrel (seconds); shells, artillery and lasers
 // already telegraph with ground markers.
@@ -18,10 +24,15 @@ const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone
 export { distToRect, distToSegment };
 
 export class Game {
-  constructor({ kaijuId = 'rex', cityId = 'harbor', difficulty = 'normal', seed = Date.now(), citySeed = seed, firstRun = false } = {}) {
+  constructor({ kaijuId = 'rex', cityId = 'harbor', difficulty = 'normal', seed = Date.now(), citySeed = seed, firstRun = false, chapter = 1, meta = null } = {}) {
     this.def = KAIJU[kaijuId];
     this.cityDef = CITIES[cityId];
-    this.diff = DIFFICULTIES[difficulty];
+    // Each chapter multiplies enemy health and damage; gear and Mutations are what keep up.
+    this.chapter = chapter;
+    this.meta = { ...NEUTRAL_META, ...(meta || {}), perks: { ...((meta && meta.perks) || {}) } };
+    const base = DIFFICULTIES[difficulty];
+    const cm = Math.pow(CHAPTER_MUL, chapter - 1);
+    this.diff = { ...base, enemyHp: base.enemyHp * cm, enemyDmg: base.enemyDmg * cm };
     this.rng = createRng(seed);
     this.firstRun = firstRun;
     // Every run gets its own endless world, generated cell by cell around the kaiju; the
@@ -88,16 +99,24 @@ export class Game {
     this.pick = null;
     this.picksMade = 0;
     this.pendingPicks = 0; // level-ups waiting for their augment pick
-    this.rerolls = 3; // per run, Vampire Survivors style
-    this.reviveAvailable = true;
+    this.rerolls = 3 + this.meta.rerolls; // per run, Vampire Survivors style
+    this.reviveAvailable = true; // the ad revive
+    this.freeRevives = this.meta.revives; // from the Nine Lives Mutation
     this.adRerollAvailable = true;
     this.director = { spawnT: ESCALATION[1].firstDelay, jetT: 4, crowdT: 0, waveT: Infinity, eliteT: Infinity };
     this.events = [];
     this.results = null;
     this.stats = {
       scrap: 0, biomass: 0, buildings: 0, destroyed: 0, units: 0, people: 0,
-      landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 },
+      landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 }, gateKills: [],
     };
+    this.kaiju.maxHp = this.kaiju.hp = this.maxHpFor(1);
+    // Titan Heart: start one level up, with a pick waiting.
+    if (this.meta.perks.titanHeart) {
+      this.kaiju.level = 2;
+      this.pendingPicks = 1;
+    }
+    this.perkT = { hook: 3, rocket: 5 };
     this.trainRespawn = 0;
     this.streamWorld(true);
     this.populate(true);
@@ -185,7 +204,7 @@ export class Game {
 
   // 0 = golden afternoon, 1 = neon night. Follows run progress so the boss fight is at night.
   kaijuSpeed() {
-    return this.stage.speed * this.def.speedMult * (1 + 0.08 * this.level('longLegs'));
+    return this.stage.speed * this.def.speedMult * this.meta.speedMul * (1 + 0.08 * this.level('longLegs'));
   }
 
   get dusk() {
@@ -234,7 +253,7 @@ export class Game {
   }
 
   baseDamage() {
-    let m = this.stage.damage * (1 + 0.1 * this.level('might')) * (1 + 0.1 * this.level('glassCannon'));
+    let m = this.stage.damage * this.meta.atkMul * (1 + 0.1 * this.level('might')) * (1 + 0.1 * this.level('glassCannon'));
     if (this.has('momentum')) m *= 1 + 0.08 * this.level('momentum') * (this.kaiju.momentum || 0);
     if (this.has('rageMode')) m *= 1 + (0.2 + 0.2 * this.level('rageMode')) * (1 - this.kaiju.hp / this.kaiju.maxHp);
     return m;
@@ -242,7 +261,7 @@ export class Game {
 
   // ---- stats from passives
   maxHpFor(stage = this.kaiju.stage) {
-    return STAGES[stage].maxHp * this.def.hpMult * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon'));
+    return STAGES[stage].maxHp * this.def.hpMult * this.meta.hpMul * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon'));
   }
 
   scrapMult() {
@@ -387,6 +406,7 @@ export class Game {
     this.updateThreat(dt);
     this.updateKaiju(dt);
     this.updateAugments(dt);
+    this.updateGearPerks(dt);
     this.updateDirector(dt);
     this.updateUnits(dt);
     this.updateAllies(dt);
@@ -487,13 +507,16 @@ export class Game {
         if (u.dead || u.flying || k.dashHits.has(u) || Math.hypot(u.x - k.x, u.y - k.y) > k.r * 1.3 + u.r) continue;
         k.dashHits.add(u);
         const away = norm(u.x - k.x, u.y - k.y);
-        const nx = u.x + away.x * k.r * 1.2;
-        const ny = u.y + away.y * k.r * 1.2;
+        // Club Tail sends them flying.
+        const fling = this.meta.perks.clubTail ? 3 : 1.2;
+        if (this.meta.perks.clubTail) u.fear = Math.max(u.fear, 1.2);
+        const nx = u.x + away.x * k.r * fling;
+        const ny = u.y + away.y * k.r * fling;
         if (!u.road && !isWater(nx, ny) && !this.blockedAt(nx, ny, u.r * 0.6, u.def.mob ? u.tier : 0)) {
           u.x = nx;
           u.y = ny;
         }
-        this.damageUnit(u, this.baseDamage() * DASH.dmg);
+        this.damageUnit(u, this.baseDamage() * DASH.dmg * (this.meta.perks.whipTail ? 3 : 1));
       }
     }
     if (k.moving) {
@@ -661,14 +684,20 @@ export class Game {
   performAttack(target) {
     const k = this.kaiju;
     const atk = this.def.attack;
-    const dmg = this.baseDamage() * atk.mult;
+    let dmg = this.baseDamage() * atk.mult;
     const dir = norm(target.x - k.x, target.y - k.y);
     k.lastAttack = { kind: atk.kind, x: target.x, y: target.y, t: 0.25 };
     k.attackCount++;
     this.fxEvent({ t: 'attack', kind: atk.kind });
     k.facing = k.moving ? k.facing : dir;
+    // Razor Claws: critical hits.
+    if (this.meta.perks.razorClaws && this.rng.chance(0.15)) {
+      dmg *= 2;
+      this.fx.floaters.push({ x: target.x, y: target.y, h: k.r * 2, text: 'CRIT!', color: '#ff5a5a', life: 0.7, max: 0.7 });
+    }
     if (atk.kind === 'bite') {
-      this.damageTarget(target, dmg, dir, 'bite');
+      this.fangHit(target, dmg, dir, 'bite');
+      this.fangFollowUp(target, dmg, dir);
     } else if (atk.kind === 'pound') {
       const radius = k.r * atk.range;
       this.areaDamage(k.x, k.y, radius, dmg, 'hit', true);
@@ -679,7 +708,8 @@ export class Game {
       const chain = [target];
       let cur = target;
       let amount = dmg;
-      this.damageTarget(target, amount, dir, target.isPerson ? 'bite' : 'hit');
+      this.fangHit(target, amount, dir, target.isPerson ? 'bite' : 'hit');
+      this.fangFollowUp(target, dmg, dir);
       for (let i = 0; i < atk.chains; i++) {
         const next = this.nearestChainTarget(cur, chain, k.r * 3);
         if (!next) break;
@@ -690,6 +720,109 @@ export class Game {
       }
       this.fx.bolts.push({ points: [{ x: k.x, y: k.y }, ...chain.map((c) => ({ x: c.x, y: c.y }))], life: 0.22, max: 0.22, width: Math.max(0.4, k.r * 0.12) });
     }
+  }
+
+  // A basic-attack hit through the equipped Fangs: Iron Jaw crunches buildings harder, Venom
+  // Fangs poison units, and Magma Claws leave burning ground.
+  fangHit(t, dmg, dir, cause = 'hit') {
+    const f = this.meta.fangs;
+    const isObj = !t.isUnit && !t.isPerson && !t.isCar && !t.isBoss;
+    if (f && f.id === 'ironJaw' && isObj) dmg *= f.up ? 1.8 : 1.4;
+    this.damageTarget(t, dmg, dir, cause);
+    if (f && f.id === 'venomFangs' && t.isUnit && !t.dead) t.poison = { dps: dmg * 0.3, t: 3, spread: f.up };
+    if (this.meta.perks.magmaClaws && this.time - (this.magmaAt || -9) > 0.5) {
+      this.magmaAt = this.time;
+      this.fires.push({ x: t.x, y: t.y, r: this.kaiju.r * 0.8, t: 2, max: 2, tick: 0 });
+    }
+  }
+
+  // Weapon follow-ups after the main hit: Saw Teeth cleave, Thunder Fangs chain, Plasma Maw bolts.
+  fangFollowUp(target, dmg, dir) {
+    const f = this.meta.fangs;
+    if (!f) return;
+    const k = this.kaiju;
+    if (f.id === 'sawTeeth') {
+      const reach = k.r * this.def.attack.range + k.r;
+      const half = ((f.up ? 200 : 120) * Math.PI) / 360;
+      const inArc = (t) => {
+        const d = Math.hypot(t.x - k.x, t.y - k.y);
+        if (d > reach + (t.r || 0)) return false;
+        const a = Math.atan2(t.y - k.y, t.x - k.x) - Math.atan2(dir.y, dir.x);
+        return Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) <= half;
+      };
+      const hits = [];
+      for (const u of this.units) if (!u.dead && u !== target && u.type !== 'jet' && inArc(u)) hits.push(u);
+      for (const c of this.traffic) if (!c.dead && c !== target && inArc(c)) hits.push(c);
+      for (const o of this.objectsNear(k.x, k.y, reach)) if (o !== target && canDamage(o.tier, k.stage, o.landmark) && inArc(o)) hits.push(o);
+      for (const t of hits.slice(0, 8)) this.fangHit(t, dmg * 0.6, norm(t.x - k.x, t.y - k.y), 'hit');
+      this.fx.slashes.push({ x: k.x, y: k.y, ang: Math.atan2(dir.y, dir.x), arc: half * 2, r: reach, side: 1, life: 0.2, max: 0.2, color: 0xffffff, h: k.r * 0.6 });
+    } else if (f.id === 'thunderFangs') {
+      const chain = [target];
+      let cur = target;
+      let amount = dmg;
+      for (let i = 0; i < (f.up ? 4 : 2); i++) {
+        const next = this.nearestChainTarget(cur, chain, k.r * 3.5);
+        if (!next) break;
+        amount *= 0.65;
+        chain.push(next);
+        this.damageTarget(next, amount, norm(next.x - cur.x, next.y - cur.y));
+        cur = next;
+      }
+      if (chain.length > 1) this.fx.bolts.push({ points: chain.map((c) => ({ x: c.x, y: c.y })), life: 0.2, max: 0.2, width: Math.max(0.3, k.r * 0.1) });
+    } else if (f.id === 'plasmaMaw' && k.attackCount % (f.up ? 3 : 4) === 0) {
+      const sp = this.stage.speed * 3 + 40;
+      const d = norm(target.x - k.x, target.y - k.y);
+      this.projectiles.push({
+        friendly: true, kind: 'spine', x: k.x, y: k.y, x0: k.x, y0: k.y, vx: d.x * sp, vy: d.y * sp, speed: sp,
+        r: k.r * 0.25, size: k.r * 0.3, arc: k.r * 0.8, h0: k.r * 1.2, dmg: dmg * 2, life: 2.5, target, color: 0x6ff0ff, age: 0,
+        onHit: (p) => {
+          const r = k.r * 1.1;
+          this.areaDamage(p.x, p.y, r, p.dmg * 0.7, 'hit');
+          this.fx.rings.push({ x: p.x, y: p.y, r0: r * 0.2, r1: r, life: 0.3, max: 0.3, color: 0x6ff0ff, width: r * 0.3 });
+        },
+      });
+    }
+  }
+
+  // Gear perks that run on their own: Hook Claws, Rocket Spines, Moss Hide.
+  updateGearPerks(dt) {
+    const k = this.kaiju;
+    const perks = this.meta.perks;
+    if (perks.hookClaws) {
+      this.perkT.hook -= dt;
+      if (this.perkT.hook <= 0) {
+        this.perkT.hook = 3;
+        let pulled = 0;
+        for (const u of this.units) {
+          if (u.dead || u.flying || u.road || u.tier >= k.stage || pulled >= 6) continue;
+          const d = Math.hypot(u.x - k.x, u.y - k.y);
+          if (d > k.r * 5 || d < k.r * 1.6) continue;
+          const to = norm(k.x - u.x, k.y - u.y);
+          const nx = k.x - to.x * k.r * 1.3;
+          const ny = k.y - to.y * k.r * 1.3;
+          if (this.blockedAt(nx, ny, u.r * 0.6, u.def.mob ? u.tier : 0)) continue;
+          u.x = nx;
+          u.y = ny;
+          pulled++;
+        }
+        if (pulled) this.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 5, r1: k.r * 1.3, life: 0.3, max: 0.3, color: 0xc9d1db, width: k.r * 0.12 });
+      }
+    }
+    if (perks.rocketSpines) {
+      this.perkT.rocket -= dt;
+      const target = this.perkT.rocket <= 0 ? this.nearestEnemy(k.r * 12) : null;
+      if (target) {
+        this.perkT.rocket = 5;
+        const sp = this.stage.speed * 3.2 + 40;
+        const d = norm(target.x - k.x, target.y - k.y);
+        this.projectiles.push({
+          friendly: true, kind: 'spine', x: k.x, y: k.y, x0: k.x, y0: k.y, vx: (d.x - d.y * 0.7) * sp, vy: (d.y + d.x * 0.7) * sp, speed: sp,
+          r: k.r * 0.2, size: k.r * 0.22, arc: k.r * 2.6, h0: k.r * 1.4, dmg: this.baseDamage() * 1.5, life: 3, target, color: 0xffd23f, age: 0,
+          onHit: (p) => this.areaDamage(p.x, p.y, k.r * 0.7, p.dmg * 0.5, 'hit'),
+        });
+      }
+    }
+    if (perks.mossHide && this.time - (k.lastHitAt ?? -9) > 4) this.addShield(0.01 * dt);
   }
 
   nearestChainTarget(from, exclude, reach) {
@@ -743,7 +876,8 @@ export class Game {
     const before = k.hp;
     k.hp = Math.min(k.maxHp, k.hp + k.maxHp * fraction);
     k.sedated = 0;
-    this.fx.floaters.push({ x, y, h: k.r * 2.8, text: `${text} +${Math.round(((k.hp - before) / k.maxHp) * 100)}%`, color: '#5dff88', life: 1.8, max: 1.8 });
+    const pct = Math.round(((k.hp - before) / k.maxHp) * 100);
+    this.fx.floaters.push({ x, y, h: k.r * 2.8, text: pct > 0 ? `${text} +${pct}%` : `${text}: full health`, color: '#5dff88', life: 1.8, max: 1.8 });
     this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: k.r * 3, life: 0.6, max: 0.6, color: 0x5dff88, width: k.r * 0.25 });
     this.emit('healed', { amount: fraction });
   }
@@ -762,7 +896,7 @@ export class Game {
     k.dashDir = k.moving ? norm(this.input.x, this.input.y) : { ...k.facing };
     k.facing = { ...k.dashDir };
     k.dashT = DASH.time;
-    k.dashCd = DASH.cd;
+    k.dashCd = DASH.cd * this.meta.dashCdMul * (this.meta.perks.rudderTail ? 0.65 : 1);
     k.dodging = DASH.iframes;
     k.invuln = Math.max(k.invuln, DASH.iframes);
     k.perfect = false;
@@ -831,7 +965,8 @@ export class Game {
     const k = this.kaiju;
     if (this.state !== 'playing' || k.invuln > 0) return;
     // The first session is tuned so almost everyone sees the boss go down.
-    let dmg = amount * this.diff.enemyDmg * (this.firstRun ? 0.8 : 1);
+    let dmg = amount * this.diff.enemyDmg * (this.firstRun ? 0.8 : 1) * (this.meta.perks.graniteHide ? 0.88 : 1);
+    k.lastHitAt = this.time;
     if ((type === 'bullet' || type === 'shell') && this.has('thickHide')) dmg *= 1 - 0.08 * this.level('thickHide');
     if (k.shield > 0) {
       const absorbed = Math.min(k.shield, dmg);
@@ -848,17 +983,22 @@ export class Game {
     }
   }
 
+  // Down, not out: the player can revive (free from Nine Lives, by ad, or for gems) or give up.
   die() {
-    if (this.reviveAvailable) {
-      this.state = 'dead';
-      this.emit('dead', { canRevive: true });
-    } else this.end(false);
+    this.state = 'dead';
+    this.emit('dead', { free: this.freeRevives > 0, ad: this.reviveAvailable });
   }
 
-  revive() {
-    if (this.state !== 'dead' || !this.reviveAvailable) return false;
+  // `paid`: the gems were already taken by the caller.
+  revive(paid = false) {
+    if (this.state !== 'dead') return false;
+    if (!paid) {
+      if (this.freeRevives > 0) this.freeRevives--;
+      else if (this.reviveAvailable) this.reviveAvailable = false;
+      else return false;
+    }
+    this.revives = (this.revives || 0) + 1;
     const k = this.kaiju;
-    this.reviveAvailable = false;
     k.hp = k.maxHp * 0.5;
     k.invuln = 2.5;
     this.projectiles = [];
@@ -963,7 +1103,7 @@ export class Game {
     const k = this.kaiju;
     k.biomass += amount;
     this.stats.biomass += amount;
-    k.xp += xpFor(amount, k.stage) * (1 + 0.1 * this.level('appetite'));
+    k.xp += xpFor(amount, k.stage) * (1 + 0.1 * this.level('appetite')) * this.meta.xpMul * (this.xpBoost || 1);
     // One level per gain at most: a huge blast tops the bar up, it never chains picks.
     if (k.xp >= xpToNext(k.level)) {
       k.xp = Math.min(k.xp - xpToNext(k.level), xpToNext(k.level + 1) * XP.carry);
@@ -1206,8 +1346,10 @@ export class Game {
     this.fxEvent({ t: 'chomp', p: { variant: 0 } });
     u.hp = 0;
     u.eaten = true;
+    this.xpBoost = this.meta.perks.gluttonHeart ? 1.2 : 1;
     if (this.has('ironStomach')) this.addBiomass(lootFor(u.tier, k.stage).biomass * 0.25 * this.level('ironStomach'));
     this.killUnit(u);
+    this.xpBoost = 1;
     return true;
   }
 
@@ -1224,7 +1366,9 @@ export class Game {
     this.stats.people++;
     this.addThreat(0.4);
     const loot = lootFor(1, k.stage, 1);
+    this.xpBoost = this.meta.perks.gluttonHeart ? 1.2 : 1;
     this.addBiomass(loot.biomass * (1 + 0.25 * this.level('ironStomach')));
+    this.xpBoost = 1;
     this.onKill();
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
@@ -1607,6 +1751,20 @@ export class Game {
   updateUnits(dt) {
     const k = this.kaiju;
     const span = this.viewSpan();
+    // Venom Fangs: poison ticks, and with the Epic upgrade it jumps on death.
+    for (const u of this.units) {
+      if (!u.poison || u.dead) continue;
+      const p = u.poison;
+      p.t -= dt;
+      u.hp -= p.dps * dt;
+      if (u.hp <= 0) {
+        this.killUnit(u);
+        if (p.spread) {
+          const next = this.units.find((v) => !v.dead && !v.poison && v.type !== 'jet' && Math.hypot(v.x - u.x, v.y - u.y) < k.r * 4);
+          if (next) next.poison = { ...p, t: 3 };
+        }
+      } else if (p.t <= 0) u.poison = null;
+    }
     for (const u of this.units) {
       if (u.dead) continue;
       u.age += dt;
@@ -1711,6 +1869,7 @@ export class Game {
         if (u.cd <= 0 && dist < k.r + u.r + k.r * 0.3) {
           this.takeDamage(def.dmg * u.dmgMul, 'bullet');
           u.cd = def.cd;
+          if (this.meta.perks.thornSpines && k.invuln <= 0) this.damageUnit(u, this.baseDamage() * 0.5);
           // Spiked Hide: brawlers get hurt hitting you.
           if (this.has('spikedHide') && k.invuln <= 0) this.damageUnit(u, this.baseDamage() * 0.3 * this.level('spikedHide'));
         }
@@ -2191,7 +2350,7 @@ export class Game {
     }
     // Health is counted in hits of the kaiju's own damage, so the fight lasts about as long
     // whatever was picked, and a little longer the higher the level.
-    const hp = this.baseDamage() * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * this.diff.enemyHp;
+    const hp = this.stage.damage * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * this.diff.enemyHp;
     const dmgMul = 1 + (this.enemyScale().dmg - 1) * 0.5;
     this.boss = {
       isBoss: true, gate: k.stage, def, model: def.id, name: def.name, title: def.title,
@@ -2216,7 +2375,7 @@ export class Game {
     const x = Math.max(BOSS.r, k.x - span * 0.95);
     const y = k.y;
     this.boss = {
-      isBoss: true, name: BOSS.name, x, y, r: BOSS.r, hp: BOSS.hp, maxHp: BOSS.hp,
+      isBoss: true, name: BOSS.name, x, y, r: BOSS.r, hp: BOSS.hp * this.diff.enemyHp, maxHp: BOSS.hp * this.diff.enemyHp,
       state: 'enter', targetX: Math.max(BOSS.r, k.x - span * 0.45), targetY: y,
       phase: 1, next: 2, patterns: ['barrage', 'laser', 'charge'], patternIndex: 0,
       aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: 1 + (this.enemyScale().dmg - 1) * 0.5,
@@ -2498,6 +2657,7 @@ export class Game {
     b.hp = 0;
     b.dead = true;
     this.gateCleared[b.gate] = true;
+    this.stats.gateKills.push(b.gate);
     this.stats.gateBosses = (this.stats.gateBosses || 0) + 1;
     const scrap = 60 * b.gate * b.gate * this.diff.loot * this.scrapMult();
     this.stats.scrap += scrap;
@@ -2589,6 +2749,13 @@ export class Game {
         }
         if (Math.hypot(k.x - p.x, k.y - p.y) < k.r * 0.8 + p.r) {
           if (k.dodging > 0) this.perfectDodge(p.x, p.y);
+          // Mirror Scales shrug off one shot in five.
+          if (this.meta.perks.mirrorScales && k.invuln <= 0 && this.rng.chance(0.2)) {
+            this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.4, text: 'BLOCKED', color: '#bfe8ff', life: 0.8, max: 0.8 });
+            this.fxEvent({ t: 'sparks', x: p.x, y: p.y, h: k.r, color: 0xbfe8ff });
+            p.life = 0;
+            continue;
+          }
           this.takeDamage(p.dmg, p.type);
           if (k.invuln <= 0) this.statusHit(p);
           if (p.kind !== 'bullet') this.spawnExplosion(p.x, p.y, k.r * 0.5);
@@ -2664,7 +2831,7 @@ export class Game {
     const k = this.kaiju;
     const { orbs, floaters, rings, beams, bolts } = this.fx;
     const scale = Math.max(4, k.r * 4);
-    const pickR = k.r * 3 * (1 + 0.4 * this.level('magnetJaws')) + 6;
+    const pickR = k.r * 3 * (1 + 0.4 * this.level('magnetJaws')) * this.meta.pickupMul + 6;
     for (const o of orbs) {
       o.t += dt;
       const dk = Math.hypot(k.x - o.x, k.y - o.y);
@@ -2727,6 +2894,7 @@ export class Game {
       augments: [...this.held.entries()].map(([id, level]) => ({ id, name: AUGMENT_BY_ID[id].name, level })),
       sets: sets.map((x) => x.name), title: sets.length ? sets.map((x) => x.name).join(' + ') : null,
       score, firstSkyscraperAt: s.firstSkyscraperAt, stageTimes: s.stageTimes,
+      gateKills: [...s.gateKills], chapter: this.chapter,
     };
     this.emit('end', { results: this.results });
   }

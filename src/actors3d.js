@@ -6,6 +6,7 @@ import { KAIJU_MODELS, UNIT_MODELS, bossModel, GATE_BOSS_MODELS, personModel, pe
 import { buildProp } from './props.js';
 import { arcHeight } from './fx3d.js';
 import { EAT_TIME } from './config.js';
+import { SKINS } from './meta.js';
 
 export function toGeometry(m) {
   const g = new THREE.BufferGeometry();
@@ -16,6 +17,35 @@ export function toGeometry(m) {
   g.setIndex(new THREE.BufferAttribute(m.indices, 1));
   g.computeBoundingSphere();
   return g;
+}
+
+// A skin recolours a kaiju's voxels toward its tint, keeping the light and dark of the original
+// so the details still read; Neon also lights up the brightest voxels.
+function applySkin(model, skinId) {
+  const sk = SKINS[skinId];
+  if (!sk) return model;
+  const [tr, tg, tb] = sk.tint;
+  const parts = model.parts.map((p) => {
+    const g = Object.assign(Object.create(Object.getPrototypeOf(p.grid)), p.grid, { data: p.grid.data.slice() });
+    for (let i = 0; i < g.data.length; i++) {
+      const v = g.data[i];
+      if (!v) continue;
+      let f = v >>> 24;
+      const r = (v >> 16) & 255;
+      const gr = (v >> 8) & 255;
+      const b = v & 255;
+      const l = (0.3 * r + 0.59 * gr + 0.11 * b) / 255;
+      const k = Math.min(1.25, l * 1.5 + 0.15);
+      const m = sk.mix;
+      const nr = Math.min(255, Math.round(r * (1 - m) + tr * 255 * k * m));
+      const ng = Math.min(255, Math.round(gr * (1 - m) + tg * 255 * k * m));
+      const nb = Math.min(255, Math.round(b * (1 - m) + tb * 255 * k * m));
+      if (sk.glow && l > 0.72) f |= 1;
+      g.data[i] = (((nr << 16) | (ng << 8) | nb || 0x010101) | (f << 24)) >>> 0;
+    }
+    return { ...p, grid: g };
+  });
+  return { ...model, parts };
 }
 
 function partsGroup(model, mat) {
@@ -101,10 +131,10 @@ export class Actors {
     this.doctorMarks = [];
   }
 
-  setKaiju(id) {
+  setKaiju(id, skin = null) {
     if (this.kaiju) this.scene.remove(this.kaiju.root);
-    const kmat = this.makeMat(0.3);
-    const rig = partsGroup(KAIJU_MODELS[id](), kmat);
+    const kmat = this.makeMat(skin && SKINS[skin] && SKINS[skin].metal ? 0.55 : 0.3);
+    const rig = partsGroup(applySkin(KAIJU_MODELS[id](), skin), kmat);
     rig.mat = kmat;
     rig.yaw = null;
     // Mouth: near the tip of the jaw, in the jaw part's own space.

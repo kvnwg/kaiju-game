@@ -1,3 +1,36 @@
+import { newSave, migrateV1, normalize } from './meta.js';
+
+// The save: everything the meta game tracks (see meta.js). Version 1 profiles are migrated.
+const SAVE_KEY = 'kaiju-rampage-save-v2';
+
+export function loadSave(now = Date.now()) {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) return normalize(JSON.parse(raw), now);
+    const old = localStorage.getItem('kaiju-rampage-profile-v1');
+    if (old) return migrateV1(JSON.parse(old), now);
+  } catch {
+    // Unreadable or blocked storage: start fresh.
+  }
+  return newSave(now);
+}
+
+export function writeSave(save) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+  } catch {
+    // Progress just won't persist this session.
+  }
+}
+
+export function clearSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
 // Local profile: best scores and unlocks (the MVP's "local best scores").
 // Storage can be unavailable (private mode, blocked site data), so every access is guarded.
 const KEY = 'kaiju-rampage-profile-v1';

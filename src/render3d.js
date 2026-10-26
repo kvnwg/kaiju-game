@@ -440,7 +440,7 @@ export class Renderer3D {
     this.collapses.clear();
     this.fx.clear();
     this.actors.clear();
-    this.actors.setKaiju(game.def.id);
+    this.actors.setKaiju(game.def.id, game.meta && game.meta.skin);
     this.ambient.reset();
     for (const [, f] of this.floaters) f.el.remove();
     this.floaters.clear();
@@ -1233,8 +1233,10 @@ export class Renderer3D {
     const k = game.kaiju;
     this.handleVfx(game);
 
-    // Time of day follows run progress.
-    this.dusk += (game.dusk - this.dusk) * Math.min(1, dt * 0.6);
+    // Time of day follows run progress (a cinematic shot picks its own).
+    const cine = this.cinematic;
+    if (cine && cine.dusk !== undefined) this.dusk = cine.dusk;
+    else this.dusk += (game.dusk - this.dusk) * Math.min(1, dt * 0.6);
     const key = lerpKey(this.dusk);
     this.uniforms.uNight.value = key.night;
     this.hemi.color.copy(key.hemiS);
@@ -1271,19 +1273,37 @@ export class Renderer3D {
     // Shake scales with how much of the city is on screen, so a thump reads the same at every size.
     const shake = game.shake * span * 0.022;
     // Zoom punch: big kills kick the camera in a touch, then it eases back out.
-    const d = this.camDist * (1 - game.punch * 0.06);
-    this.camera.position.set(
-      this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
-      this.target.y + Math.sin(PITCH) * d + (Math.random() - 0.5) * shake,
-      this.target.z + Math.cos(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
-    );
-    this.camera.lookAt(this.target);
-    // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
-    this.camera.near = Math.max(1, d * 0.25);
-    this.camera.far = d * 4.5;
-    this.camera.updateProjectionMatrix();
-    this.scene.fog.near = d * 1.05;
-    this.scene.fog.far = d * 3.4;
+    let d = this.camDist * (1 - game.punch * 0.06);
+    if (cine) {
+      // A low, slow-drifting shot from street level toward the kaiju (the title screen).
+      const yaw = cine.yaw + Math.sin(this.t * 0.05) * 0.06;
+      d = k.r * cine.dist;
+      // `side` slides the kaiju off-centre (negative: to the right of frame, leaving room for the logo).
+      const sx = -Math.sin(yaw) * k.r * (cine.side || 0) * cine.dist * 0.5;
+      const sz = Math.cos(yaw) * k.r * (cine.side || 0) * cine.dist * 0.5;
+      this.target.set(k.x + sx, k.r * cine.lookH, k.y + sz);
+      this.camera.position.set(k.x + Math.cos(yaw) * d + sx + (Math.random() - 0.5) * shake * 0.3, k.r * cine.height, k.y + Math.sin(yaw) * d + sz);
+      this.camera.lookAt(this.target);
+      this.camera.near = Math.max(0.5, k.r * 0.2);
+      this.camera.far = d * 6;
+      this.camera.updateProjectionMatrix();
+      this.scene.fog.near = d * 0.9;
+      this.scene.fog.far = d * 4.2;
+    } else {
+      this.camera.position.set(
+        this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
+        this.target.y + Math.sin(PITCH) * d + (Math.random() - 0.5) * shake,
+        this.target.z + Math.cos(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
+      );
+      this.camera.lookAt(this.target);
+      // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
+      this.camera.near = Math.max(1, d * 0.25);
+      this.camera.far = d * 4.5;
+      this.camera.updateProjectionMatrix();
+      this.scene.fog.near = d * 1.05;
+      this.scene.fog.far = d * 3.4;
+    }
+    if (this.tilt) this.tilt.enabled = !cine;
 
     // Sun / moon with a shadow box around the view.
     const sdir = new THREE.Vector3(Math.cos(key.az) * Math.cos(key.elev), Math.sin(key.elev), Math.sin(key.az) * Math.cos(key.elev));
@@ -1304,8 +1324,8 @@ export class Renderer3D {
       this.sun.shadow.normalBias = texel * 1.2;
     }
 
-    const half = span * 0.75;
-    this.terrain.update(k.stage, this.target.x, this.target.z, span, key.night, key.water, this.t);
+    const half = cine ? Math.max(span * 0.75, d * 1.25) : span * 0.75;
+    this.terrain.update(cine ? Math.min(k.stage, 4) : k.stage, this.target.x, this.target.z, cine ? Math.max(span, d * 1.6) : span, key.night, key.water, this.t);
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);

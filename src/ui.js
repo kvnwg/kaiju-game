@@ -91,7 +91,15 @@ export class UI {
     this.stageNum.textContent = k.level;
     this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
     this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';
-    this.scrapEl.textContent = fmtNum(game.stats.scrap);
+    // Damage $: rolls up toward the real figure like a slot counter, and flashes every billion.
+    const target = Math.floor(game.stats.scrap);
+    if (target < (this.dmgShown || 0)) this.dmgShown = 0;
+    this.dmgShown = (this.dmgShown || 0) + Math.max(1, (target - (this.dmgShown || 0)) * 0.18);
+    if (this.dmgShown > target) this.dmgShown = target;
+    const bill = Math.floor(this.dmgShown / 1e9);
+    if (bill > (this.lastBill || 0)) this.retrigger(this.scrapPill, 'billion');
+    this.lastBill = bill;
+    this.scrapEl.textContent = `$${Math.floor(this.dmgShown).toLocaleString('en-US')}`;
     // Little pops when things go up: the growth bar glows, the coin pill bumps.
     if (k.biomass > this.lastBio + 1e-6) this.retrigger(this.growthEl, 'gain');
     this.lastBio = k.biomass;

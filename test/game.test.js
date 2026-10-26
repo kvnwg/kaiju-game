@@ -148,7 +148,7 @@ test('stat passives change the kaiju: Might, Toughness, Long Legs', () => {
   assert.ok(Math.abs(g.kaijuSpeed() - sp * 1.08) < 1e-9);
 });
 
-test('death offers one revive, then ends the run keeping 50% scrap', () => {
+test('death offers one ad revive, more only if paid for; giving up ends the run keeping 50% scrap', () => {
   const g = new Game({ seed: 3 });
   g.stats.scrap = 101;
   g.takeDamage(10000);
@@ -157,8 +157,21 @@ test('death offers one revive, then ends the run keeping 50% scrap', () => {
   assert.equal(g.kaiju.hp, g.kaiju.maxHp * 0.5);
   g.kaiju.invuln = 0;
   g.takeDamage(10000);
+  assert.equal(g.state, 'dead');
+  assert.equal(g.revive(), false, 'the free ad revive is used up');
+  assert.ok(g.revive(true), 'a paid (gem) revive works');
+  g.kaiju.invuln = 0;
+  g.takeDamage(10000);
+  g.giveUp();
   assert.equal(g.state, 'lost');
   assert.equal(g.results.scrap, 51);
+  // Nine Lives gives a free revive on top of the ad one.
+  const h = new Game({ seed: 3, meta: { revives: 1 } });
+  h.takeDamage(10000);
+  assert.ok(h.revive());
+  h.kaiju.invuln = 0;
+  h.takeDamage(10000);
+  assert.ok(h.revive());
 });
 
 test('Thick Hide reduces bullet and shell damage only', () => {
