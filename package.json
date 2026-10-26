@@ -1,12 +1,16 @@
 {
   "name": "kaiju-rampage",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Browser prototype of the Kaiju Rampage core run loop",
+  "description": "Kaiju Rampage: grow from human-sized to skyline-sized and wreck an endless voxel city (browser game for CrazyGames)",
   "type": "module",
   "scripts": {
     "start": "npx --yes serve -l 8080 .",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "build": "node tools/build.mjs"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
 }

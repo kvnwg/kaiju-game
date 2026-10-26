@@ -134,8 +134,8 @@ export class UI {
     for (const f of ['900 40px "Playfair Display"', 'italic 16px "Playfair Display"', '700 16px "Playfair Display"', '40px "UnifrakturMaguntia"']) document.fonts.load(f).catch(() => {});
   }
 
-  // The size-up newspaper: spins in and slams onto the screen, then waits for a tap (or Space,
-  // Enter or Escape) and flies away. photo: a canvas of the moment, turned to newsprint here.
+  // The size-up newspaper: spins in and slams onto the screen, then waits for a tap (or Space or
+  // Enter) and flies away. photo: a canvas of the moment, turned to newsprint here.
   showNewspaper(page, photo, onClose) {
     const el = $('#news');
     el.innerHTML = `<div class="news-shake"><div class="news-fit"><div class="news-paper">
@@ -166,7 +166,7 @@ export class UI {
     const shown = performance.now();
     const close = (ev) => {
       if (ev.type === 'keydown') {
-        if (![' ', 'Enter', 'Escape'].includes(ev.key)) return;
+        if (![' ', 'Enter'].includes(ev.key)) return;
         ev.preventDefault();
         ev.stopPropagation();
       }
@@ -366,7 +366,7 @@ export class UI {
     this.show('pick');
   }
 
-  showPick(game, { onChoose, onReroll }) {
+  showPick(game, { onChoose, onReroll, ads = true }) {
     const p = game.pick;
     const el = this.modals.pick;
     const cards = p.options
@@ -405,7 +405,7 @@ export class UI {
         <div class="cards">${cards}</div>
         <div class="row">
           <button class="btn ghost" id="rerollFree" ${game.rerolls > 0 ? '' : 'disabled'}>Reroll (${game.rerolls} left)</button>
-          <button class="btn ghost ad" id="rerollAd" ${game.rerolls === 0 && game.adRerollAvailable ? '' : 'disabled'}>Reroll · watch ad</button>
+          ${ads ? `<button class="btn ghost ad" id="rerollAd" ${game.rerolls === 0 && game.adRerollAvailable ? '' : 'disabled'}>Reroll · watch ad</button>` : ''}
         </div>
         <details class="recipes-help"><summary>Evolution recipes</summary>${codex(game.held)}</details>
       </div>`;
@@ -413,7 +413,7 @@ export class UI {
     const spin = this.spinReels(el, cardEls);
     cardEls.forEach((c) => c.addEventListener('click', () => spin.canPick(c) && onChoose(c.dataset.id)));
     el.querySelector('#rerollFree').addEventListener('click', () => onReroll(false));
-    el.querySelector('#rerollAd').addEventListener('click', () => onReroll(true));
+    if (ads) el.querySelector('#rerollAd').addEventListener('click', () => onReroll(true));
     this.show('pick');
   }
 
@@ -484,22 +484,6 @@ export class UI {
     return { canPick: (card) => card.classList.contains('landed') && performance.now() > guardUntil };
   }
 
-  showRevive({ onRevive, onGiveUp }) {
-    const el = this.modals.revive;
-    el.innerHTML = `<div class="panel small">
-        <h2>Your kaiju is down</h2>
-        <p class="muted">One revive per run: back up at 50% health.</p>
-        <div class="col">
-          <button class="btn primary ad" id="reviveAd">Revive · watch ad</button>
-          <button class="btn ghost" id="giveUp">Give up (keep 50% scrap)</button>
-        </div>
-        <p class="tiny">Ads and gems are placeholders in this prototype; the revive is free.</p>
-      </div>`;
-    el.querySelector('#reviveAd').addEventListener('click', onRevive);
-    el.querySelector('#giveUp').addEventListener('click', onGiveUp);
-    this.show('revive');
-  }
-
   showPause({ held = new Map(), quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
@@ -510,15 +494,17 @@ export class UI {
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
         <details class="recipes-help"><summary>Evolution recipes</summary>${codex(held)}</details>
-        <h3>Sound</h3>
-        <div class="segs" id="soundSegs"><button class="seg ${sound ? 'on' : ''}" data-s="1">On</button><button class="seg ${sound ? '' : 'on'}" data-s="0">Off</button></div>
-        <h3>Music</h3>
-        <div class="segs" id="musicSegs"><button class="seg ${musicOn ? 'on' : ''}" data-m="1">On</button><button class="seg ${musicOn ? '' : 'on'}" data-m="0">Off</button></div>
-        <h3>Look</h3>
-        <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Voxel</button><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Retro pixel</button></div>
-        <h3>Graphics</h3>
-        <div class="segs" id="qualSegs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
-        <p class="tiny">Low turns off shadows, bloom and tilt-shift for older phones.</p>
+        <div class="settings-grid">
+          <h3>Sound</h3>
+          <div class="segs" id="soundSegs"><button class="seg ${sound ? 'on' : ''}" data-s="1">On</button><button class="seg ${sound ? '' : 'on'}" data-s="0">Off</button></div>
+          <h3>Music</h3>
+          <div class="segs" id="musicSegs"><button class="seg ${musicOn ? 'on' : ''}" data-m="1">On</button><button class="seg ${musicOn ? '' : 'on'}" data-m="0">Off</button></div>
+          <h3>Look</h3>
+          <div class="segs" id="lookSegs"><button class="seg ${pixelArt ? '' : 'on'}" data-px="0">Voxel</button><button class="seg ${pixelArt ? 'on' : ''}" data-px="1">Retro pixel</button></div>
+          <h3>Graphics</h3>
+          <div class="segs" id="qualSegs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
+        </div>
+        <p class="tiny">Low graphics turn off shadows, bloom and tilt-shift for older devices.</p>
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);

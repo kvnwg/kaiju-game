@@ -5,9 +5,9 @@ import {
   newSave, migrateV1, rollover, ECONOMY, syncEnergy, spendEnergy, nextEnergyIn, energyCap, openCrate, pityLeft, crateOdds,
   addItem, levelUp, levelCost, resetItem, merge, mergeFodder, mergeAll, equip, autoEquip, loadout, power, recommendedPower,
   buyMutation, mutationCost, runRewards, applyRun, questState, claimQuest, claimQuestBonus, DAILY_QUESTS, claimLogin, loginReady,
-  addPassXp, passTier, claimPass, patrolPending, claimPatrol, quickPatrol, adsLeft, useAd, adEnergy, adGems,
+  addPassXp, passTier, passReward, claimPass, patrolPending, claimPatrol, quickPatrol, adsLeft, adWait, useAd, adEnergy, adGems,
   buyEnergy, spinWheel, buyDeal, starUp, unlockKaiju, addAccountXp, featureOpen, notifications, buySkin,
-  RARITY, GEAR, CRATES, EPIC, SKINS,
+  RARITY, GEAR, CRATES, EPIC, SKINS, PASS,
 } from '../src/meta.js';
 
 const T0 = new Date(2026, 9, 26, 10, 0, 0).getTime();
@@ -260,11 +260,15 @@ test('Patrol accrues scrap for up to 12 hours; Quick Patrol pays 2 hours for ene
   assert.ok(quickPatrol(s, 'energy', T0 + 20 * HOUR));
 });
 
-test('no real-money store: gems come from play and from ads, 30 an ad with no daily cap', () => {
+test('no real-money store: gems come from play and from ads, 30 an ad, a few minutes apart', () => {
   const s = newSave(T0);
   const g = s.cur.gems;
-  for (let i = 0; i < 25; i++) assert.ok(adGems(s, T0));
-  assert.equal(s.cur.gems, g + 25 * ECONOMY.adGems);
+  assert.ok(adGems(s, T0));
+  assert.equal(adGems(s, T0 + MIN), null, 'not straight after the last one');
+  assert.equal(adWait(s, 'gems', T0 + MIN), 120);
+  for (let i = 1; i < 10; i++) assert.ok(adGems(s, T0 + i * 3 * MIN), `ad ${i + 1}`);
+  assert.equal(adGems(s, T0 + 40 * MIN), null, 'ten a day');
+  assert.equal(s.cur.gems, g + 10 * ECONOMY.adGems);
   assert.equal(ECONOMY.adGems, 30);
   assert.equal(energyCap(s, T0), ECONOMY.energyCap);
   assert.equal(s.purchases, undefined, 'no purchase records');
@@ -273,6 +277,19 @@ test('no real-money store: gems come from play and from ads, 30 an ad with no da
   s.cur.gems = SKINS.golden.gems;
   assert.ok(buySkin(s, 'golden'));
   assert.equal(s.cur.gems, 0);
+});
+
+test('where ads cannot be shown, the pass bonus and the wheel take a few gems instead', () => {
+  const s = newSave(T0);
+  addPassXp(s, PASS.xpPerTier * 2);
+  s.cur.gems = 100;
+  assert.ok(claimPass(s, 1, true, createRng(1), T0, 'gems'));
+  assert.equal(s.cur.gems, 100 - ECONOMY.passBonusGems + (passReward(1, true).gems || 0));
+  s.cur.gems = 0;
+  assert.equal(claimPass(s, 2, true, createRng(2), T0, 'gems'), null, 'not without the gems');
+  s.cur.gems = 1000;
+  for (let i = 0; i < 5; i++) assert.ok(spinWheel(s, T0, createRng(i), 'gems'));
+  assert.equal(spinWheel(s, T0, createRng(9), 'gems'), null, 'still five spins a day');
 });
 
 test('the wheel, deals and kaiju unlocks work end to end', () => {

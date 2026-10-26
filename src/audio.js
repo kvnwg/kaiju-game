@@ -6,7 +6,8 @@
 export class Sfx {
   constructor() {
     this.ctx = null;
-    this.muted = false;
+    this.userMuted = false; // the player's own sound setting
+    this.holds = new Set(); // other reasons for silence (an ad playing, the platform's mute)
     this.last = {};
     this.stage = 1;
   }
@@ -56,9 +57,25 @@ export class Sfx {
     return Boolean(this.ctx && this.ctx.state === 'running');
   }
 
+  // Silent when the player turns sound off, or while anything holds it off, whatever the
+  // player's own setting says.
+  get muted() {
+    return this.userMuted || this.holds.size > 0;
+  }
+
   setMuted(m) {
-    this.muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : 0.55;
+    this.userMuted = m;
+    this.applyMute();
+  }
+
+  hold(reason, on) {
+    if (on) this.holds.add(reason);
+    else this.holds.delete(reason);
+    this.applyMute();
+  }
+
+  applyMute() {
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.55;
   }
 
   ok(key, gap) {

@@ -13,10 +13,11 @@ import {
   levelUp, resetItem, equip, unequip, mergeFodder, merge, mergeAll, autoEquip, kaijuState, nextStarCost, starUp, unlockKaiju,
   mutationLevel, mutationCost, mutationOpen, buyMutation, power, recommendedPower, loadout, openCrate, pityLeft, crateOdds,
   questState, claimQuest, claimQuestBonus, loginReady, claimLogin, passTier, claimPass, passReward, passEndsIn, patrolPending,
-  patrolRate, claimPatrol, quickPatrol, adsLeft, adEnergy, adGems, buyEnergy, spinWheel, buyDeal, buySkin, notifications, canAfford,
+  patrolRate, claimPatrol, quickPatrol, adsLeft, adWait, adEnergy, adGems, buyEnergy, spinWheel, buyDeal, buySkin, notifications, canAfford,
 } from './meta.js';
 
 const hq = (root, sel) => root.querySelector(sel);
+const REVIVE_OFFER = 10; // seconds to take the ad revive
 export function hfmt(n) {
   n = Math.floor(n);
   if (n >= 1e12) return `${(n / 1e12).toFixed(1)}T`;
@@ -172,6 +173,12 @@ export class Hub {
     if (!this.visible) return;
     syncEnergy(this.save, this.now());
     this.renderTop();
+    // The free-gems ad comes back off its cooldown.
+    const cooling = adWait(this.save, 'gems', this.now()) > 0;
+    if (cooling !== this.gemsCooling) {
+      this.gemsCooling = cooling;
+      this.render();
+    }
     for (const el of this.el.querySelectorAll('[data-timer]')) {
       const end = Number(el.dataset.timer);
       el.textContent = hclock(end - this.now());
@@ -226,7 +233,16 @@ export class Hub {
       side('patrol', 'patrol', 'Patrol', n.patrol, featureOpen(s, 'patrol')),
       side('wheel', 'wheel', 'Wheel', n.wheel ? '' : 0, featureOpen(s, 'wheel')),
     ].join('');
-    this.right.innerHTML = side('adgems', 'gem', `+${ECONOMY.adGems}`, 0, true, '<i class="pulse"></i>');
+    this.right.innerHTML = this.ads && adsLeft(s, 'gems', now) > 0 ? this.gemsButton('side-btn') : '';
+  }
+
+  // The free-gems ad button: +30, or a countdown while it cools down between ads.
+  gemsButton(cls) {
+    const s = this.save;
+    const now = this.now();
+    const wait = adWait(s, 'gems', now);
+    const label = wait ? `<span data-timer="${now + wait * 1000}">${hclock(wait * 1000)}</span>` : `+${ECONOMY.adGems}`;
+    return `<button class="${cls} ad" data-act="adgems" ${wait ? 'disabled' : ''}>${ico('gem')}<span>${label}</span></button>`;
   }
 
   renderNav() {
@@ -360,6 +376,7 @@ export class Hub {
     // Daily deals
     const deals = featureOpen(s, 'deals')
       ? `<div class="deals">${s.daily.deals.map((d, i) => {
+        if (d.cost.ad && !this.ads) return '';
         const sold = s.daily.dealsBought[i];
         const price = d.cost.ad ? (adsLeft(s, 'deal', now) ? `${ico('ad')}Free` : 'Tomorrow') : d.cost.gems ? `${ico('gem')}${d.cost.gems}` : `${ico('scrap')}${hfmt(d.cost.scrap)}`;
         return `<button class="deal ${sold ? 'sold' : ''}" data-act="deal" data-i="${i}" ${sold ? 'disabled' : ''}>${rewardChips(d.give, 'big')}<span class="dprice">${sold ? 'Sold out' : price}</span></button>`;
@@ -370,7 +387,7 @@ export class Hub {
       const c = CRATES[id];
       const keys = s.cur.keys[id] || 0;
       const pity = pityLeft(s, id);
-      const adOk = id === 'supply' ? adsLeft(s, 'crate', now) > 0 : featureOpen(s, 'eggAd') && adsLeft(s, 'egg', now) > 0;
+      const adOk = this.ads && (id === 'supply' ? adsLeft(s, 'crate', now) > 0 : featureOpen(s, 'eggAd') && adsLeft(s, 'egg', now) > 0);
       const free = id === 'supply' && !s.crates.freeFirst;
       return `<div class="crate-card ${id}">
         <div class="crate-art">${ico(id === 'egg' ? 'egg' : 'crate', 'huge')}</div>
@@ -393,16 +410,20 @@ export class Hub {
         ${owned ? `<button class="btn ${on ? 'gold' : 'ghost'}" data-act="skin" data-id="${id}">${on ? 'Equipped' : 'Equip'}</button>` : sk.gems ? `<button class="btn primary" data-act="buyskin" data-id="${id}">${ico('gem')}${hfmt(sk.gems)}</button>` : `<small>${sk.how}</small>`}</div>`;
     }).join('');
     const energyRow = `<div class="energy-row">
-      <button class="btn ghost ad" data-act="adenergy" ${adsLeft(s, 'energy', now) ? '' : 'disabled'}>${ico('energy')}+${ECONOMY.energyAd} (${adsLeft(s, 'energy', now)} left)</button>
+      ${this.ads ? `<button class="btn primary ad" data-act="adenergy" ${adsLeft(s, 'energy', now) ? '' : 'disabled'}>${ico('energy')}+${ECONOMY.energyAd} (${adsLeft(s, 'energy', now)} left)</button>` : ''}
       <button class="btn primary" data-act="buyenergy" ${s.daily.energyBuys < ECONOMY.energyGemPack.perDay ? '' : 'disabled'}>${ico('energy')}+${ECONOMY.energyGemPack.energy} for ${ico('gem')}${ECONOMY.energyGemPack.gems}</button></div>`;
+    const gemsLeft = adsLeft(s, 'gems', now);
+    const freeGems = this.ads
+      ? `<div class="free-gems" id="shop-gems">${ico('gem', 'huge')}<div class="fg-text"><b>Free gems</b><small>${gemsLeft ? `Watch a short ad for ${ECONOMY.adGems} gems. ${gemsLeft} left today.` : 'That’s all the free gems for today. More tomorrow!'}</small></div>
+        ${gemsLeft ? this.gemsButton('btn primary') : ''}</div>`
+      : '';
     return `<div class="shop">
-      <div class="free-gems" id="shop-gems">${ico('gem', 'huge')}<div class="fg-text"><b>Free gems</b><small>Watch a short ad for ${ECONOMY.adGems} gems, as often as you like.</small></div>
-        <button class="btn gold ad big" data-act="adgems">+${ECONOMY.adGems}</button></div>
+      ${freeGems}
       <h3>Crates</h3>${crate('supply')}${crate('egg')}
       <h3>Daily Deals <small data-timer="${new Date(new Date(now).setHours(24, 0, 0, 0)).getTime()}"></small></h3>${deals}
       <h3>Energy</h3>${energyRow}
       <h3>Rampage Pass</h3><div class="offers">
-        <div class="offer-card"><div class="oc-head"><b>Rampage Pass</b><em>Season ${s.pass.season}</em></div><p class="tiny">Free rewards every tier, and a bonus reward on every tier for watching an ad: gems, Kaiju Eggs and the Zombie skin.</p><button class="btn primary" data-act="pass">${featureOpen(s, 'pass') ? 'Open pass' : `Unlocks at level ${FEATURES.pass}`}</button></div></div>
+        <div class="offer-card"><div class="oc-head"><b>Rampage Pass</b><em>Season ${s.pass.season}</em></div><p class="tiny">Free rewards every tier, plus a bonus reward on every tier: gems, Kaiju Eggs and the Zombie skin.</p><button class="btn primary" data-act="pass">${featureOpen(s, 'pass') ? 'Open pass' : `Unlocks at level ${FEATURES.pass}`}</button></div></div>
       <h3>Skins</h3><div class="skins">${skins}</div>
     </div>`;
   }
@@ -462,6 +483,23 @@ export class Hub {
     this.modal.dataset.kind = kind;
   }
 
+  // Rewarded ads can be offered (not switched off for this session, and no ad blocker).
+  get ads() {
+    return this.platform.rewardedAds;
+  }
+
+  // Rewarded ads just became unavailable: redraw so no ad button is left that can't pay out.
+  adsChanged() {
+    if (!this.visible) return;
+    this.render();
+    const kind = this.modalKind;
+    if (kind === 'wheel' && !this.spinning) this.openWheel();
+    else if (kind === 'pass') this.openPass();
+    else if (kind === 'patrol') this.openPatrol(true);
+    else if (kind === 'energy') this.openEnergy();
+    else if (kind === 'results' || kind === 'revive') for (const b of this.modal.querySelectorAll('.btn.ad')) b.remove();
+  }
+
   closeModal() {
     this.modalKind = null;
     this.modal.classList.add('hidden');
@@ -485,6 +523,7 @@ export class Hub {
   watchAd(placement, then) {
     this.platform.showAd('rewarded').then((ok) => {
       if (ok) then();
+      else if (!this.ads) this.toast('Video rewards aren’t available right now.');
       else this.toast('No ad available right now. Try again in a moment.');
     });
   }
@@ -595,15 +634,15 @@ export class Hub {
       const pc = s.pass.prem[t];
       rows.push(`<div class="ptier ${reached ? 'reached' : ''}"><span class="pn">${t}</span>
         <button class="prew free ${fc ? 'got' : ''}" data-act="claimpass" data-t="${t}" data-p="0" ${reached && !fc ? '' : 'disabled'}>${rewardChips(fr)}</button>
-        <button class="prew prem ${pc ? 'got' : ''} ${reached && !pc ? 'adclaim' : ''}" data-act="claimpass" data-t="${t}" data-p="1" ${reached && !pc ? '' : 'disabled'}>${rewardChips(pr)}</button></div>`);
+        <button class="prew prem ${pc ? 'got' : ''} ${reached && !pc && this.ads ? 'adclaim' : ''}" data-act="claimpass" data-t="${t}" data-p="1" ${reached && !pc ? '' : 'disabled'}>${rewardChips(pr)}${reached && !pc && !this.ads ? `<i class="pcost">${ico('gem')}${ECONOMY.passBonusGems}</i>` : ''}</button></div>`);
     }
     this.openModal('pass', `<div class="panel pass-panel"><h2>Rampage Pass · Season ${s.pass.season}</h2>
       <p class="muted">Tier ${tier}/${PASS.tiers} · ends in <span data-timer="${this.now() + passEndsIn(s, this.now())}">${hclock(passEndsIn(s, this.now()))}</span></p>
       <span class="qbar"><i style="width:${tier >= PASS.tiers ? 100 : (100 * xpIn) / PASS.xpPerTier}%"></i><small>${tier >= PASS.tiers ? 'Complete' : `${xpIn}/${PASS.xpPerTier} XP`}</small></span>
-      <div class="pcols"><span></span><b>Free</b><b class="gold">Bonus · watch an ad</b></div>
+      <div class="pcols"><span></span><b>Free</b><b class="gold">${this.ads ? 'Bonus · watch an ad' : `Bonus · ${ico('gem')}${ECONOMY.passBonusGems} each`}</b></div>
       <div class="ptiers">${rows.join('')}</div>
       <div class="row"><button class="btn ghost" data-act="close">Close</button></div>
-      <p class="tiny muted">Pass XP comes from daily quests and every run. Each bonus reward is one short ad.</p></div>`);
+      <p class="tiny muted">Pass XP comes from daily quests and every run. ${this.ads ? 'Each bonus reward is one short ad.' : `Each bonus reward costs ${ECONOMY.passBonusGems} gems.`}</p></div>`);
   }
 
   openPatrol(refresh = false) {
@@ -619,9 +658,9 @@ export class Hub {
       <h3>Quick Patrol: 2 hours now</h3>
       <div class="row">
         <button class="btn primary" data-act="quickpatrol" data-how="energy" ${s.daily.quickPatrols < ECONOMY.quickPatrolPerDay ? '' : 'disabled'}>${ico('energy')}${ECONOMY.quickPatrolEnergy} (${ECONOMY.quickPatrolPerDay - s.daily.quickPatrols} left)</button>
-        <button class="btn ghost ad" data-act="quickpatrol" data-how="ad" ${adsLeft(s, 'patrol', now) ? '' : 'disabled'}>Free</button>
+        ${this.ads ? `<button class="btn primary ad" data-act="quickpatrol" data-how="ad" ${adsLeft(s, 'patrol', now) ? '' : 'disabled'}>Free</button>` : ''}
       </div>
-      <button class="btn ghost" data-act="close">Close</button></div>`;
+      <button class="btn primary" data-act="close">Close</button></div>`;
     if (refresh) {
       if (this.modalKind === 'patrol') this.modal.innerHTML = html;
       return;
@@ -680,9 +719,15 @@ export class Hub {
         <div class="wheel-hub">${ico('gem')}</div>
         <svg class="wheel-pin" viewBox="0 0 40 52" aria-hidden="true"><path d="M20 50 L5 16 A15.5 15.5 0 1 1 35 16 Z" fill="#ff4d5a" stroke="#0d0e14" stroke-width="3"/><circle cx="20" cy="16" r="6" fill="#ffe27a" stroke="#0d0e14" stroke-width="2"/></svg>
       </div>
-      <button class="btn gold ad big" data-act="spin" ${left && !this.spinning ? '' : 'disabled'}>${left ? 'Spin' : 'Come back tomorrow'}</button>
-      <p class="tiny muted">${left} of ${AD_PLACEMENTS.wheel.cap} spins left today · one short ad each</p>
-      <button class="btn ghost" data-act="close">Close</button></div>`);
+      <div class="row wheel-btns">
+        <button class="btn primary big ${this.ads ? 'ad' : ''}" data-act="spin" ${left && !this.spinning ? '' : 'disabled'}>${left ? (this.ads ? 'Spin' : `Spin ${ico('gem')}${ECONOMY.wheelGems}`) : 'Come back tomorrow'}</button>
+        <button class="btn primary big" data-act="close">Close</button>
+      </div>
+      <p class="tiny muted">${this.wheelNote(left)}</p></div>`);
+  }
+
+  wheelNote(left) {
+    return `${left} of ${AD_PLACEMENTS.wheel.cap} spins left today · ${this.ads ? 'one short ad each' : `${ECONOMY.wheelGems} gems each`}`;
   }
 
   spin() {
@@ -690,15 +735,15 @@ export class Hub {
     const wheel = wrap && hq(wrap, '.wheel');
     if (!wheel || this.spinning) return;
     const s = this.save;
-    const res = spinWheel(s, this.now(), this.rng);
+    const res = spinWheel(s, this.now(), this.rng, this.ads ? 'ad' : 'gems');
     if (!res) {
-      this.toast('No spins left today');
+      this.toast(adsLeft(s, 'wheel', this.now()) ? 'Not enough gems' : 'No spins left today');
       return;
     }
     this.persist();
     this.spinning = true;
     const note = hq(this.modal, '.wheel-panel .tiny');
-    if (note) note.textContent = `${adsLeft(s, 'wheel', this.now())} of ${AD_PLACEMENTS.wheel.cap} spins left today · one short ad each`;
+    if (note) note.textContent = this.wheelNote(adsLeft(s, 'wheel', this.now()));
     const n = WHEEL.length;
     const step = 360 / n;
     const from = this.wheelAngle || 0;
@@ -763,9 +808,9 @@ export class Hub {
     const now = this.now();
     this.openModal('energy', `<div class="panel small"><h2>Energy</h2><p class="muted">Each run costs ${ECONOMY.energyPerRun}. One point returns every 12 minutes.</p>
       <div class="col">
-        <button class="btn ghost ad" data-act="adenergy" ${adsLeft(s, 'energy', now) ? '' : 'disabled'}>${ico('energy')}+${ECONOMY.energyAd} (${adsLeft(s, 'energy', now)} left today)</button>
+        ${this.ads ? `<button class="btn primary ad" data-act="adenergy" ${adsLeft(s, 'energy', now) ? '' : 'disabled'}>${ico('energy')}+${ECONOMY.energyAd} (${adsLeft(s, 'energy', now)} left today)</button>` : ''}
         <button class="btn primary" data-act="buyenergy" ${s.daily.energyBuys < ECONOMY.energyGemPack.perDay ? '' : 'disabled'}>${ico('energy')}+${ECONOMY.energyGemPack.energy} for ${ico('gem')}${ECONOMY.energyGemPack.gems}</button>
-        <button class="btn ghost" data-act="close">Close</button></div></div>`);
+        <button class="btn primary" data-act="close">Close</button></div></div>`);
   }
 
   // The results screen: what the run paid, with the doubling ad and the next step.
@@ -788,24 +833,44 @@ export class Hub {
       <h3>Rewards</h3>
       <div class="rlist ${doubled ? 'doubled' : ''}">${rewardChips({ scrap: rewards.scrap * m, gems: rewards.gems, dna: Object.fromEntries(Object.entries(rewards.dna).map(([k, v]) => [k, v * m])), items: rewards.items, geneCores: rewards.geneCores, xp: rewards.xp, passXp: rewards.passXp * m }, doubled ? 'big' : 'big pop')}</div>
       <div class="row">
-        <button class="btn gold ${doubled ? '' : 'ad'}" data-act="resdouble" ${adLeft && !doubled ? '' : 'disabled'}>${doubled ? 'Doubled!' : `2× rewards (${adLeft} left)`}</button>
-        <button class="btn ghost" data-act="resagain">Again ${ico('energy')}${ECONOMY.energyPerRun}</button>
-        <button class="btn primary big" data-act="rescontinue">Continue</button>
+        ${this.ads || doubled ? `<button class="btn primary ${doubled ? '' : 'ad'}" data-act="resdouble" ${adLeft && !doubled ? '' : 'disabled'}>${doubled ? 'Doubled!' : `2× rewards (${adLeft} left)`}</button>` : ''}
+        <button class="btn primary" data-act="resagain">Again ${ico('energy')}${ECONOMY.energyPerRun}</button>
+        <button class="btn primary" data-act="rescontinue">Continue</button>
       </div></div>`);
     this.results = { onDouble, onContinue, onAgain };
   }
 
-  // Down: free revive, ad revive, gem revive, or give up.
+  // Down: free revive, ad revive, gem revive, or give up. The ad revive is a one-off offer
+  // against a countdown (and "Give up" is just as big); when the countdown runs out, the run ends.
+  // Returns whether an ad was offered.
   showRevive({ free, ad, gems, onRevive, onGiveUp }) {
     const s = this.save;
+    const adOffer = ad && !free && this.ads;
     this.openModal('revive', `<div class="panel small revive2"><h2>Knocked down!</h2><p class="muted">Get back up at half health with a shockwave.</p>
       <div class="col">
         ${free ? '<button class="btn gold big" data-act="rev" data-how="free">Revive (Nine Lives)</button>' : ''}
-        ${ad && !free ? '<button class="btn gold big ad" data-act="rev" data-how="ad">Revive</button>' : ''}
-        ${!free && !ad && gems ? `<button class="btn primary big" data-act="rev" data-how="gems" ${s.cur.gems >= gems ? '' : 'disabled'}>Revive ${ico('gem')}${gems}</button>` : ''}
-        <button class="btn ghost" data-act="rev" data-how="quit">Give up</button>
+        ${adOffer ? `<button class="btn primary big ad" data-act="rev" data-how="ad">Revive <span class="rev-count">${REVIVE_OFFER}</span></button>` : ''}
+        ${!free && !adOffer && gems ? `<button class="btn primary big" data-act="rev" data-how="gems" ${s.cur.gems >= gems ? '' : 'disabled'}>Revive ${ico('gem')}${gems}</button>` : ''}
+        <button class="btn primary big" data-act="rev" data-how="quit">Give up</button>
       </div></div>`);
     this.revive = { onRevive, onGiveUp, gems };
+    clearInterval(this.reviveTimer);
+    if (adOffer) {
+      let left = REVIVE_OFFER;
+      this.reviveTimer = setInterval(() => {
+        if (this.modalKind !== 'revive') return clearInterval(this.reviveTimer);
+        if (this.platform.adPlaying) return null; // the countdown waits while the ad plays
+        left--;
+        const el = hq(this.modal, '.rev-count');
+        if (el) el.textContent = left;
+        if (left > 0) return null;
+        clearInterval(this.reviveTimer);
+        this.closeModal();
+        onGiveUp();
+        return null;
+      }, 1000);
+    }
+    return adOffer;
   }
 
   // ------------------------------------------------------------------ actions
@@ -964,6 +1029,7 @@ export class Hub {
         if (this.modalKind === 'energy') this.openEnergy();
         break;
       case 'adgems':
+        if (adWait(s, 'gems', now) > 0 || adsLeft(s, 'gems', now) <= 0) break;
         this.watchAd('gems', () => {
           if (adGems(s, this.now())) {
             this.sfx.cash();
@@ -1011,17 +1077,21 @@ export class Hub {
         else this.openPass();
         break;
       case 'claimpass': {
-        const claim = () => {
-          const out = claimPass(s, Number(d.t), d.p === '1', this.rng, this.now());
-          if (!out) return;
+        const claim = (how) => {
+          const out = claimPass(s, Number(d.t), d.p === '1', this.rng, this.now(), how);
+          if (!out) {
+            if (how === 'gems') this.toast('Not enough gems');
+            return;
+          }
           this.sfx.ding(d.p === '1' ? 3 : 1);
           this.persist();
           this.openPass();
           this.render();
         };
-        // The bonus track is one rewarded ad a tier.
-        if (d.p === '1') this.watchAd('pass', claim);
-        else claim();
+        // The bonus track is one rewarded ad a tier (or a few gems where ads can't be shown).
+        if (d.p !== '1') claim();
+        else if (this.ads) this.watchAd('pass', () => claim('ad'));
+        else claim('gems');
         break;
       }
       case 'patrol':
@@ -1059,7 +1129,8 @@ export class Hub {
         break;
       case 'spin':
         if (this.spinning || adsLeft(s, 'wheel', now) <= 0) break;
-        this.watchAd('wheel', () => this.spin());
+        if (this.ads) this.watchAd('wheel', () => this.spin());
+        else this.spin();
         break;
       case 'pickkaiju':
         s.lastKaiju = d.id;

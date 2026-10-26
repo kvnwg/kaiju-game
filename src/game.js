@@ -3151,14 +3151,6 @@ export class Game {
     this.emit('end', { results: this.results });
   }
 
-  // Rewarded-ad placeholder: double the scrap from the finished run.
-  doubleLoot() {
-    if (!this.results || this.results.doubled) return false;
-    this.results.scrap *= 2;
-    this.results.doubled = true;
-    return true;
-  }
-
   debugGrow() {
     this.gateCleared[this.kaiju.stage] = true;
     if (this.kaiju.stage < MAX_STAGE) this.addBiomass(this.stage.biomassToNext - this.kaiju.biomass);

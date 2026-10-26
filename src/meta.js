@@ -16,7 +16,9 @@ export const ECONOMY = {
   energyRegenMs: 12 * 60000,
   energyAd: 5,
   energyGemPack: { energy: 15, gems: 50, perDay: 3 },
-  adGems: 30, // gems per rewarded ad, as many times as the player likes
+  adGems: 30, // gems per rewarded ad (ten a day, a few minutes apart: see AD_PLACEMENTS.gems)
+  passBonusGems: 20, // a pass bonus reward bought with gems, when ads can't be shown
+  wheelGems: 20, // a Lucky Wheel spin bought with gems, when ads can't be shown
   levelUpEnergy: 5,
   levelUpGems: 20,
   quickPatrolEnergy: 15,
@@ -128,7 +130,7 @@ export const AD_PLACEMENTS = {
   double: { cap: 3, name: 'Double run rewards' },
   energy: { cap: 3, name: '+5 energy' },
   crate: { cap: 1, name: 'Free Supply Crate' },
-  gems: { cap: Infinity, name: '30 gems' },
+  gems: { cap: 10, cooldown: 180, name: '30 gems' }, // a few minutes apart, so ads aren't pushed
   pass: { cap: Infinity, name: 'Bonus pass reward' },
   wheel: { cap: 5, name: 'Lucky Wheel spin' },
   patrol: { cap: 1, name: 'Free Quick Patrol' },
@@ -785,10 +787,12 @@ export function passReward(tier, premium) {
   return { scrap: 800 };
 }
 // The bonus track pays a tier at a time for a rewarded ad, which the hub plays first.
-export function claimPass(s, tier, premium, rng, now = Date.now()) {
+// A bonus (premium) reward costs an ad, or a few gems where ads can't be shown (how = 'gems').
+export function claimPass(s, tier, premium, rng, now = Date.now(), how = 'ad') {
   if (tier > passTier(s) || tier < 1) return null;
   const book = premium ? s.pass.prem : s.pass.free;
-  if (book[tier] || (premium && !useAd(s, 'pass', now))) return null;
+  if (book[tier]) return null;
+  if (premium && !(how === 'gems' ? pay(s, { gems: ECONOMY.passBonusGems }) : useAd(s, 'pass', now))) return null;
   book[tier] = true;
   return grant(s, passReward(tier, premium), rng);
 }
@@ -850,10 +854,19 @@ export function adsLeft(s, id, now = Date.now()) {
   const book = p.weekly ? s.weekly.ads : s.daily.ads;
   return Math.max(0, p.cap - (book[id] || 0));
 }
+// Seconds until placement `id` can be watched again (its cooldown since the last one); 0 when ready.
+export function adWait(s, id, now = Date.now()) {
+  rollover(s, now);
+  const p = AD_PLACEMENTS[id];
+  const at = s.daily.adAt && s.daily.adAt[id];
+  if (!p.cooldown || !at) return 0;
+  return Math.max(0, Math.ceil(p.cooldown - (now - at) / 1000));
+}
 export function useAd(s, id, now = Date.now()) {
-  if (adsLeft(s, id, now) <= 0) return false;
+  if (adsLeft(s, id, now) <= 0 || adWait(s, id, now) > 0) return false;
   const book = AD_PLACEMENTS[id].weekly ? s.weekly.ads : s.daily.ads;
   book[id] = (book[id] || 0) + 1;
+  if (AD_PLACEMENTS[id].cooldown) (s.daily.adAt ||= {})[id] = now;
   return true;
 }
 export function adEnergy(s, now = Date.now()) {
@@ -873,8 +886,12 @@ export function buyEnergy(s, now = Date.now()) {
 }
 
 // ---------------------------------------------------------------- Lucky Wheel
-export function spinWheel(s, now = Date.now(), rng = createRng(now)) {
-  if (!useAd(s, 'wheel', now)) return null;
+// One spin costs an ad, or a few gems where ads can't be shown; five spins a day either way.
+export function spinWheel(s, now = Date.now(), rng = createRng(now), how = 'ad') {
+  if (how === 'gems') {
+    if (adsLeft(s, 'wheel', now) <= 0 || !pay(s, { gems: ECONOMY.wheelGems })) return null;
+    s.daily.ads.wheel = (s.daily.ads.wheel || 0) + 1;
+  } else if (!useAd(s, 'wheel', now)) return null;
   const idx = Number(rng.weighted(Object.fromEntries(WHEEL.map((w, i) => [i, w.weight]))));
   return { index: idx, reward: grant(s, WHEEL[idx].reward, rng) };
 }

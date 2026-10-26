@@ -1,5 +1,6 @@
 // One-thumb controls: drag anywhere for a floating virtual stick; WASD / arrows on desktop.
-// Charge: Space or Shift, or the on-screen button.
+// Charge: Space or Shift, or the on-screen button. Keys are read by position (KeyboardEvent.code),
+// so WASD stays under the same fingers on any layout (ZQSD on AZERTY).
 export class Input {
   constructor(surface, stickEl) {
     this.surface = surface;
@@ -17,14 +18,13 @@ export class Input {
     window.addEventListener('pointercancel', (e) => this.onUp(e));
     this.dashQueued = false;
     window.addEventListener('keydown', (e) => {
+      // Arrows and Space would scroll the page around the game.
+      if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
       if (e.repeat) return;
-      this.keys.add(e.key.toLowerCase());
-      if (e.key === ' ' || e.key === 'Shift') {
-        this.dashQueued = true;
-        e.preventDefault();
-      }
+      this.keys.add(e.code);
+      if (e.code === 'Space' || e.key === 'Shift') this.dashQueued = true;
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.release();
@@ -75,8 +75,8 @@ export class Input {
 
   get() {
     const k = this.keys;
-    const kx = (k.has('d') || k.has('arrowright') ? 1 : 0) - (k.has('a') || k.has('arrowleft') ? 1 : 0);
-    const ky = (k.has('s') || k.has('arrowdown') ? 1 : 0) - (k.has('w') || k.has('arrowup') ? 1 : 0);
+    const kx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    const ky = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
     if (kx || ky) return { x: kx, y: ky };
     return this.vec;
   }

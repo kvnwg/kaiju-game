@@ -15,33 +15,34 @@ const canvas = document.getElementById('game');
 const input = new Input(canvas, document.getElementById('stick'));
 const ui = new UI();
 const params = new URLSearchParams(location.search);
-const debug = params.has('debug');
+// Debug keys and dev buttons (?debug) are left out of release builds (see tools/build.mjs).
+const debug = params.has('debug') && !document.documentElement.hasAttribute('data-release');
 const loading = document.getElementById('loading');
 
-// The save holds the whole meta game (currencies, gear, quests...); see meta.js.
-let save = loadSave();
-let hub = null;
-const now = () => Date.now() + (hub ? hub.timeShift || 0 : 0);
-const persist = () => writeSave(save);
-rollover(save, now());
-const settings = save.settings;
-const sfx = new Sfx();
-ui.sfx = sfx;
-sfx.setMuted(settings.sound === false);
-const music = new Music(sfx);
-music.setEnabled(settings.music !== false);
-
-// Ads (CrazyGames, or a placeholder elsewhere). The game goes quiet and holds still while one plays.
+// Ads, saves and gameplay events (CrazyGames, or stand-ins elsewhere); see platform.js.
 const platform = new Platform();
 platform.loadingStart();
-let mutedBeforeAd = null;
-platform.onAdStart = () => {
-  mutedBeforeAd = sfx.muted;
-  sfx.setMuted(true);
-};
-platform.onAdEnd = () => {
-  if (mutedBeforeAd !== null) sfx.setMuted(mutedBeforeAd);
-  mutedBeforeAd = null;
+
+// The save holds the whole meta game (currencies, gear, quests...); see meta.js. It is loaded in
+// boot(), once the platform is ready, from wherever the platform keeps it.
+let save = null;
+let settings = null;
+let store = null;
+let hub = null;
+const now = () => Date.now() + (hub ? hub.timeShift || 0 : 0);
+const persist = () => writeSave(store, save);
+const sfx = new Sfx();
+ui.sfx = sfx;
+const music = new Music(sfx);
+
+// The game goes quiet while an ad plays, and whenever CrazyGames' own sound setting is off
+// (that wins over the player's in-game sound setting).
+platform.onAdStart = () => sfx.hold('ad', true);
+platform.onAdEnd = () => sfx.hold('ad', false);
+platform.onAdsOff = () => hub && hub.adsChanged();
+platform.onSettings = () => {
+  sfx.hold('platform', platform.muteAudio);
+  showSound();
 };
 
 // How hard the soundtrack should hit right now: menu 0, then by size and threat, bosses 4.
@@ -73,6 +74,7 @@ let movedFor = 0;
 let newsAt = 0; // when the size-up newspaper slams in (0: none on its way)
 let newsStage = 0;
 let newsUp = false; // the newspaper is on screen, and the run waits for it
+let reviveAdOffered = false; // this run's last knockdown offered an ad revive (so no ad break follows)
 
 function defaultQuality() {
   const saved = settings.quality;
@@ -103,6 +105,7 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   movedFor = 0;
   newsAt = 0;
   newsUp = false;
+  reviveAdOffered = false;
   ui.warmNewsFonts();
   hintUntil = firstRun || save.runs < 2 ? performance.now() + 7000 : 0;
   ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');
@@ -243,7 +246,7 @@ function handleEvents(events) {
       case 'dead': {
         const paid = game.revives - (game.reviveAvailable ? 0 : 1) - (game.meta.revives - game.freeRevives) || 0;
         const price = ECONOMY.reviveGems[Math.max(0, paid)] || null;
-        hub.showRevive({
+        reviveAdOffered = hub.showRevive({
           free: game.freeRevives > 0, ad: game.reviveAvailable, gems: price,
           onRevive: (how) => game.revive(how === 'gems'),
           onGiveUp: () => game.giveUp(),
@@ -291,13 +294,16 @@ function onRunEnd(results) {
     },
     onAgain: () => startRun(lastSettings),
   });
-  // An ad break after every match, then the results.
-  platform.showAd('midgame').then(show);
+  // An ad break after every match, then the results; but never straight after an ad revive was
+  // offered (one ad offer per break).
+  if (reviveAdOffered) show();
+  else platform.showAd('midgame').then(show);
 }
 
 // The augment pick, with the extra reroll behind a rewarded ad.
 function showPick() {
   ui.showPick(game, {
+    ads: platform.rewardedAds,
     onChoose: (id) => game.choose(id),
     onReroll: (ad) => {
       if (!ad) {
@@ -326,7 +332,7 @@ function togglePause(force) {
       held: game.held,
       quality: renderer.qualityName,
       pixelArt: renderer.pixelArt,
-      sound: !sfx.muted,
+      sound: !sfx.userMuted,
       musicOn: music.enabled,
       onMusic: (on) => {
         music.setEnabled(on);
@@ -357,11 +363,12 @@ function togglePause(force) {
 document.getElementById('pauseBtn').addEventListener('click', () => togglePause());
 // Sound on/off right on the HUD (the same setting as in the pause menu).
 const soundBtn = document.getElementById('soundBtn');
-const showSound = () => soundBtn.classList.toggle('muted', sfx.muted);
-showSound();
+function showSound() {
+  soundBtn.classList.toggle('muted', sfx.muted);
+}
 soundBtn.addEventListener('click', () => {
-  sfx.setMuted(!sfx.muted);
-  settings.sound = !sfx.muted;
+  sfx.setMuted(!sfx.userMuted);
+  settings.sound = !sfx.userMuted;
   persist();
   showSound();
   if (!sfx.muted) sfx.click();
@@ -374,7 +381,8 @@ dashBtn.addEventListener('pointerdown', (e) => {
   input.dashQueued = true;
 });
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' || e.key === 'p') togglePause();
+  // P pauses (not Escape: on CrazyGames that leaves fullscreen).
+  if (e.code === 'KeyP') togglePause();
   if (!debug || !game) return;
   if (e.key === 'g') game.debugGrow();
   if (e.key === 'l') game.debugLevel();
@@ -461,10 +469,22 @@ function updatePreyArrow() {
   const ry = (bottom - top) / 2;
   const t = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
   preyArrow.classList.remove('hidden');
-  preyArrow.style.transform = `translate(${cx + Math.cos(a) * t}px, ${cy + Math.sin(a) * t}px) rotate(${a}rad)`;
+  // In the HUD's scaled space (see fitUi).
+  preyArrow.style.transform = `translate(${(cx + Math.cos(a) * t) / uiScale}px, ${(cy + Math.sin(a) * t) / uiScale}px) rotate(${a}rad)`;
 }
 
-function boot() {
+async function boot() {
+  // CrazyGames' SDK first: it brings the player's save with it. A stalled SDK doesn't hold the
+  // game up for long; the save then stays in this browser for the session.
+  await Promise.race([platform.ready, new Promise((done) => setTimeout(done, 8000))]);
+  store = platform.storage;
+  save = loadSave(store, now());
+  rollover(save, now());
+  settings = save.settings;
+  sfx.setMuted(settings.sound === false);
+  sfx.hold('platform', platform.muteAudio);
+  music.setEnabled(settings.music !== false);
+  showSound();
   try {
     if (!window.THREE) throw new Error('three.js did not load');
     renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || settings.pixelArt === true, floaterLayer: document.getElementById('floaters') });
@@ -481,8 +501,7 @@ function boot() {
   hub = new Hub({ app: document.getElementById('app'), getSave: () => save, persist, onPlay: (opts) => startRun(opts), sfx, platform, getNow: now });
   hub.debug = debug;
   hub.onReset = () => {
-    clearSave();
-    save = loadSave();
+    clearSave(store);
     location.reload();
   };
   // `?play` skips straight into a run; otherwise the cinematic title comes first.
@@ -494,7 +513,18 @@ function boot() {
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', () => renderer && renderer.resize());
+// The interface is laid out for phone and laptop windows; a big screen scales it up (see #app's --ui).
+let uiScale = 1;
+function fitUi() {
+  const fit = Math.max(1, Math.min(1.6, window.innerWidth / 1100, window.innerHeight / 640));
+  uiScale = Math.round(fit * 20) / 20;
+  appEl.style.setProperty('--ui', String(uiScale));
+}
+fitUi();
+window.addEventListener('resize', () => {
+  fitUi();
+  if (renderer) renderer.resize();
+});
 // Let the loading screen paint before generating the city.
 setTimeout(boot, 30);
 
