@@ -28,6 +28,8 @@ void main() {
   gl_FragColor = vec4(c * 1.4, a);
 }`;
 const PARTICLE_CAP = 2500;
+const PLUMES = 14; // burning ruins smoking at once (the title shot)
+const WIND = { x: 0.55, z: -0.25 }; // smoke drifts this way, in its own radii per second
 
 const PARTICLE_VS = `
 attribute float size;
@@ -189,6 +191,7 @@ export class FX {
     this.hazardMeshes = new Map();
     this.boltLines = [];
     this.lights = []; // short-lived light flashes {x,y,z,color,intensity,radius,life,max}
+    this.plumes = [];
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();
     this._e = new THREE.Euler();
@@ -288,6 +291,51 @@ export class FX {
     this.lights.push({ x, y, z, color, intensity, radius, life, max: life });
   }
 
+  // A burning ruin: a column of smoke rising from it and leaning with the wind, with flames and
+  // a flickering light at its foot, for `life` seconds.
+  plume(x, z, r, life) {
+    this.plumes.push({ x, z, r, life, max: life, smoke: 0, fire: 0 });
+    if (this.plumes.length > PLUMES) this.plumes.shift();
+  }
+
+  updatePlumes(dt) {
+    let lit = 0;
+    for (let i = this.plumes.length - 1; i >= 0; i--) {
+      const p = this.plumes[i];
+      p.life -= dt;
+      // Catches over a second or two, dies down over the last few.
+      const k = Math.max(0, Math.min(1, p.life / 5, (p.max - p.life) / 1.5));
+      p.smoke -= dt;
+      if (p.smoke <= 0 && k > 0) {
+        p.smoke = 0.13;
+        const l = 7 + Math.random() * 3;
+        // Mostly sooty grey; some puffs carry the fire's colour up with them.
+        const c = Math.random() < 0.3 ? { r: 0.42, g: 0.24, b: 0.16 } : { r: 0.3, g: 0.27, b: 0.3 };
+        this.dust.add({
+          x: p.x + (Math.random() - 0.5) * p.r * 0.6, y: p.r * 0.4, z: p.z + (Math.random() - 0.5) * p.r * 0.6,
+          vx: WIND.x * p.r * (0.6 + Math.random() * 0.5), vy: p.r * (1.1 + Math.random() * 0.4), vz: WIND.z * p.r * (0.6 + Math.random() * 0.5),
+          drag: 0.06, lift: 0, size: p.r * (0.55 + Math.random() * 0.3), grow: 2.2, life: l, max: l, a: 0.55 * k, ...c,
+        });
+      }
+      p.fire -= dt;
+      if (p.fire <= 0 && k > 0.2) {
+        p.fire = 0.09;
+        const l = 0.5 + Math.random() * 0.4;
+        const c = rgb([0xffb347, 0xff7a1a, 0xff4a1a][Math.floor(Math.random() * 3)]);
+        this.glow.add({
+          x: p.x + (Math.random() - 0.5) * p.r * 1.2, y: p.r * 0.15, z: p.z + (Math.random() - 0.5) * p.r * 1.2,
+          vx: 0, vy: p.r * (0.6 + Math.random() * 0.6), vz: 0, drag: 1.5, size: p.r * (0.5 + Math.random() * 0.4), grow: 0.3, life: l, max: l, a: 0.85 * k, ...c,
+        });
+      }
+      // The newest few fires light up their surroundings (and the kaiju's legs).
+      if (k > 0.2 && lit < 3) {
+        lit++;
+        this.lights.push({ x: p.x, y: p.r * 0.8, z: p.z, color: 0xff7a2a, intensity: k * (0.9 + Math.random() * 0.35), radius: p.r * 9, life: 0.001, max: 0.001 });
+      }
+      if (p.life <= 0) this.plumes.splice(i, 1);
+    }
+  }
+
   ring(x, z, r0, r1, color, life, width = 0.15) {
     let m = this.ringPool.find((p) => !p.visible);
     if (!m) {
@@ -325,6 +373,7 @@ export class FX {
     }
     for (const l of this.lights) l.life -= dt;
     this.lights = this.lights.filter((l) => l.life > 0);
+    if (this.plumes.length) this.updatePlumes(dt);
     if (game) {
       this.syncRings(game);
       this.syncHazards(game);
@@ -849,5 +898,6 @@ export class FX {
     for (const [, entry] of this.hazardMeshes) for (const o of entry.parts) this.scene.remove(o);
     this.hazardMeshes.clear();
     this.lights = [];
+    this.plumes = [];
   }
 }

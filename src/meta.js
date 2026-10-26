@@ -15,7 +15,7 @@ export const ECONOMY = {
   energyPerRun: 5,
   energyRegenMs: 12 * 60000,
   energyAd: 5,
-  energyGemPack: { energy: 15, gems: 100, perDay: 3 },
+  energyGemPack: { energy: 15, gems: 50, perDay: 3 },
   adGems: 30, // gems per rewarded ad, as many times as the player likes
   levelUpEnergy: 5,
   levelUpGems: 20,

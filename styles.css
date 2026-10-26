@@ -891,6 +891,12 @@ html, body {
 @keyframes titleIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes titleOut { to { opacity: 0; } }
 @keyframes tapPulse { 50% { opacity: 0.35; } }
+/* On a tall screen the kaiju fills the middle: the logo goes up in the sky, the prompt down in the city. */
+@media (max-aspect-ratio: 1/1) {
+  .title-screen { justify-content: flex-start; padding-top: calc(9vh + 5vh); padding-bottom: calc(9vh + 7vh); }
+  .title-tap { margin-top: auto; text-align: center; }
+  .title-grade { background: linear-gradient(rgba(5, 6, 10, 0.55), transparent 30%, transparent 70%, rgba(5, 6, 10, 0.5)); }
+}
 
 /* ---------- hub frame ---------- */
 .hub { position: absolute; inset: 0; z-index: 20; pointer-events: none; display: flex; flex-direction: column; }

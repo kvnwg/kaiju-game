@@ -3,10 +3,11 @@ import { Renderer3D } from './render3d.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { loadSave, writeSave, clearSave } from './storage.js';
-import { KAIJU, WORLD } from './config.js';
+import { KAIJU } from './config.js';
 import { Sfx, Music } from './audio.js';
 import { Hub } from './hub.js';
 import { Platform } from './platform.js';
+import { setupTitle, TITLE } from './title.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 
 const canvas = document.getElementById('game');
@@ -64,6 +65,7 @@ let game = null;
 let paused = false;
 let lastSettings = { kaijuId: 'rex', chapter: 1, mode: 'normal' };
 let titleActive = false;
+let title = null; // the title shot's kaiju, kept in frame
 let runCtx = null;
 let hintUntil = 0;
 let movedFor = 0;
@@ -117,33 +119,18 @@ function showHub(tab) {
   if (loginReady(save, now()) && save.tutorialDone) hub.openLogin();
 }
 
-// The title: a live cinematic of a kaiju wrecking a skyline in the distance.
+// The title: a fixed shot from among the towers, looking out across the skyline at a colossal
+// kaiju wrecking the city in the distance. The camera never follows it.
 function showTitle() {
   game = new Game({ seed: 11, kaijuId: 'rex' });
-  // Set the scene downtown, among the towers.
-  let best = null;
-  for (let r = -12; r <= 12; r++) {
-    for (let c = -12; c <= 12; c++) {
-      const z = game.city.zoneFor(c, r);
-      if (z.style === 'neon' && z.density > 0.6 && (!best || c * c + r * r < best.d)) best = { c, r, d: c * c + r * r };
-    }
-  }
-  if (best) {
-    game.kaiju.x = (best.c + 0.5) * WORLD.cell;
-    game.kaiju.y = (best.r + 0.5) * WORLD.cell;
-  }
-  for (let i = 1; i < 5; i++) game.grow();
-  game.streamWorld(true);
-  game.kaiju.r = game.stage.radius;
-  game.kaiju.level = 999;
-  game.director.spawnT = 3;
+  title = setupTitle(game);
   renderer.startRun(game);
-  game.diff = { ...game.diff, enemyDmg: 0 };
-  renderer.cinematic = { yaw: 0.6, dist: 13, height: 0.9, lookH: 1.4, side: 0.3, dusk: 0.92 };
+  renderer.cinematic = title.view;
   titleActive = true;
   ui.show('hud', false);
   hub.showTitle(() => {
     titleActive = false;
+    title = null;
     renderer.cinematic = null;
     if (!save.tutorialDone) startRun({ kaijuId: 'rex', firstRun: true });
     else showHub('battle');
@@ -402,12 +389,10 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (game && renderer && titleActive) {
-    // The title's kaiju wanders in a slow loop through the city, wrecking it.
-    const t = now / 1000;
-    game.setInput(Math.cos(t * 0.45), Math.sin(t * 0.45));
-    game.kaiju.hp = game.kaiju.maxHp;
-    game.kaiju.biomass = 0;
+    // The title's kaiju rampages in frame, out in the distance.
+    title.update(dt, renderer.w / renderer.h);
     if (game.state === 'playing') game.update(dt);
+    game.kaiju.r = TITLE.r;
     game.drainEvents();
   }
   if (game && renderer) {
@@ -426,7 +411,8 @@ function frame(now) {
         ui.hint('');
       }
     }
-    renderer.render(game, inRun && !paused ? dt : dt * 0.25);
+    // Behind the hub, wreckage settles in slow motion; the title and a run play at full speed.
+    renderer.render(game, titleActive || (inRun && !paused) ? dt : dt * 0.25);
     music.update(musicState());
     if (inRun) {
       ui.updateHud(game);
@@ -497,4 +483,4 @@ window.addEventListener('resize', () => renderer && renderer.resize());
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, sfx, platform, startRun, showHub, save: () => save, persist };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, get title() { return title; }, sfx, platform, startRun, showHub, save: () => save, persist };

@@ -98,6 +98,7 @@ export class Game {
     this.vfx = [];
     this.boss = null;
     this.bossTimer = null;
+    this.spare = null; // (object) => true keeps it standing whatever hits it (the title shot's foreground)
     this.gateTimer = null; // countdown to the size-gate boss walking in
     this.gateCleared = []; // gateCleared[stage]: that size's boss is down, so the kaiju may grow
     this.collapsing = 0;
@@ -1344,7 +1345,7 @@ export class Game {
 
   // ---------------------------------------------------------------- destruction
   damageObject(o, amount, dir, cause = 'hit', at = null) {
-    if (o.state !== 'intact' || !o.chunk.loaded) return false;
+    if (o.state !== 'intact' || !o.chunk.loaded || (this.spare && this.spare(o))) return false;
     const stage = this.kaiju.stage;
     if (!canDamage(o.tier, stage, o.landmark)) return false;
     if (isSnack(o.tier, stage) && !o.landmark) amount = o.hp;
@@ -1360,7 +1361,7 @@ export class Game {
   }
 
   destroyObject(o, dir, cause = 'hit') {
-    if (o.state !== 'intact' || !o.chunk.loaded) return;
+    if (o.state !== 'intact' || !o.chunk.loaded || (this.spare && this.spare(o))) return;
     const k = this.kaiju;
     o.hp = 0;
     o.fallDir = dir && (dir.x || dir.y) ? dir : norm(o.x - k.x, o.y - k.y);

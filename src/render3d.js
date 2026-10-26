@@ -3,7 +3,7 @@
 // tiles with baked street-light pools, voxel buildings that chip and collapse (simplified
 // meshes once they are small next to the kaiju), instanced street props, water, suspension
 // bridges, and post-processing.
-import { WORLD } from './config.js';
+import { WORLD, FOV } from './config.js';
 import { buildBuilding } from './buildings.js';
 import { PROP_BY_ID, buildProp } from './props.js';
 import { meshGrid, fracture } from './mesher.js';
@@ -23,7 +23,27 @@ export const QUALITY = {
 };
 const YAW = 0.62;
 const PITCH = 0.92; // ~53 degrees down
-const FOV = 32;
+
+// Searchlight beams (the title shot): brightest at the lamp and down the beam's middle, fading
+// out along its length and toward its edges.
+const BEAM_VS = `
+varying float vH;
+varying float vRim;
+void main() {
+  vH = uv.y;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vRim = abs(dot(normalize(normalMatrix * normal), normalize(-mv.xyz)));
+  gl_Position = projectionMatrix * mv;
+}`;
+const BEAM_FS = `
+uniform vec3 uColor;
+uniform float uAlpha;
+varying float vH;
+varying float vRim;
+void main() {
+  float a = uAlpha * pow(vRim, 1.6) * (1.0 - vH) * (1.0 - vH) * smoothstep(0.0, 0.03, vH);
+  gl_FragColor = vec4(uColor * a, 1.0);
+}`;
 
 // Lighting keyframes: golden afternoon -> sunset -> neon night.
 const SKY = [
@@ -163,6 +183,8 @@ export class Renderer3D {
     this.flashPool = [];
     this.t = 0;
     this.dusk = 0;
+    this.cinematic = null; // the title's fixed shot: { eye, focus, frameX, dusk }
+    this.lodBias = 1; // above 1, buildings and props switch to coarser voxels sooner
     this.camDist = 200;
     this.target = new THREE.Vector3();
 
@@ -277,7 +299,7 @@ export class Renderer3D {
         this.tilt.uniforms.amount.value = 5.5 * pr;
       }
     }
-    this.fx.setScale((h * pr) / (2 * Math.tan((FOV * Math.PI) / 360)));
+    this.fxFov = null; // particle sizes follow the screen height and field of view (see render)
   }
 
   // Screen-space stick direction -> world direction for this camera.
@@ -349,6 +371,57 @@ export class Renderer3D {
     this.hospitalMarks.delete(o);
   }
 
+  // Searchlights from around the kaiju sweeping the night sky, only in the title shot.
+  updateSearchlights(cine) {
+    if (!cine) {
+      if (this.searchlights) {
+        for (const m of this.searchlights.beams) this.scene.remove(m);
+        this.searchlights.geo.dispose();
+        this.searchlights.mat.dispose();
+        this.searchlights = null;
+      }
+      return;
+    }
+    const e = cine.eye;
+    const f = cine.focus;
+    const d = Math.hypot(f.x - e.x, f.z - e.z);
+    const ux = (f.x - e.x) / d;
+    const uz = (f.z - e.z) / d;
+    if (!this.searchlights) {
+      const len = d * 0.9;
+      const geo = new THREE.CylinderGeometry(len * 0.035, len * 0.004, len, 16, 1, true);
+      geo.translate(0, len / 2, 0);
+      const mat = new THREE.ShaderMaterial({
+        vertexShader: BEAM_VS, fragmentShader: BEAM_FS, uniforms: { uColor: { value: new THREE.Color(0xcfe0ff) }, uAlpha: { value: 0.22 } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      });
+      // Out to either side of the kaiju and behind it, so the beams climb out of the skyline.
+      const spots = [[-1.4, 0.45], [-0.6, 0.75], [0.5, 0.6], [1.3, 0.35]];
+      const beams = spots.map(([side, back], i) => {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(f.x - uz * side * d * 0.5 + ux * back * d * 0.5, 0, f.z + ux * side * d * 0.5 + uz * back * d * 0.5);
+        m.userData = { phase: i * 1.7, speed: 0.11 + i * 0.023, lean: side > 0 ? -0.35 : 0.35 };
+        m.renderOrder = 4;
+        m.frustumCulled = false;
+        this.scene.add(m);
+        return m;
+      });
+      this.searchlights = { geo, mat, beams };
+    }
+    const up = new THREE.Vector3(0, 1, 0);
+    const dir = new THREE.Vector3();
+    for (const m of this.searchlights.beams) {
+      const u = m.userData;
+      // Swing across the sky (relative to the view: 0 points away from the camera), rising and dipping.
+      const az = u.lean + Math.sin(this.t * u.speed + u.phase) * 0.9;
+      const el = 0.95 + Math.sin(this.t * u.speed * 0.7 + u.phase * 2) * 0.28;
+      const across = Math.sin(az) * Math.cos(el);
+      const away = Math.cos(az) * Math.cos(el);
+      dir.set(ux * away - uz * across, Math.sin(el), uz * away + ux * across).normalize();
+      m.quaternion.setFromUnitVectors(up, dir);
+    }
+  }
+
   // The golden vault: a pulsing gold frame and a spinning gem above the building.
   updateVaultMark(game) {
     const o = game.vault && game.vault.state === 'intact' ? game.vault : null;
@@ -395,7 +468,7 @@ export class Renderer3D {
 
   // Hospitals glow while they are worth smashing: within two sizes of the kaiju (a 5% heal or
   // more). Smaller ones go dark, which also keeps a big kaiju's view free of markers.
-  updateHospitalMarks(stage) {
+  updateHospitalMarks(stage, hidden = false) {
     if (!this.hospitalMarks) return;
     const pulse = 0.6 + 0.4 * Math.sin(this.t * 4);
     this.healMat.opacity = 0.55 + 0.4 * pulse;
@@ -404,7 +477,7 @@ export class Renderer3D {
         this.removeHospitalMark(o);
         continue;
       }
-      g.visible = stage - o.tier <= 2;
+      g.visible = !hidden && stage - o.tier <= 2;
       if (!g.visible) continue;
       const c = g.userData.cross;
       c.rotation.y = this.t * 1.5;
@@ -576,7 +649,7 @@ export class Renderer3D {
     const found = [];
     for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
       if (o.kind !== 'prop' || o.state !== 'intact') continue;
-      const px = view.px(o.x, o.y, Math.max(o.height, o.w));
+      const px = view.px(o.x, o.y, Math.max(o.height, o.w)) / this.lodBias;
       if (px < 3.5 || !view.visible(o.x, o.y, o.height, o.height)) continue;
       found.push(o, this.propEntry(o.type, o.variant, px < 7 ? 2 : px < 14 ? 1 : 0));
     }
@@ -733,7 +806,7 @@ export class Renderer3D {
     this.camera.updateMatrixWorld();
     const m = new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
     const cam = this.camera.position;
-    const focal = this.h / (2 * Math.tan((FOV * Math.PI) / 360));
+    const focal = this.h / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     const onScreen = (x, z, y, pad) => {
       const w = m[3] * x + m[7] * y + m[11] * z + m[15];
       if (w <= 0) return false;
@@ -741,8 +814,10 @@ export class Renderer3D {
       const py = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
       return px > -1 - pad && px < 1 + pad && py > -1 - pad && py < 1 + pad;
     };
+    const far = this.camera.far;
     return {
       visible: (x, z, h, r) => {
+        if (Math.hypot(x - cam.x, z - cam.z) > far + r) return false;
         const pad = 0.3 + (r * focal) / Math.max(1, Math.hypot(x - cam.x, z - cam.z, cam.y)) / this.h;
         return onScreen(x, z, 0, pad) || onScreen(x, z, h, pad);
       },
@@ -804,7 +879,7 @@ export class Renderer3D {
       if (o.state === 'intact') {
         if (rec && rec.mesh) continue;
         // The fewer pixels a building covers, the coarser the voxels it is drawn with.
-        const px = view.px(o.x, o.y, size);
+        const px = view.px(o.x, o.y, size) / this.lodBias;
         const lod = px > 110 ? 0 : px > 40 ? 1 : 2;
         list.push(lod ? this.instFor(this.bInst, `${key}:L${lod}`, null) : this.instFor(this.bInst, key, v.geo), o, 0);
         if (lod) {
@@ -813,7 +888,7 @@ export class Renderer3D {
         }
       } else if (!o.walkable && !(rec && rec.collapse)) {
         // Rubble gets coarser with distance too, and a pile a few pixels wide isn't drawn.
-        const px = view.px(o.x, o.y, size);
+        const px = view.px(o.x, o.y, size) / this.lodBias;
         if (px < 5) continue;
         const lod = px > 80 ? 0 : px > 25 ? 1 : 2;
         list.push(this.instFor(this.rInst, `${key}:R${lod}`, null), o, 1);
@@ -1003,6 +1078,8 @@ export class Renderer3D {
     const rec = this.ensureMeshFor(o);
     const size = Math.max(o.w, o.h);
     this.fx.dustCloud(o.x, 0, o.y, size * 0.6, 12);
+    // In the title shot what falls keeps burning: a column of smoke over the skyline.
+    if (this.cinematic && o.height > 30 && Math.random() < 0.6) this.fx.plume(o.x, o.y, Math.min(80, Math.max(24, size * 0.45)), 25 + Math.random() * 20);
     if (e.animated) {
       rec.collapse = { t: 0, dur: 0.9 + o.tier * 0.15, dir: e.dir, nextBurst: 0.1 };
       this.collapses.add(rec);
@@ -1380,21 +1457,29 @@ export class Renderer3D {
     // Zoom punch: big kills kick the camera in a touch, then it eases back out.
     let d = this.camDist * (1 - game.punch * 0.06);
     if (cine) {
-      // A low, slow-drifting shot from street level toward the kaiju (the title screen).
-      const yaw = cine.yaw + Math.sin(this.t * 0.05) * 0.06;
-      d = k.r * cine.dist;
-      // `side` slides the kaiju off-centre (negative: to the right of frame, leaving room for the logo).
-      const sx = -Math.sin(yaw) * k.r * (cine.side || 0) * cine.dist * 0.5;
-      const sz = Math.cos(yaw) * k.r * (cine.side || 0) * cine.dist * 0.5;
-      this.target.set(k.x + sx, k.r * cine.lookH, k.y + sz);
-      this.camera.position.set(k.x + Math.cos(yaw) * d + sx + (Math.random() - 0.5) * shake * 0.3, k.r * cine.height, k.y + Math.sin(yaw) * d + sz);
-      this.camera.lookAt(this.target);
-      this.camera.near = Math.max(0.5, k.r * 0.2);
-      this.camera.far = d * 6;
+      // A fixed shot (the title): the camera stands still among the towers, looking out at the
+      // kaiju's anchor, turned so the anchor sits at cine.frameX across a wide screen. Only a
+      // slow handheld sway, and a tremble when something big goes off.
+      const e = cine.eye;
+      const f = cine.focus;
+      d = Math.hypot(f.x - e.x, f.z - e.z);
+      const at = aspect > 1 ? cine.frameX : 0;
+      const fov = cine.fov ? cine.fov(aspect) : FOV;
+      const jolt = game.shake * 0.002;
+      const yaw = Math.atan2(f.z - e.z, f.x - e.x) - Math.atan(at * Math.tan((fov * Math.PI) / 360) * aspect) + Math.sin(this.t * 0.11) * 0.004 + (Math.random() - 0.5) * jolt;
+      const pitch = Math.atan2(f.y - e.y, d) + Math.sin(this.t * 0.07) * 0.003 + (Math.random() - 0.5) * jolt;
+      this.camera.position.set(e.x, e.y, e.z);
+      this.camera.lookAt(e.x + Math.cos(yaw) * Math.cos(pitch), e.y + Math.sin(pitch), e.z + Math.sin(yaw) * Math.cos(pitch));
+      this.camera.fov = fov;
+      this.camera.near = 10;
+      this.camera.far = d * 2;
       this.camera.updateProjectionMatrix();
-      this.scene.fog.near = d * 0.9;
-      this.scene.fog.far = d * 4.2;
+      this.scene.fog.near = d * 0.5;
+      this.scene.fog.far = d * 1.95;
+      // What gets streamed in and lit: the stretch between the camera and the kaiju.
+      this.target.set(e.x + (f.x - e.x) * 0.6, 0, e.z + (f.z - e.z) * 0.6);
     } else {
+      this.camera.fov = FOV;
       this.camera.position.set(
         this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
         this.target.y + Math.sin(PITCH) * d + (Math.random() - 0.5) * shake,
@@ -1409,6 +1494,14 @@ export class Renderer3D {
       this.scene.fog.far = d * 3.4;
     }
     if (this.tilt) this.tilt.enabled = !cine;
+    if (this.camera.fov !== this.fxFov) {
+      this.fxFov = this.camera.fov;
+      this.fx.setScale((this.h * this.renderer.getPixelRatio()) / (2 * Math.tan((this.fxFov * Math.PI) / 360)));
+    }
+    // The title looks out across the whole city from street level: coarser voxels for what is
+    // not close, and no x-ray outline (there, buildings hiding its feet are the point).
+    this.lodBias = cine ? 2.5 : 1;
+    this.actors.setXray(!cine);
 
     // Sun / moon with a shadow box around the view.
     const sdir = new THREE.Vector3(Math.cos(key.az) * Math.cos(key.elev), Math.sin(key.elev), Math.sin(key.az) * Math.cos(key.elev));
@@ -1429,13 +1522,14 @@ export class Renderer3D {
       this.sun.shadow.normalBias = texel * 1.2;
     }
 
-    const half = cine ? Math.max(span * 0.75, d * 1.25) : span * 0.75;
-    this.terrain.update(cine ? Math.min(k.stage, 4) : k.stage, this.target.x, this.target.z, cine ? Math.max(span, d * 1.6) : span, key.night, key.water, this.t);
+    const half = cine ? d * 0.75 : span * 0.75;
+    this.terrain.update(cine ? Math.min(k.stage, 4) : k.stage, this.target.x, this.target.z, cine ? d * 1.1 : span, key.night, key.water, this.t);
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
-    this.updateHospitalMarks(k.stage);
+    this.updateHospitalMarks(k.stage, Boolean(cine));
+    this.updateSearchlights(cine);
     this.updateVaultMark(game);
     this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Charge trail

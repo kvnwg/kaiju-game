@@ -150,15 +150,21 @@ export class Actors {
     const ghost = new THREE.MeshBasicMaterial({ color: 0x356f26, blending: THREE.AdditiveBlending, depthFunc: THREE.GreaterDepth, depthWrite: false });
     const meshes = [];
     rig.root.traverse((m) => m.isMesh && meshes.push(m));
+    rig.ghosts = [];
     for (const m of meshes) {
       m.renderOrder = 10;
       const g = new THREE.Mesh(m.geometry, ghost);
       g.renderOrder = 5;
       g.castShadow = false;
       m.add(g);
+      rig.ghosts.push(g);
     }
     this.kaiju = rig;
     this.scene.add(rig.root);
+  }
+
+  setXray(on) {
+    if (this.kaiju) for (const g of this.kaiju.ghosts) g.visible = on;
   }
 
   clear() {

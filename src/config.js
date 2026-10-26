@@ -11,6 +11,8 @@ export const WORLD = {
 WORLD.width = WORLD.cols * WORLD.cell + WORLD.seaWidth;
 WORLD.height = WORLD.rows * WORLD.cell;
 
+export const FOV = 32; // the camera's vertical field of view, in degrees
+
 // 6 growth stages, from human-sized to skyline-sized. Size roughly doubles each stage.
 export const STAGES = [
   null,

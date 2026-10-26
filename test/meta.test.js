@@ -54,7 +54,7 @@ test('ads are capped per day and the energy ad pays 5', () => {
   s.cur.gems = 1000;
   for (let i = 0; i < 3; i++) assert.ok(buyEnergy(s, T0));
   assert.equal(buyEnergy(s, T0), null, 'gem refills capped at 3 a day');
-  assert.equal(s.cur.gems, 700);
+  assert.equal(s.cur.gems, 850, '15 energy for 50 gems');
 });
 
 test('Supply Crates guarantee a Rare by the 10th open and Kaiju Eggs an Epic every 10 and a Legendary by 50', () => {
