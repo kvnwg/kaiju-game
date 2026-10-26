@@ -1391,6 +1391,23 @@ export class Renderer3D {
     }
   }
 
+  // A still of the frame just drawn, w x h pixels, framing a subject at screen point (cx, cy)
+  // that stands `tall` pixels high: the newspaper's photo. Only good straight after render(),
+  // before the browser shows the frame.
+  snapshot(cx, cy, tall, w, h) {
+    const src = this.renderer.domElement;
+    const px = src.width / this.w;
+    const ch = Math.min(this.h * 0.75, (this.w * 0.75 * h) / w, Math.max(this.h * 0.22, tall * 2.4));
+    const cw = (ch * w) / h;
+    const x0 = Math.max(0, Math.min(this.w - cw, cx - cw / 2));
+    const y0 = Math.max(0, Math.min(this.h - ch, cy - ch / 2));
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    out.getContext('2d').drawImage(src, x0 * px, y0 * px, cw * px, ch * px, 0, 0, w, h);
+    return out;
+  }
+
   // World position -> screen pixels (and whether it is in view).
   project(x, y, h = 0) {
     const v = new THREE.Vector3(x, h, y).project(this.camera);

@@ -124,7 +124,7 @@ export class Game {
     this.events = [];
     this.results = null;
     this.stats = {
-      scrap: 0, biomass: 0, buildings: 0, destroyed: 0, units: 0, people: 0,
+      scrap: 0, biomass: 0, buildings: 0, destroyed: 0, units: 0, people: 0, cars: 0,
       landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 }, gateKills: [],
     };
     this.kaiju.maxHp = this.kaiju.hp = this.maxHpFor(1);
@@ -1726,6 +1726,7 @@ export class Game {
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
     this.stats.destroyed++;
+    this.stats.cars++;
     if (this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'carDie', car: c, dir: norm(c.x - k.x, c.y - k.y) });
     this.spawnOrbs(c.x, c.y, 3, true);

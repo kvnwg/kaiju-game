@@ -8,6 +8,7 @@ import { Sfx, Music } from './audio.js';
 import { Hub } from './hub.js';
 import { Platform } from './platform.js';
 import { setupTitle, TITLE } from './title.js';
+import { frontPage } from './news.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 
 const canvas = document.getElementById('game');
@@ -69,7 +70,9 @@ let title = null; // the title shot's kaiju, kept in frame
 let runCtx = null;
 let hintUntil = 0;
 let movedFor = 0;
-let pendingGrowBanner = null;
+let newsAt = 0; // when the size-up newspaper slams in (0: none on its way)
+let newsStage = 0;
+let newsUp = false; // the newspaper is on screen, and the run waits for it
 
 function defaultQuality() {
   const saved = settings.quality;
@@ -98,7 +101,9 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   ui.show('hud');
   ui.augSig = null;
   movedFor = 0;
-  pendingGrowBanner = null;
+  newsAt = 0;
+  newsUp = false;
+  ui.warmNewsFonts();
   hintUntil = firstRun || save.runs < 2 ? performance.now() + 7000 : 0;
   ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');
 }
@@ -159,9 +164,9 @@ function handleEvents(events) {
         ui.flash(1);
         hintUntil = 0;
         ui.hint('');
-        // If a pick is on screen, announce the new size once it closes.
-        if (game.state === 'picking') pendingGrowBanner = e.stage;
-        else ui.growBanner(e.stage);
+        // A beat to watch the shockwave, then the newspaper slams in with the story so far.
+        newsAt = performance.now() + 1000;
+        newsStage = e.stage;
         break;
       case 'levelUp':
         ui.levelUp(e.level);
@@ -174,8 +179,6 @@ function handleEvents(events) {
         break;
       case 'picked':
         ui.show('pick', false);
-        if (pendingGrowBanner) ui.growBanner(pendingGrowBanner);
-        pendingGrowBanner = null;
         break;
       case 'altar':
         ui.showAltar(game, (c) => game.altarChoose(c));
@@ -397,8 +400,8 @@ function frame(now) {
   }
   if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
-    platform.setPlaying(inRun && !paused && game.state === 'playing' && !platform.adPlaying);
-    if (inRun && !paused && !platform.adPlaying) {
+    platform.setPlaying(inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying);
+    if (inRun && !paused && !newsUp && !platform.adPlaying) {
       const v = input.get();
       const w = renderer.worldDir(v.x, v.y);
       game.setInput(w.x, w.y);
@@ -412,7 +415,20 @@ function frame(now) {
       }
     }
     // Behind the hub, wreckage settles in slow motion; the title and a run play at full speed.
-    renderer.render(game, titleActive || (inRun && !paused) ? dt : dt * 0.25);
+    renderer.render(game, titleActive || (inRun && !paused && !newsUp) ? dt : dt * 0.25);
+    // The newspaper's photo is the frame just drawn, so it has to be taken straight after render.
+    if (newsAt && now >= newsAt && inRun && !paused && (game.state === 'playing' || game.state === 'picking')) {
+      newsAt = 0;
+      newsUp = true;
+      const k = game.kaiju;
+      const feet = renderer.project(k.x, k.y, 0);
+      const head = renderer.project(k.x, k.y, k.r * 2.4);
+      const photo = renderer.snapshot((feet.x + head.x) / 2, (feet.y + head.y) / 2, Math.hypot(head.x - feet.x, head.y - feet.y), 360, 240);
+      ui.showNewspaper(frontPage(game, newsStage), photo, () => {
+        newsUp = false;
+      });
+      sfx.paper();
+    }
     music.update(musicState());
     if (inRun) {
       ui.updateHud(game);

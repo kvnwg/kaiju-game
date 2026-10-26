@@ -1,4 +1,4 @@
-import { STAGES, MAX_STAGE, STAGE_INFO, KAIJU, CITIES, DIFFICULTIES, xpToNext } from './config.js';
+import { STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, xpToNext } from './config.js';
 import { AUGMENTS, AUGMENT_BY_ID, EVOLUTIONS, evolutionFor, recipeState, setsFor, SYNERGY_SETS, levelText, maxLevel, movesHeld, passivesHeld, MOVE_SLOTS, PASSIVE_SLOTS } from './augments.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -48,6 +48,38 @@ function fmtNum(n) {
   return Math.round(n).toLocaleString('en-US');
 }
 
+// Newsprint: the photo turned into ink dots on paper, a little brighter and harsher than life.
+function halftone(img) {
+  const w = img.width;
+  const h = img.height;
+  const ctx = img.getContext('2d');
+  const d = ctx.getImageData(0, 0, w, h).data;
+  ctx.fillStyle = '#ece3cb';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#1d1b17';
+  const cell = 4;
+  for (let y = 0; y < h; y += cell) {
+    for (let x = 0; x < w; x += cell) {
+      let sum = 0;
+      let n = 0;
+      for (let yy = y; yy < Math.min(h, y + cell); yy++) {
+        for (let xx = x; xx < Math.min(w, x + cell); xx++) {
+          const i = (yy * w + xx) * 4;
+          sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
+          n++;
+        }
+      }
+      const lum = Math.min(1, Math.max(0, (Math.pow(sum / n / 255, 0.55) - 0.5) * 1.5 + 0.5));
+      const r = cell * 0.62 * Math.sqrt(1 - lum);
+      if (r < 0.3) continue;
+      ctx.beginPath();
+      ctx.arc(x + cell / 2, y + cell / 2, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  return img;
+}
+
 export class UI {
   constructor() {
     this.hud = $('#hud');
@@ -93,6 +125,65 @@ export class UI {
     this.lastBio = 0;
     this.lastScrap = 0;
     this.bannerTimer = null;
+  }
+
+  // The newspaper's typefaces, fetched ahead of the first front page.
+  warmNewsFonts() {
+    if (this.newsFonts || !document.fonts) return;
+    this.newsFonts = true;
+    for (const f of ['900 40px "Playfair Display"', 'italic 16px "Playfair Display"', '700 16px "Playfair Display"', '40px "UnifrakturMaguntia"']) document.fonts.load(f).catch(() => {});
+  }
+
+  // The size-up newspaper: spins in and slams onto the screen, then waits for a tap (or Space,
+  // Enter or Escape) and flies away. photo: a canvas of the moment, turned to newsprint here.
+  showNewspaper(page, photo, onClose) {
+    const el = $('#news');
+    el.innerHTML = `<div class="news-shake"><div class="news-fit"><div class="news-paper">
+        <div class="np-stamp">Extra!</div>
+        <div class="np-top"><span>${page.edition}</span><span>${page.city}</span><span>${page.price}</span></div>
+        <div class="np-mast">The Daily Stomp</div>
+        <div class="np-note">“${page.note}”</div>
+        <div class="np-kicker">${page.size}</div>
+        <h1 class="np-head">${page.headline}</h1>
+        <p class="np-sub">${page.subhead}</p>
+        <div class="np-body">
+          <figure class="np-photo"><div class="np-img"></div><figcaption>${page.caption}</figcaption></figure>
+          <div class="np-side">
+            <div class="np-box"><h4>Now on the menu</h4><p>${page.menu}</p></div>
+            <div class="np-box warn"><h4>Coming for it</h4><p>${page.incoming}</p></div>
+            <div class="np-damage"><small>Damage so far</small><b>${page.damage}</b></div>
+          </div>
+        </div>
+        <div class="np-nums">${page.numbers.map(([n, label]) => `<div><b>${n}</b><small>${label}</small></div>`).join('')}</div>
+        <div class="np-foot">${page.jokes.map(([head, text]) => `<p><b>${head}:</b> ${text}</p>`).join('')}</div>
+      </div><div class="news-dust"></div></div></div>
+      <div class="news-tap">Tap to keep stomping</div>`;
+    if (photo) el.querySelector('.np-img').appendChild(halftone(photo));
+    el.classList.remove('hidden', 'out');
+    const paper = el.querySelector('.news-paper');
+    const fit = Math.min(1, (window.innerWidth * 0.94) / paper.offsetWidth, (window.innerHeight * 0.84) / paper.offsetHeight);
+    el.querySelector('.news-fit').style.setProperty('--fit', fit.toFixed(3));
+    const shown = performance.now();
+    const close = (ev) => {
+      if (ev.type === 'keydown') {
+        if (![' ', 'Enter', 'Escape'].includes(ev.key)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      // A beat to see it land, so a tap already on its way doesn't throw it straight away.
+      if (performance.now() - shown < 900) return;
+      el.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', close, true);
+      el.classList.add('out');
+      if (this.sfx) this.sfx.dash();
+      setTimeout(() => {
+        el.classList.add('hidden');
+        el.innerHTML = '';
+        onClose();
+      }, 380);
+    };
+    el.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', close, true);
   }
 
   show(name, on = true) {
@@ -257,12 +348,6 @@ export class UI {
   hint(text) {
     if (text) this.hintText.textContent = text;
     this.hintEl.classList.toggle('show', Boolean(text));
-  }
-
-  growBanner(stage) {
-    const s = STAGES[stage];
-    const info = STAGE_INFO[stage];
-    this.banner(`Stage ${stage} · ${s.name}`, `${s.size}-sized. Now breaks: ${info.destroys.toLowerCase()}. Incoming: ${info.military.toLowerCase()}.`, 'grow');
   }
 
   // Mutation Altar: the angel heals and gives a free reroll; the devil boosts an augment for health.

@@ -375,7 +375,6 @@ html, body {
   background: rgba(20, 22, 33, 0.9);
   clip-path: var(--notch);
 }
-.banner.grow .title { color: #b6ff8f; }
 .banner.warning .title { color: #ff6464; }
 .banner.synergy .title { color: var(--gold); }
 @keyframes banner {
@@ -1316,3 +1315,76 @@ html, body {
 .codex-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: var(--panel-hi); }
 .codex-name { display: flex; flex-direction: column; gap: 2px; font-family: var(--display); font-size: 8px; line-height: 1.3; text-transform: uppercase; color: #d7b8ff; }
 .codex-name small { font-family: var(--body); font-size: 13px; text-transform: none; color: var(--muted); }
+
+/* ---------- size-up newspaper: spins in, slams down, flies away on a tap ---------- */
+.news { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; overflow: hidden; background: rgba(6, 6, 10, 0.62); cursor: pointer; animation: newsDim 0.4s ease-out both; }
+.news.hidden { display: none; }
+.news.out { animation: newsUndim 0.38s ease-in forwards; }
+@keyframes newsDim { from { background-color: rgba(6, 6, 10, 0); } }
+@keyframes newsUndim { to { background-color: rgba(6, 6, 10, 0); } }
+.news::before { content: ''; position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; animation: npFlash 0.4s 0.55s ease-out forwards; }
+@keyframes npFlash { 0% { opacity: 0.45; } 100% { opacity: 0; } }
+.news-shake { animation: npShake 0.34s 0.55s linear; }
+@keyframes npShake { 0%, 100% { transform: none; } 20% { transform: translate(-7px, 5px); } 40% { transform: translate(6px, -4px); } 60% { transform: translate(-4px, -3px); } 80% { transform: translate(3px, 2px); } }
+.news-fit { position: relative; transform: scale(var(--fit, 1)); }
+.news-paper {
+  position: relative; width: 600px; padding: 12px 22px 12px; color: #1d1b17; text-align: left;
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif; font-size: 14px; line-height: 1.25;
+  background: radial-gradient(ellipse at 30% 18%, #f7f0de, #ebe1c7 65%, #dccfae);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.65), inset 0 0 50px rgba(120, 90, 40, 0.2);
+  animation: npSpin 0.75s cubic-bezier(0.25, 0.6, 0.3, 1) both;
+}
+.news.out .news-paper { animation: npOut 0.38s ease-in forwards; }
+.news.out .news-tap { display: none; }
+@keyframes npSpin {
+  0% { transform: scale(0.06) rotate(-900deg); opacity: 0; }
+  12% { opacity: 1; }
+  73% { transform: scale(1.1) rotate(-5deg); }
+  85% { transform: scale(0.97) rotate(-1deg); }
+  100% { transform: scale(1) rotate(-2deg); }
+}
+@keyframes npOut { from { transform: rotate(-2deg); } to { transform: translate(110vw, -12vh) rotate(30deg) scale(0.9); } }
+.news-dust { position: absolute; inset: 0; pointer-events: none; }
+.news-dust::before, .news-dust::after { content: ''; position: absolute; bottom: -40px; width: 300px; height: 120px; background: radial-gradient(closest-side, rgba(232, 222, 196, 0.8), transparent); opacity: 0; animation: npDustL 0.9s 0.55s ease-out forwards; }
+.news-dust::before { left: -130px; }
+.news-dust::after { right: -130px; animation-name: npDustR; }
+@keyframes npDustL { 0% { opacity: 0.9; transform: translate(80px, 0) scale(0.3); } 100% { opacity: 0; transform: translate(-50px, -24px) scale(1.4); } }
+@keyframes npDustR { 0% { opacity: 0.9; transform: translate(-80px, 0) scale(0.3); } 100% { opacity: 0; transform: translate(50px, -24px) scale(1.4); } }
+.news-tap { position: absolute; left: 0; right: 0; bottom: max(14px, 4vh); text-align: center; font-family: var(--display); font-size: 11px; color: #fff; text-shadow: var(--outline); opacity: 0; animation: npTapIn 0.3s 1s ease-out forwards, tapPulse 2s 1.3s ease-in-out infinite; }
+@keyframes npTapIn { to { opacity: 1; } }
+.np-stamp { position: absolute; top: 44px; left: 8px; z-index: 1; padding: 6px 10px 3px; border: 3px solid #b3261e; color: #b3261e; font-family: var(--display); font-size: 15px; text-transform: uppercase; mix-blend-mode: multiply; transform: rotate(-14deg); animation: npStamp 0.28s 0.85s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+@keyframes npStamp { from { transform: rotate(-14deg) scale(2.6); opacity: 0; } to { transform: rotate(-14deg) scale(1); opacity: 0.9; } }
+.np-top { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0 3px; border-bottom: 1px solid #1d1b17; font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.np-mast { font-family: 'UnifrakturMaguntia', 'Old English Text MT', 'Times New Roman', serif; font-size: 56px; line-height: 1.08; text-align: center; }
+.np-note { padding-bottom: 5px; border-bottom: 3px double #1d1b17; font-size: 12px; font-style: italic; text-align: center; }
+.np-kicker { margin-top: 7px; color: #a3221a; font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-align: center; text-transform: uppercase; }
+.np-head { margin: 3px 0 2px; font-family: inherit; font-size: 44px; font-weight: 900; line-height: 0.96; letter-spacing: -0.01em; text-align: center; text-transform: uppercase; text-wrap: balance; }
+.np-sub { margin: 5px 0 8px; font-size: 17px; font-style: italic; line-height: 1.2; text-align: center; text-wrap: balance; }
+.np-body { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; padding-top: 8px; border-top: 1px solid #1d1b17; }
+.np-photo { margin: 0; min-width: 0; }
+.np-img canvas { display: block; width: 100%; height: auto; border: 1px solid #1d1b17; }
+.np-photo figcaption { margin-top: 4px; font-size: 11px; font-style: italic; line-height: 1.25; }
+.np-side { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.np-box h4 { margin: 0 0 4px; padding: 3px 6px 2px; background: #1d1b17; color: #f2ead4; font-size: 11px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+.np-box.warn h4 { background: #a3221a; }
+.np-box p { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.2; }
+.np-damage { margin-top: auto; padding: 5px 6px 4px; border: 2px solid #1d1b17; text-align: center; }
+.np-damage small { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+.np-damage b { display: block; font-size: 24px; font-weight: 900; line-height: 1.1; }
+.np-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; padding: 6px 0 5px; border-top: 3px double #1d1b17; border-bottom: 1px solid #1d1b17; text-align: center; }
+.np-nums b { display: block; font-size: 22px; font-weight: 900; line-height: 1.05; }
+.np-nums small { display: block; font-size: 10px; line-height: 1.15; letter-spacing: 0.04em; text-transform: uppercase; }
+.np-foot { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 6px; font-size: 11px; line-height: 1.25; }
+.np-foot p { margin: 0; }
+.np-foot b { letter-spacing: 0.08em; text-transform: uppercase; }
+/* A phone held upright gets a narrower page with bigger type. */
+@media (max-width: 560px) and (max-aspect-ratio: 1/1) {
+  .news-paper { width: 400px; padding: 10px 16px; }
+  .np-mast { font-size: 44px; }
+  .np-head { font-size: 36px; }
+  .np-body { grid-template-columns: 1fr; }
+  .np-nums { grid-template-columns: repeat(2, 1fr); }
+  .np-foot { grid-template-columns: 1fr; gap: 3px; }
+  .np-foot p:nth-child(3) { display: none; }
+  .np-stamp { top: 36px; }
+}

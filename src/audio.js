@@ -277,6 +277,15 @@ export class Sfx {
     this.vibrate([80, 40, 40]);
   }
 
+  // The size-up newspaper: a flutter as it spins in, then a slap and a thud as it lands.
+  paper() {
+    if (!this.ok('paper', 0.5)) return;
+    for (let i = 0; i < 4; i++) this.noise({ dur: 0.1, vol: 0.07 + i * 0.03, f0: 4200, f1: 1500, type: 'bandpass', q: 1.4, delay: i * 0.13 });
+    this.noise({ dur: 0.14, vol: 0.38, f0: 6500, f1: 700, type: 'bandpass', q: 0.8, delay: 0.55 });
+    this.tone({ f0: 130, f1: 45, dur: 0.4, vol: 0.4, delay: 0.55 });
+    this.vibrate([0, 550, 60]);
+  }
+
   levelUp() {
     if (!this.ok('level', 0.5)) return;
     [523, 659, 784, 1047].forEach((f, i) => this.tone({ type: 'square', f0: f, f1: f, dur: 0.14, vol: 0.09, delay: i * 0.08 }));
