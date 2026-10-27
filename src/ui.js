@@ -47,6 +47,13 @@ function reel(a, i) {
 function fmtNum(n) {
   return Math.round(n).toLocaleString('en-US');
 }
+// Short form for the smallest phones: 1.6k, 12k, 3.4M.
+function fmtShort(n) {
+  n = Math.round(n);
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`;
+  return String(n);
+}
 
 // Newsprint: the photo turned into ink dots on paper, a little brighter and harsher than life.
 function halftone(img) {
@@ -96,6 +103,7 @@ export class UI {
     this.threatNote = $('#threat em');
     this.stageNum = $('#stageBadge b');
     this.hpBar = $('#hp');
+    this.tiny = window.matchMedia('(max-width: 360px)');
     this.scrapEl = $('#scrap');
     this.objWrap = $('#objective');
     this.objEl = $('#objective span');
@@ -200,7 +208,8 @@ export class UI {
     const k = game.kaiju;
     this.hpFill.style.width = `${(100 * k.hp) / k.maxHp}%`;
     this.shieldFill.style.width = `${Math.min(100, (100 * k.shield) / k.maxHp)}%`;
-    this.hpText.textContent = `${fmtNum(k.hp)}/${fmtNum(k.maxHp)}${k.shield > 1 ? ` +${fmtNum(k.shield)}` : ''}`;
+    const num = this.tiny.matches ? fmtShort : fmtNum;
+    this.hpText.textContent = `${num(k.hp)}/${num(k.maxHp)}${k.shield > 1 ? ` +${num(k.shield)}` : ''}`;
     this.hpBar.classList.toggle('low', k.hp < k.maxHp * 0.3);
     const s = STAGES[k.stage];
     const growth = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / s.biomassToNext);

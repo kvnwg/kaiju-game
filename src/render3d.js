@@ -1381,7 +1381,11 @@ export class Renderer3D {
       }
       const p = 1 - f.life / f.max;
       v.set(f.x, f.h + p * f.h * 0.4, f.y).project(this.camera);
-      entry.el.style.transform = `translate(${((v.x + 1) / 2) * this.w}px, ${((1 - v.y) / 2) * this.h}px) translate(-50%, -50%)`;
+      // Kept whole on screen (a hospital at the edge of the view still gets its full label).
+      if (!(entry.half > 6)) entry.half = entry.el.offsetWidth / 2 + 6;
+      const sx = Math.max(entry.half, Math.min(this.w - entry.half, ((v.x + 1) / 2) * this.w));
+      const sy = Math.max(16, Math.min(this.h - 16, ((1 - v.y) / 2) * this.h));
+      entry.el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`;
       entry.el.style.opacity = String(Math.min(1, (f.life / f.max) * 2));
     }
     for (const [f, entry] of this.floaters) {

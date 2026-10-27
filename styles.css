@@ -242,7 +242,7 @@ html, body {
   white-space: nowrap;
 }
 #hp span { left: 20px; }
-#growth span { left: 5px; text-transform: uppercase; }
+#growth span { left: 5px; max-width: calc(100% - 46px); overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
 #growth em { right: 5px; color: #d6ffc4; }
 
 #hud .meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; flex: none; }
@@ -720,6 +720,22 @@ html, body {
   .pick-panel .row { margin-top: 12px; }
   .pick-panel .btn { font-size: 10px; padding: 10px 12px 9px; }
 }
+/* Phones: the damage counter moves under the sound and pause buttons, so the health and size
+   bars get the width they need, and the bonus objective may take two lines. */
+@media (max-width: 600px) {
+  #hud .meta-row { display: grid; grid-template-columns: auto auto; justify-content: end; }
+  #hud .meta-row .damage-pill { grid-column: 1 / -1; grid-row: 2; justify-self: end; height: 24px; padding: 0 6px 0 4px; font-size: 9px; }
+  #hud .damage-pill .ic { width: 16px; height: 16px; margin-right: 0; }
+  #hud .vitals { max-width: none; }
+  #hud .objective { white-space: normal; align-items: flex-start; font-size: 12px; line-height: 1.15; }
+  #hud .objective b { padding-top: 2px; }
+  #hud .objective span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
+@media (max-width: 360px) {
+  .bar span, .bar em { font-size: 7px; }
+  #hud .meta-row .damage-pill { font-size: 8px; }
+  #hud .badge { width: 34px; }
+}
 /* Big screens: scale the whole HUD up so it reads at desktop distance. */
 @media (min-width: 900px) and (min-height: 600px) {
   #xpbar, #hud .top, #bossbar, #augbar, #hint { zoom: 1.5; }
@@ -748,7 +764,7 @@ html, body {
 .combo[data-tier='2'] { --cc: #ff6a3d; }
 .combo[data-tier='3'] { --cc: #ff3b6b; }
 .combo[data-tier='4'], .combo[data-tier='5'] { --cc: #c58bff; }
-.combo.hit b { animation: comboHit 0.18s steps(3); }
+.combo.hit b { animation: comboHit 0.18s steps(3); transform-origin: 100% 50%; }
 @keyframes comboHit { 0% { transform: scale(1.5) rotate(-6deg); } 100% { transform: none; } }
 
 .callout {
