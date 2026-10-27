@@ -71,6 +71,16 @@ function rewardChips(r, cls = '') {
     .join('');
 }
 
+// What each gear slot does, in plain words, for the Gear tab.
+const SLOT_ROLE = {
+  fangs: { stat: 'Attack', text: 'Your bite. Adds attack, and every Fangs piece changes how your basic attack works.' },
+  claws: { stat: 'Attack', text: 'Adds attack. Epic and better claws add a special effect to your hits.' },
+  hide: { stat: 'Health', text: 'Adds health. Epic and better hides help you take less damage.' },
+  spines: { stat: 'Health', text: 'Adds health. Epic and better spines hit back or fire on their own.' },
+  tail: { stat: 'Speed', text: 'Adds speed and a little health. Epic and better tails power up your Charge.' },
+  heart: { stat: 'Atk + HP', text: 'Adds a little attack and health. Epic and better hearts speed up your moves or your XP.' },
+};
+
 const NAV = [
   { id: 'shop', name: 'Shop', icon: 'shop', feature: 'shop' },
   { id: 'gear', name: 'Gear', icon: 'gear', feature: 'gear' },
@@ -213,7 +223,7 @@ export class Hub {
       </button>
       <button class="cur energy" data-act="energy">${ico('energy')}<b>${s.cur.energy}/${cap}</b>${next ? `<small>${hclock(next)}</small>` : ''}<span class="plus">+</span></button>
       <button class="cur gems" data-act="tab" data-tab="shop" data-scroll="gems">${ico('gem')}<b>${hfmt(s.cur.gems)}</b><span class="plus">+</span></button>
-      <span class="cur scrap">${ico('scrap')}<b>${hfmt(s.cur.scrap)}</b></span>`;
+      <button class="cur scrap" data-act="scrap" title="Scrap: levels up gear">${ico('scrap')}<b>${hfmt(s.cur.scrap)}</b></button>`;
   }
 
   renderSides() {
@@ -252,7 +262,7 @@ export class Hub {
       const open = !t.feature || featureOpen(s, t.feature);
       const badge = t.id === 'shop' ? n.freeCrate : t.id === 'gear' ? this.gearBadge() : 0;
       return `<button class="nav-btn ${t.id === this.tab ? 'on' : ''} ${open ? '' : 'locked'} ${t.id === 'battle' ? 'main' : ''}" data-act="tab" data-tab="${t.id}">
-        ${ico(t.icon)}<span>${open ? t.name : `Lv ${FEATURES[t.feature]}`}</span>${badge && open ? `<em>${badge > 9 ? '9+' : badge}</em>` : ''}</button>`;
+        ${ico(t.icon)}<span>${t.name}</span>${open ? (badge ? `<em>${badge > 9 ? '9+' : badge}</em>` : '') : `<i class="lock">Lv ${FEATURES[t.feature]}</i>`}</button>`;
     }).join('');
   }
 
@@ -260,8 +270,7 @@ export class Hub {
     const s = this.save;
     let n = 0;
     for (const sl of GEAR_SLOTS) if (!equippedItem(s, sl.id) && s.gear.items.some((i) => GEAR[i.id].slot === sl.id)) n++;
-    for (const i of s.gear.items) if (mergeFodder(s, i.uid).length === 2) n++;
-    return n;
+    return n + mergeAll(JSON.parse(JSON.stringify(s)));
   }
 
   // ------------------------------------------------------------------ Battle
@@ -303,33 +312,92 @@ export class Hub {
     const r = RARITY[item.rarity];
     const can = mergeFodder(this.save, item.uid).length === 2;
     return `<button class="item ${opts.eq ? 'eq' : ''}" data-act="item" data-uid="${item.uid}" style="--rc:${r.color}">
-      ${ico(`slot-${g.slot}`)}<span class="ilv">${item.level}</span>${can ? '<em class="merge-dot">3</em>' : ''}${opts.eq ? '<i class="eqmark"></i>' : ''}
-      <small>${g.name}</small></button>`;
+      ${ico(`slot-${g.slot}`)}<span class="ilv">Lv${item.level}</span>${can ? '<em class="merge-dot" title="Can merge">3</em>' : ''}
+      <small>${g.name}</small><small class="irar">${r.name}</small></button>`;
+  }
+
+  // The strongest piece the player owns for a slot.
+  bestFor(slot) {
+    return this.save.gear.items.filter((i) => GEAR[i.id].slot === slot).sort((a, b) => b.rarity - a.rarity || b.level - a.level)[0] || null;
   }
 
   gearTab() {
     const s = this.save;
     const slots = GEAR_SLOTS.map((sl) => {
       const it = equippedItem(s, sl.id);
-      return it ? this.itemTile(it, { eq: true }) : `<div class="item empty">${ico(`slot-${sl.id}`)}<small>${sl.name}</small></div>`;
+      return it ? this.itemTile(it, { eq: true })
+        : `<button class="item empty" data-act="slotinfo" data-slot="${sl.id}">${ico(`slot-${sl.id}`)}<small>${sl.name}</small><small class="irar">${SLOT_ROLE[sl.id].stat}</small><span class="plus">+</span></button>`;
     });
     const eqUids = new Set(Object.values(s.gear.equipped));
     const inv = s.gear.items.filter((i) => !eqUids.has(i.uid)).sort((a, b) => b.rarity - a.rarity || b.level - a.level || a.id.localeCompare(b.id));
-    const dna = GEAR_SLOTS.map((sl) => `<span>${ico(`slot-${sl.id}`)}${s.cur.dna[sl.id]}</span>`).join('');
     const kd = KAIJU[s.lastKaiju];
+    // What the Power number is measured against: the chapter selected on the Battle tab.
+    const n = s.chapter.selected;
+    const mode = s.chapter.mode;
+    const pw = power(s);
+    const rec = recommendedPower(n) * (mode === 'hard' ? 1.6 : mode === 'nightmare' ? 2.4 : 1);
+    const better = GEAR_SLOTS.filter((sl) => {
+      const best = this.bestFor(sl.id);
+      return best && s.gear.equipped[sl.id] !== best.uid;
+    }).length;
+    // How many merges the button would make (on a copy, so chains like 3 → 1 → 3 count too).
+    const merges = mergeAll(JSON.parse(JSON.stringify(s)));
+    const mats = GEAR_SLOTS.map((sl) => `<div class="mat">${ico(`slot-${sl.id}`)}<b>${hfmt(s.cur.dna[sl.id])}</b><small>${sl.name} DNA</small></div>`).join('');
     return `<div class="gear">
-      <div class="gear-head"><div class="gear-power">${ico('power')}Power <b>${hfmt(power(s))}</b></div><div class="dna-row">${dna}</div></div>
+      <div class="gear-head">
+        <div class="gear-power">${ico('power')}<span>Power <b>${hfmt(pw)}</b></span></div>
+        <div class="gear-rec ${pw < rec ? 'low' : 'ok'}">Chapter ${n}${mode === 'normal' ? '' : ` ${MODES[mode].name}`} needs ${hfmt(rec)}</div>
+        <button class="btn ghost help-btn" data-act="gearhelp">? How gear works</button>
+      </div>
+      <p class="gear-intro">Gear makes ${kd.name} stronger. Put a piece in each slot: every piece adds attack, health or speed, and Power is the total.</p>
       <div class="gear-doll">
         <div class="col">${slots.slice(0, 3).join('')}</div>
         <div class="doll" style="--kc:${kd.color}"><i class="kport big"></i><span>${kd.name}</span></div>
         <div class="col">${slots.slice(3).join('')}</div>
       </div>
       <div class="gear-actions">
-        <button class="btn ghost" data-act="autoequip">Equip best</button>
-        <button class="btn ghost" data-act="mergeall">Merge all</button>
+        <div class="ga"><button class="btn ghost" data-act="autoequip" ${better ? '' : 'disabled'}>Equip best${better ? ` (${better})` : ''}</button><small>Puts your strongest piece in every slot</small></div>
+        <div class="ga"><button class="btn ghost" data-act="mergeall" ${merges ? '' : 'disabled'}>Merge all${merges ? ` (${merges})` : ''}</button><small>3 of the same piece become 1 of the next rarity</small></div>
       </div>
-      <div class="inv">${inv.length ? inv.map((i) => this.itemTile(i)).join('') : '<p class="muted">Open crates in the Shop to find gear.</p>'}</div>
+      <h3 class="gear-h">Upgrade materials <small>Tap a piece to level it up with these</small></h3>
+      <div class="mats">
+        <div class="mat scrap">${ico('scrap')}<b>${hfmt(s.cur.scrap)}</b><small>Scrap: levels up any piece</small></div>
+        ${mats}
+      </div>
+      <h3 class="gear-h">Spare gear (${inv.length}) <small>Tap a piece to see it, level it up or equip it</small></h3>
+      ${inv.length ? `<div class="inv">${inv.map((i) => this.itemTile(i)).join('')}</div>`
+        : `<div class="empty-card"><p>No spare gear yet. You find gear in crates in the Shop, and every chapter you clear gives you a piece.</p>
+          <button class="btn primary" data-act="tab" data-tab="shop">${ico('shop')}Go to the Shop</button></div>`}
     </div>`;
+  }
+
+  // An empty slot: what it does and how to fill it.
+  openSlotInfo(slot) {
+    const sl = SLOT_BY_ID[slot];
+    const best = this.bestFor(slot);
+    this.openModal('slot', `<div class="panel small">
+      <div class="item-hero">${ico(`slot-${slot}`, 'big')}</div>
+      <h2>${sl.name}</h2>
+      <p>${SLOT_ROLE[slot].text}</p>
+      ${best ? `<div class="col"><button class="btn primary" data-act="equip" data-uid="${best.uid}">Equip ${GEAR[best.id].name}</button><button class="btn ghost" data-act="close">Close</button></div>`
+        : `<p class="tiny">You don't have any ${sl.name} yet. Open crates in the Shop to find some.</p>
+        <div class="row"><button class="btn primary" data-act="tab" data-tab="shop">Go to the Shop</button><button class="btn ghost" data-act="close">Close</button></div>`}
+    </div>`);
+  }
+
+  openGearHelp() {
+    const rar = RARITY.map((r) => `<b style="color:${r.color}">${r.name}</b>`).join(' → ');
+    this.openModal('gearhelp', `<div class="panel small help-panel">
+      <h2>How gear works</h2>
+      <ol class="help-list">
+        <li><b>Equip</b> one piece in each of the 6 slots. Each piece adds attack, health or speed to your kaiju in every run. Your <b>Power</b> is all of it added up: aim for what the chapter needs.</li>
+        <li><b>Level up</b> a piece by tapping it. Each level costs ${ico('scrap')}<b>Scrap</b> plus <b>DNA</b> for that slot (Fangs DNA for Fangs, and so on). Every run pays you both. You can reset a piece any time and get it all back.</li>
+        <li><b>Merge</b> 3 copies of the same piece at the same rarity into one piece of the next rarity:<br>${rar}</li>
+        <li>Pieces that are <b style="color:${RARITY[EPIC].color}">Epic</b> or better also unlock a special perk.</li>
+        <li><b>Find gear</b> in crates in the Shop. Every chapter you clear gives you a piece too.</li>
+      </ol>
+      <button class="btn primary" data-act="close">Got it</button>
+    </div>`);
   }
 
   openItem(uid) {
@@ -359,7 +427,8 @@ export class Hub {
       <div class="stat-lines">${lines.map((l) => `<span>${l}</span>`).join('')}</div>
       ${perk}
       <div class="col">
-        <button class="btn primary" data-act="levelup" data-uid="${uid}" ${maxed || !canAfford(s, cost) ? 'disabled' : ''}>${maxed ? 'Max level' : `Level up · ${ico('scrap')}${hfmt(cost.scrap)} ${ico(`slot-${g.slot}`)}${Object.values(cost.dna)[0]}`}</button>
+        <button class="btn primary" data-act="levelup" data-uid="${uid}" ${maxed || !canAfford(s, cost) ? 'disabled' : ''}>${maxed ? 'Max level' : 'Level up'}</button>
+        ${maxed ? '' : `<p class="tiny cost-line">Costs ${ico('scrap')}${hfmt(cost.scrap)} scrap + ${ico(`slot-${g.slot}`)}${Object.values(cost.dna)[0]} ${SLOT_BY_ID[g.slot].name} DNA<br>You have ${hfmt(s.cur.scrap)} scrap and ${hfmt(s.cur.dna[g.slot])} ${SLOT_BY_ID[g.slot].name} DNA</p>`}
         ${fodder.length === 2 ? `<button class="btn gold" data-act="merge" data-uid="${uid}">Merge 3 → ${RARITY[item.rarity + 1].name}</button>` : item.rarity < RARITY.length - 1 ? `<p class="tiny muted">${item.rarity >= 4 ? `Merge with 2 more Legendary ${SLOT_BY_ID[g.slot].name}` : `Merge with 2 more ${r.name} ${g.name}`} for ${RARITY[item.rarity + 1].name}</p>` : ''}
         <div class="row">
           <button class="btn ghost" data-act="${isEq ? 'unequip' : 'equip'}" data-uid="${uid}">${isEq ? 'Unequip' : 'Equip'}</button>
@@ -888,7 +957,7 @@ export class Hub {
       case 'tab': {
         const t = NAV.find((x) => x.id === d.tab);
         if (t && t.feature && !featureOpen(s, t.feature)) {
-          this.toast(`Unlocks at account level ${FEATURES[t.feature]}`);
+          this.toast(`${t.name} opens at account level ${FEATURES[t.feature]}. Play runs to level up.`);
           break;
         }
         this.closeModal();
@@ -959,10 +1028,19 @@ export class Hub {
       }
       case 'autoequip':
         for (const sl of GEAR_SLOTS) {
-          const best = s.gear.items.filter((i) => GEAR[i.id].slot === sl.id).sort((a, b) => b.rarity - a.rarity || b.level - a.level)[0];
+          const best = this.bestFor(sl.id);
           if (best) s.gear.equipped[sl.id] = best.uid;
         }
         this.commit();
+        break;
+      case 'slotinfo':
+        this.openSlotInfo(d.slot);
+        break;
+      case 'gearhelp':
+        this.openGearHelp();
+        break;
+      case 'scrap':
+        this.toast('Scrap levels up your gear. Every run pays some.');
         break;
       case 'mergeall': {
         const n = mergeAll(s);
