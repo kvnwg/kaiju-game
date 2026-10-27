@@ -227,20 +227,22 @@ export class UI {
       if (this.objEl.textContent !== objText) this.objEl.textContent = objText;
       this.objWrap.classList.toggle('done', ob.done);
     }
-    // Damage $: rolls up toward the real figure like a slot counter, and flashes every billion.
-    const target = Math.floor(game.stats.scrap);
+    // Damage in dollars: rolls up toward the real figure like a slot counter, and flashes at each
+    // new milestone ($1 million, $10 million, $100 million, $1 billion...).
+    const target = Math.floor(game.stats.damage);
     if (target < (this.dmgShown || 0)) this.dmgShown = 0;
     this.dmgShown = (this.dmgShown || 0) + Math.max(1, (target - (this.dmgShown || 0)) * 0.18);
     if (this.dmgShown > target) this.dmgShown = target;
-    const bill = Math.floor(this.dmgShown / 1e9);
-    if (bill > (this.lastBill || 0)) this.retrigger(this.scrapPill, 'billion');
-    this.lastBill = bill;
-    this.scrapEl.textContent = `$${Math.floor(this.dmgShown).toLocaleString('en-US')}`;
+    const mag = Math.floor(Math.log10(Math.max(1, this.dmgShown)));
+    if (mag >= 6 && mag > (this.lastMag || 0)) this.retrigger(this.scrapPill, 'billion');
+    this.lastMag = mag;
+    const shown = Math.floor(this.dmgShown);
+    this.scrapEl.textContent = shown >= 1e9 ? `$${(shown / 1e9).toFixed(3)}B` : `$${shown.toLocaleString('en-US')}`;
     // Little pops when things go up: the growth bar glows, the coin pill bumps.
     if (k.biomass > this.lastBio + 1e-6) this.retrigger(this.growthEl, 'gain');
     this.lastBio = k.biomass;
-    if (Math.floor(game.stats.scrap) > this.lastScrap) this.retrigger(this.scrapPill, 'bump');
-    this.lastScrap = Math.floor(game.stats.scrap);
+    if (Math.floor(game.stats.damage) > this.lastScrap) this.retrigger(this.scrapPill, 'bump');
+    this.lastScrap = Math.floor(game.stats.damage);
     const c = game.combo;
     const showCombo = c.n >= 3;
     this.comboEl.classList.toggle('on', showCombo);

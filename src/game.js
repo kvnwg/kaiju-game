@@ -10,6 +10,7 @@ import { MoveSystem } from './moves.js';
 import { PERSON_VARIANTS, DOCTOR } from './models.js';
 import { HOSPITAL_TYPES } from './buildings.js';
 import { propDims } from './props.js';
+import { objectPrice, vehiclePrice, unitPrice, bossPrice, shortMoney, TRAIN_PRICE, VAULT_PRICE } from './prices.js';
 import { CHAPTER_MUL } from './meta.js';
 
 // One bonus objective per run; finishing it pays a Supply Crate.
@@ -177,6 +178,7 @@ export class Game {
     this.results = null;
     this.stats = {
       scrap: 0, biomass: 0, buildings: 0, destroyed: 0, units: 0, people: 0, cars: 0,
+      damage: 0, // property destroyed, in real dollars (see prices.js)
       landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 }, gateKills: [],
     };
     this.kaiju.maxHp = this.kaiju.hp = this.maxHpFor(1);
@@ -274,6 +276,7 @@ export class Game {
     const loot = lootFor(3, k.stage, 3);
     this.addBiomass(derailed ? 0 : loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
+    this.stats.damage += TRAIN_PRICE;
     this.stats.destroyed++;
     this.fxEvent({ t: 'trainDie', train: t, dir: norm(t.x - k.x, t.y - k.y) });
     this.spawnExplosion(t.x, t.y, 30);
@@ -1248,6 +1251,7 @@ export class Game {
     this.stats.vaults++;
     this.stats.vaultGems += gems;
     this.stats.scrap += lootFor(o.tier, k.stage).scrap * 5;
+    this.stats.damage += VAULT_PRICE;
     this.fx.floaters.push({ x: o.x, y: o.y, h: o.height, text: `VAULT! +${gems} GEMS`, color: '#ffd84a', life: 2, max: 2 });
     this.fx.rings.push({ x: o.x, y: o.y, r0: k.r, r1: k.r * 4, life: 0.7, max: 0.7, color: 0xffd84a, width: k.r * 0.4 });
     this.spawnOrbs(o.x, o.y, 12, false);
@@ -1559,7 +1563,10 @@ export class Game {
     const before = completedSets(this.held).map((s) => s.id);
     const level = applyPick(this.held, id);
     if (id === 'growthSpurt' && k.stage < MAX_STAGE) k.biomass = Math.min(this.stage.biomassToNext, k.biomass + this.stage.biomassToNext * 0.15);
-    if (id === 'scrapPile') this.stats.scrap += 25 * k.stage * k.stage;
+    if (id === 'scrapPile') {
+      this.stats.scrap += 25 * k.stage * k.stage;
+      this.stats.scrapPiles = (this.stats.scrapPiles || 0) + 1;
+    }
     if (id === 'toughness') {
       const frac = k.hp / k.maxHp;
       k.maxHp = this.maxHpFor();
@@ -1637,6 +1644,8 @@ export class Game {
       }
       this.addBiomass(biomass);
       this.stats.scrap += scrap;
+      const price = objectPrice(o);
+      this.stats.damage += price;
       this.stats.destroyed++;
       if (o.structure) this.stats.buildings++;
       if (o.structure && o.tier >= k.stage) this.stats.bigTopples++;
@@ -1644,7 +1653,7 @@ export class Game {
       if (o.tier >= 5 && this.stats.firstSkyscraperAt === null) this.stats.firstSkyscraperAt = this.time;
       this.spawnOrbs(o.x, o.y, Math.min(10, 1 + o.tier * 2), biomass > 0);
       if (o.structure && o.tier >= k.stage) {
-        this.fx.floaters.push({ x: o.x, y: o.y, h: o.height * 0.8, text: `+${Math.round(scrap)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
+        this.fx.floaters.push({ x: o.x, y: o.y, h: o.height * 0.8, text: `+${shortMoney(price)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
       }
       if (this.has('magneticHide') && (o.vehicle || o.structure)) this.addShield((o.vehicle ? 0.02 : 0.03) * (0.5 + 0.5 * this.level('magneticHide')));
       if (HOSPITAL_TYPES.has(o.type)) this.hospitalHeal(o);
@@ -2035,6 +2044,7 @@ export class Game {
     const loot = lootFor(2, k.stage, 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
+    this.stats.damage += vehiclePrice(c.model);
     this.stats.destroyed++;
     this.stats.cars++;
     if (this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
@@ -2695,6 +2705,7 @@ export class Game {
     const loot = lootFor(u.tier, k.stage, u.def.mob ? SWARM.loot * 0.5 : 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
+    this.stats.damage += unitPrice(u);
     this.stats.units++;
     this.countMulti();
     this.onKill();
@@ -3238,6 +3249,7 @@ export class Game {
     this.stats.gateBosses = (this.stats.gateBosses || 0) + 1;
     const scrap = 60 * b.gate * b.gate * this.diff.loot * this.scrapMult();
     this.stats.scrap += scrap;
+    this.stats.damage += bossPrice(b);
     k.hp = Math.min(k.maxHp, k.hp + k.maxHp * GATE.heal);
     this.slowmo = 0.8;
     this.shake = Math.max(this.shake, 0.9);
@@ -3276,6 +3288,7 @@ export class Game {
       b.hp = 0;
       b.dead = true;
       this.stats.bossDefeated = true;
+      this.stats.damage += bossPrice(b);
       this.stats.bossTime = this.time - b.start;
       this.stats.rareMaterials += 1;
       this.slowmo = 1.2;
@@ -3467,11 +3480,13 @@ export class Game {
     );
     this.results = {
       won, time: this.time, kaiju: this.def.name, kaijuId: this.def.id, city: this.cityDef.name, cityId: this.cityDef.id,
-      difficulty: this.diff.id, stage: this.kaiju.stage, scrap, scrapRaw, biomass: Math.round(s.biomass),
+      difficulty: this.diff.id, stage: this.kaiju.stage, scrap, scrapRaw, damage: Math.round(s.damage), biomass: Math.round(s.biomass),
       buildings: s.buildings, destroyed: s.destroyed, units: s.units, people: s.people, landmark: s.landmark, rareMaterials: s.rareMaterials,
       augments: [...this.held.entries()].map(([id, level]) => ({ id, name: AUGMENT_BY_ID[id].name, level })),
       sets: sets.map((x) => x.name), title: sets.length ? sets.map((x) => x.name).join(' + ') : null,
       score, firstSkyscraperAt: s.firstSkyscraperAt, stageTimes: s.stageTimes,
+      // Scavenger and Scrap Piles raise the scrap the run pays out (see meta.runRewards).
+      scrapBoost: 0.2 * this.level('scavenger') + 0.1 * (s.scrapPiles || 0),
       gateKills: [...s.gateKills], chapter: this.chapter, vaultGems: s.vaultGems, vaults: s.vaults, objectiveDone: s.objectiveDone,
       objective: this.objective.text, frenzies: s.frenzies,
     };

@@ -63,7 +63,7 @@ export const AUGMENTS = [
   { id: 'longLegs', kind: 'passive', name: 'Long Legs', tier: 'silver', max: 5, text: '+8% move speed', stat: true },
   { id: 'toughness', kind: 'passive', name: 'Toughness', tier: 'silver', max: 5, text: '+15% max health', stat: true },
   { id: 'appetite', kind: 'passive', name: 'Appetite', tier: 'silver', max: 5, text: '+10% XP', stat: true },
-  { id: 'scavenger', kind: 'passive', name: 'Scavenger', tier: 'silver', max: 5, text: '+20% scrap', stat: true },
+  { id: 'scavenger', kind: 'passive', name: 'Scavenger', tier: 'silver', max: 5, text: '+20% scrap from this run', stat: true },
   { id: 'thickHide', kind: 'passive', name: 'Thick Hide', tier: 'silver', max: 5, text: '-8% bullet & shell damage', stat: true },
   { id: 'glassCannon', kind: 'passive', name: 'Glass Cannon', tier: 'gold', max: 5, text: '+10% damage, -6% max health', stat: true },
   { id: 'momentum', kind: 'passive', name: 'Momentum', tier: 'silver', max: 5, text: 'Keep moving: up to +8% damage', stat: true },
@@ -121,7 +121,7 @@ export function recipeState(held, e, pickId = null) {
 // When everything is maxed, picks fall back to these (Vampire Survivors' chicken and coins).
 export const FILLERS = [
   { id: 'growthSpurt', kind: 'filler', name: 'Growth Spurt', tier: 'silver', text: '+15% growth' },
-  { id: 'scrapPile', kind: 'filler', name: 'Scrap Pile', tier: 'silver', text: '+scrap' },
+  { id: 'scrapPile', kind: 'filler', name: 'Scrap Pile', tier: 'silver', text: '+10% scrap from this run' },
 ];
 for (const f of FILLERS) AUGMENT_BY_ID[f.id] = f;
 

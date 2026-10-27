@@ -150,7 +150,7 @@ export const WEEKLY_QUESTS = [
   { id: 'clear', text: 'Clear a chapter', stat: 'clears', goal: 1 },
   { id: 'bosses', text: 'Beat 10 bosses', stat: 'bosses', goal: 10 },
   { id: 'apex', text: 'Reach Apex size 3 times', stat: 'apex', goal: 3 },
-  { id: 'damage', text: 'Cause $1B of damage', stat: 'damage', goal: 1e9 },
+  { id: 'damage', text: 'Cause $200B of damage', stat: 'damage', goal: 2e11 },
 ];
 export const WEEKLY_QUEST_REWARD = { gems: 100 };
 
@@ -675,6 +675,7 @@ export function runRewards(s, results, { chapter = 1, mode = 'normal' } = {}, rn
     const options = GEAR_IDS.filter((id) => GEAR[id].slot === ch.featured);
     r.items.push([rng.pick(options), mode === 'normal' ? 2 : 3]);
   }
+  if (results.scrapBoost) r.scrap = Math.round(r.scrap * (1 + results.scrapBoost));
   return r;
 }
 
@@ -701,13 +702,13 @@ export function applyRun(s, results, ctx, rewards, { doubled = false } = {}, now
   st.buildings += results.buildings || 0;
   st.gateBosses += (results.gateKills || []).length;
   st.bosses += (results.gateKills || []).length + (results.won ? 1 : 0);
-  st.bestDamage = Math.max(st.bestDamage, results.scrapRaw || 0);
+  st.bestDamage = Math.max(st.bestDamage, results.damage || 0);
   const key = `${chapter}:${mode}`;
   if ((results.score || 0) > (s.best[key] || 0)) s.best[key] = results.score;
   trackQuests(s, {
     runs: 1, people: results.people || 0, buildings: results.buildings || 0, gateBosses: (results.gateKills || []).length,
     clears: results.won ? 1 : 0, bosses: (results.gateKills || []).length + (results.won ? 1 : 0), apex: (results.stage || 1) >= 6 ? 1 : 0,
-    damage: results.scrapRaw || 0,
+    damage: results.damage || 0,
   }, now);
   return out;
 }

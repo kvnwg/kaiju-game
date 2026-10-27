@@ -6,7 +6,7 @@ import { frontPage, money } from '../src/news.js';
 
 test('every size-up front page says what the kaiju can crush now, what is coming, and the damage so far', () => {
   const game = new Game({ seed: 3, kaijuId: 'rex' });
-  Object.assign(game.stats, { buildings: 214, people: 1302, cars: 37, units: 52, scrap: 4234567 });
+  Object.assign(game.stats, { buildings: 214, people: 1302, cars: 37, units: 52, damage: 4234567 });
   for (let stage = 2; stage <= 6; stage++) {
     for (const roll of [0, 0.99]) {
       const page = frontPage(game, stage, () => roll);

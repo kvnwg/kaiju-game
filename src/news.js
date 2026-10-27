@@ -100,7 +100,7 @@ export function frontPage(game, stage, rng = Math.random) {
     menu: `${STAGE_INFO[stage].destroys}.`,
     incoming: incoming(stage, game.cityDef),
     caption: pick(CAPTIONS).replace('{k}', name),
-    damage: money(s.scrap || 0),
+    damage: money(s.damage || 0),
     numbers: [
       [Math.round(s.buildings || 0).toLocaleString('en-US'), 'buildings flattened'],
       [Math.round(s.people || 0).toLocaleString('en-US'), 'citizens eaten or flung'],

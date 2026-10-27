@@ -896,7 +896,7 @@ export class Hub {
     this.openModal('results', `<div class="panel results2 ${won ? 'won' : 'lost'}">
       <h1>${won ? 'City claimed!' : 'Rampage over'}</h1>
       <p class="muted">Chapter ${ctx.chapter} · ${ch.name} · ${MODES[ctx.mode].name}</p>
-      <div class="damage">${ico('cash')}<b>${hmoney(results.scrapRaw || 0)}</b><small>in damages</small></div>
+      <div class="damage">${ico('cash')}<b>${hmoney(results.damage || 0)}</b><small>in damages</small></div>
       <div class="stats-row"><span><b>${results.stage}</b><small>size</small></span><span><b>${hfmt(results.buildings)}</b><small>toppled</small></span><span><b>${hfmt(results.people)}</b><small>eaten</small></span><span><b>${(results.gateKills || []).length}</b><small>bosses</small></span></div>
       ${notes.map((n) => `<p class="note">${n}</p>`).join('')}
       <h3>Rewards</h3>
