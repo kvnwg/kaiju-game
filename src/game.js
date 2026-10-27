@@ -2274,7 +2274,7 @@ export class Game {
       hp: def.hp * this.diff.enemyHp * sc.hp, maxHp: def.hp * this.diff.enemyHp * sc.hp,
       dmgMul: sc.dmg * SWARM.dmg,
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
-      heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
+      heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: this.rng.next(),
       stress: 0, windup: 0, windupMax: 0,
     };
     // Ground vehicles and roadblocks live on the road network.
