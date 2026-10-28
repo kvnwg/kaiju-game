@@ -770,8 +770,8 @@ export class Hub {
         <div class="wheel" style="transform: rotate(${this.wheelAngle || 0}deg)">
           <svg class="wheel-face" viewBox="-100 -100 200 200" aria-hidden="true">
             <defs>
-              <radialGradient id="wa" cx="0" cy="0" r="100" gradientUnits="userSpaceOnUse"><stop offset="0.15" stop-color="#4a63b0"/><stop offset="1" stop-color="#1f2b5c"/></radialGradient>
-              <radialGradient id="wb" cx="0" cy="0" r="100" gradientUnits="userSpaceOnUse"><stop offset="0.15" stop-color="#7a4fb8"/><stop offset="1" stop-color="#33205e"/></radialGradient>
+              <radialGradient id="wa" cx="0" cy="0" r="100" gradientUnits="userSpaceOnUse"><stop offset="0.15" stop-color="#f7b8cf"/><stop offset="1" stop-color="#c4648c"/></radialGradient>
+              <radialGradient id="wb" cx="0" cy="0" r="100" gradientUnits="userSpaceOnUse"><stop offset="0.15" stop-color="#c4a8e0"/><stop offset="1" stop-color="#6e4c94"/></radialGradient>
               <radialGradient id="wjack" cx="0" cy="0" r="100" gradientUnits="userSpaceOnUse"><stop offset="0.15" stop-color="#fff0a0"/><stop offset="1" stop-color="#d08a18"/></radialGradient>
             </defs>
             <g class="wsls">${slices}</g>
@@ -781,12 +781,12 @@ export class Hub {
         </div>
         <svg class="wheel-rim" viewBox="-112 -112 224 224" aria-hidden="true">
           <defs><linearGradient id="wrim" x1="0" y1="-1" x2="0" y2="1" gradientUnits="objectBoundingBox"><stop offset="0" stop-color="#ffe9a0"/><stop offset="0.5" stop-color="#e0a83a"/><stop offset="1" stop-color="#9a6416"/></linearGradient></defs>
-          <circle r="104" fill="none" stroke="#0d0e14" stroke-width="13"/>
+          <circle r="104" fill="none" stroke="#2a1736" stroke-width="13"/>
           <circle r="104" fill="none" stroke="url(#wrim)" stroke-width="9"/>
           ${bulbs}
         </svg>
         <div class="wheel-hub">${ico('gem')}</div>
-        <svg class="wheel-pin" viewBox="0 0 40 52" aria-hidden="true"><path d="M20 50 L5 16 A15.5 15.5 0 1 1 35 16 Z" fill="#ff4d5a" stroke="#0d0e14" stroke-width="3"/><circle cx="20" cy="16" r="6" fill="#ffe27a" stroke="#0d0e14" stroke-width="2"/></svg>
+        <svg class="wheel-pin" viewBox="0 0 40 52" aria-hidden="true"><path d="M20 50 L5 16 A15.5 15.5 0 1 1 35 16 Z" fill="#ff4d5a" stroke="#2a1736" stroke-width="3"/><circle cx="20" cy="16" r="6" fill="#ffe27a" stroke="#2a1736" stroke-width="2"/></svg>
       </div>
       <div class="row wheel-btns">
         <button class="btn primary big ${this.ads ? 'ad' : ''}" data-act="spin" ${left && !this.spinning ? '' : 'disabled'}>${left ? (this.ads ? 'Spin' : `Spin ${ico('gem')}${ECONOMY.wheelGems}`) : 'Come back tomorrow'}</button>
