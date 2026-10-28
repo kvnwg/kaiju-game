@@ -8,7 +8,7 @@ import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
 import { PERSON_VARIANTS, DOCTOR } from './models.js';
-import { HOSPITAL_TYPES } from './buildings.js';
+import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
 import { propDims } from './props.js';
 import { objectPrice, vehiclePrice, unitPrice, bossPrice, shortMoney, TRAIN_PRICE, VAULT_PRICE } from './prices.js';
 import { CHAPTER_MUL } from './meta.js';
@@ -927,7 +927,7 @@ export class Game {
 
   onDeck(k) {
     for (const o of this.grid.query(k.x - 1, k.y - 1, k.x + 1, k.y + 1)) {
-      if (o.walkable && o.state === 'intact' && distToRect(k.x, k.y, o) < 1) return true;
+      if (DECK_TYPES.has(o.type) && o.state === 'intact' && distToRect(k.x, k.y, o) < 1) return true;
     }
     return false;
   }

@@ -14,7 +14,7 @@ import { FX } from './fx3d.js';
 import { Actors, toGeometry } from './actors3d.js';
 import { Ambient } from './ambient3d.js';
 import { personLook } from './models.js';
-import { HOSPITAL_TYPES } from './buildings.js';
+import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
 
 export const QUALITY = {
   high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8 },
@@ -1421,7 +1421,7 @@ export class Renderer3D {
   kaijuElevation(game) {
     const k = game.kaiju;
     for (const o of game.grid.query(k.x - 1, k.y - 1, k.x + 1, k.y + 1)) {
-      if (!o.walkable || o.state !== 'intact') continue;
+      if (!DECK_TYPES.has(o.type) || o.state !== 'intact') continue;
       if (Math.abs(k.x - o.x) > o.w / 2 || Math.abs(k.y - o.y) > o.h / 2) continue;
       const top = o.type === 'bridge_deck' ? o.height - 4 : o.height;
       if (k.r * 2 < top + 8) return top;

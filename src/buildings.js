@@ -1072,6 +1072,9 @@ const T4 = 4;
 // Hospitals (and the bigger medical center) heal the kaiju when smashed.
 const hospital = (g, r, d, P) => { const b = block(g, r, d, { wall: 0xf0ece4, floorH: 4, win: winStd(P, { w: 3, lit: COOL, litChance: 0.7 }), bands: { every: 2, color: 0x9fc4d8 }, clutter: { kinds: ['ac', 'vent'] } }); const cx = Math.floor((b.x0 + b.x1) / 2); for (let i = -2; i <= 2; i++) { g.set(cx + i, b.y1 - 4, b.z1, 0xff3b3b, E); g.set(cx, b.y1 - 4 + i, b.z1, 0xff3b3b, E); } g.box(b.x0 + 3, b.y1 + 1, b.z0 + 3, b.x0 + 10, b.y1 + 2, b.z0 + 10, (x, y, z) => (x === b.x0 + 6 || (z === b.z0 + 6 && (x === b.x0 + 4 || x === b.x0 + 8)) ? 0xf2f2f2 : 0x4f5a66)); };
 export const HOSPITAL_TYPES = new Set(['hospital', 'medical_center']);
+// Bridge decks a small kaiju walks across, over water. (The elevated metro is walkable too, but
+// that means you walk underneath it.)
+export const DECK_TYPES = new Set(['bridge_deck', 'road_bridge']);
 
 function def(id, name, tier, style, zones, v, size, build, extra = {}) {
   return { id, name, tier, style, zones, v, size, build, weight: extra.weight ?? 1, ...extra };
