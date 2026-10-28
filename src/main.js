@@ -45,20 +45,21 @@ platform.onSettings = () => {
   showSound();
 };
 
-// How hard the soundtrack should hit right now: menu 0, then by size and threat, bosses 4.
+// Which tune and how hard it should hit right now: the menu tune on the title and in the hub,
+// then the rampage theme by size and threat, and the boss theme in boss fights.
 function musicState() {
   const inRun = game && !ui.hud.classList.contains('hidden');
-  if (titleActive) return { level: 2, bpm: 132 };
-  if (!inRun) return { level: 0, bpm: 128 };
-  if (game.state === 'won' || game.state === 'lost') return { level: -1, bpm: 128 };
-  if (game.state === 'dead') return { level: 0, bpm: 120 };
+  if (titleActive) return { theme: 'menu', level: 1, bpm: 132 };
+  if (!inRun) return { theme: 'menu', level: 0, bpm: 126 };
+  if (game.state === 'won' || game.state === 'lost') return { theme: 'menu', level: -1, bpm: 126 };
+  if (game.state === 'dead') return { theme: 'rampage', level: 0, bpm: 120 };
   const k = game.kaiju;
   const boss = Boolean(game.boss && !game.boss.dead) || game.gateTimer !== null || game.bossTimer !== null;
   let level = k.stage <= 1 ? 1 : k.stage <= 3 ? 2 : 3;
   if (game.threat > 60) level++;
   if (boss) level = 4;
   if (game.frenzy > 0) level = Math.max(level, 3);
-  return { level: Math.min(4, level), boss, bpm: (boss ? 164 : 140 + k.stage * 3), paused: paused || game.state === 'picking' || game.state === 'altar' };
+  return { theme: boss ? 'boss' : 'rampage', level: Math.min(4, level), bpm: boss ? 160 : 136 + k.stage * 3, paused: paused || game.state === 'picking' || game.state === 'altar' };
 }
 // Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
 for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', 'touchstart', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
@@ -529,4 +530,4 @@ window.addEventListener('resize', () => {
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, get title() { return title; }, sfx, platform, startRun, showHub, save: () => save, persist };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, get title() { return title; }, sfx, music, platform, startRun, showHub, save: () => save, persist };

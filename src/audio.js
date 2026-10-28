@@ -435,32 +435,82 @@ export class Sfx {
 }
 
 // ---------------------------------------------------------------- music
-// An adaptive soundtrack synthesised on the fly: E minor, driving drums, a gallop bass,
-// arpeggios and a lead. Layers come in as the rampage escalates (size, threat) and a boss
-// fight switches to a heavier Phrygian loop with stabs and a faster tempo. Changes land on
-// bar lines so it never stumbles.
-const PROGRESSIONS = {
-  // [semitones from E, minor?] per bar
-  rampage: [[0, true], [-4, false], [-2, false], [-5, false]], // Em C D B
-  boss: [[0, true], [1, false], [0, true], [-5, false]], // Em F Em B
+// An 8-bit soundtrack in the style of the NES sound chip, played live: two pulse channels (lead
+// and fast arpeggio "chords", with the chip's 12.5%, 25% and 50% duty cycles), a triangle bass
+// and a noise channel for drums. Three themes: a bouncy menu tune, the rampage theme, whose
+// layers come in as the rampage escalates (size, threat), and a faster boss theme. Changes land
+// on bar lines so it never stumbles.
+
+// One bar is 16 sixteenth-note steps: a note name starts a note, "." holds it, "-" is a rest.
+const SONGS = {
+  menu: {
+    chords: [['A2', 'm'], ['F2', ''], ['C3', ''], ['G2', ''], ['A2', 'm'], ['F2', ''], ['C3', ''], ['G2', '']],
+    lead: [
+      'E5 . . . A5 . . . C6 . B5 . A5 . . .',
+      'A5 . G5 . F5 . . . C5 . F5 . A5 . . .',
+      'G5 . . . E5 . C5 . E5 . G5 . C6 . . .',
+      'B5 . . . . . A5 . G5 . . . D5 . . .',
+      'E5 . A5 . C6 . E6 . D6 . C6 . B5 . A5 .',
+      'C6 . . . A5 . F5 . A5 . C6 . F6 . . .',
+      'E6 . D6 . C6 . G5 . E5 . G5 . C6 . . .',
+      'B5 . . . D6 . . . G5 . . . - - - -',
+    ],
+  },
+  rampage: {
+    chords: [['E2', 'm'], ['C2', ''], ['D2', ''], ['B1', ''], ['E2', 'm'], ['C2', ''], ['D2', ''], ['B1', '']],
+    lead: [
+      'B4 . E5 . G5 . B5 . A5 . G5 . F#5 . E5 .',
+      'G5 . . . E5 . C5 . E5 . G5 . C6 . . .',
+      'A5 . . . F#5 . D5 . F#5 . A5 . D6 . C6 .',
+      'B5 . . . . . - - D#5 . F#5 . B5 . A5 .',
+      'G5 . . . E5 . B4 . E5 . G5 . B5 . . .',
+      'C6 . B5 . A5 . G5 . E5 . G5 . A5 . . .',
+      'F#5 . A5 . D6 . A5 . F#5 . E5 . D5 . F#5 .',
+      'E5 . . . . . . . D#5 . . . . . - -',
+    ],
+  },
+  boss: {
+    chords: [['E2', 'm'], ['F2', ''], ['E2', 'm'], ['B1', ''], ['E2', 'm'], ['F2', ''], ['G2', ''], ['B1', '']],
+    lead: [
+      'E5 E5 - E5 G5 . E5 - F5 . E5 - D5 . E5 .',
+      'F5 . A5 . C6 . A5 . F5 . A5 . C6 . F6 .',
+      'E6 . D6 . B5 . G5 . E5 . G5 . B5 . D6 .',
+      'D#6 . . . B5 . . . F#5 . . . D#5 . F#5 .',
+      'E5 E5 - E5 G5 . E5 - B5 . G5 - E5 . G5 .',
+      'A5 . F5 . C6 . F5 . A5 . C6 . F6 . E6 .',
+      'D6 . B5 . G5 . D6 . B5 . G5 . D5 . G5 .',
+      'F#5 . A5 . B5 . D#6 . F#6 . . . - - - -',
+    ],
+  },
 };
-const RIFF = [0, null, 2, 1, null, 0, 2, null, 3, null, 2, 1, 0, null, 1, null];
+const NOTE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const midiOf = (name) => {
+  const m = /^([A-G])(#|b)?(-?\d)$/.exec(name);
+  return 12 * (Number(m[3]) + 1) + NOTE[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+};
+// Bars of 16 steps -> per step: a midi note to start, null to hold, -1 for a rest.
+function parseBar(text) {
+  return text.split(/\s+/).map((tok) => (tok === '.' ? null : tok === '-' ? -1 : midiOf(tok)));
+}
+for (const song of Object.values(SONGS)) {
+  song.steps = song.lead.map(parseBar);
+  song.roots = song.chords.map(([n, q]) => ({ root: midiOf(n), minor: q === 'm' }));
+}
 const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 export class Music {
   constructor(sfx) {
     this.sfx = sfx;
     this.enabled = true;
-    this.level = 0;
-    this.want = { level: 0, boss: false, bpm: 140, paused: false };
-    this.cur = { level: 0, boss: false, bpm: 140 };
+    this.want = { theme: 'menu', level: 0, bpm: 126, paused: false };
+    this.cur = { theme: 'menu', level: 0, bpm: 126 };
     this.step = 0;
     this.bar = 0;
     this.next = 0;
     this.timer = null;
   }
 
-  // Build the music bus the first time audio is running.
+  // Build the music bus and the chip's pulse waves the first time audio is running.
   ensure() {
     const c = this.sfx.ctx;
     if (!c || c.state !== 'running') return false;
@@ -470,37 +520,35 @@ export class Music {
     this.tone = c.createBiquadFilter(); // muffled while paused
     this.tone.type = 'lowpass';
     this.tone.frequency.value = 18000;
-    const comp = c.createDynamicsCompressor();
-    comp.threshold.value = -14;
-    comp.ratio.value = 4;
-    this.bus.connect(this.tone).connect(comp).connect(c.destination);
-    // A dotted-eighth echo for the lead and arps.
-    this.echo = c.createDelay(1);
-    const fb = c.createGain();
-    fb.gain.value = 0.28;
-    const wet = c.createGain();
-    wet.gain.value = 0.3;
-    this.echo.connect(fb).connect(this.echo);
-    this.echo.connect(wet).connect(this.bus);
-    // Grit for the bass once things get heavy.
-    this.drive = c.createWaveShaper();
-    const curve = new Float32Array(1024);
-    for (let i = 0; i < 1024; i++) curve[i] = Math.tanh(((i / 1023) * 2 - 1) * 3.5);
-    this.drive.curve = curve;
-    this.drive.connect(this.bus);
+    this.bus.connect(this.tone).connect(c.destination);
+    // Pulse waves at the NES duty cycles: thin (12.5%), hollow (25%) and square (50%).
+    this.pulse = {};
+    for (const duty of [0.125, 0.25, 0.5]) {
+      const n = 48;
+      const real = new Float32Array(n);
+      const imag = new Float32Array(n);
+      for (let k = 1; k < n; k++) real[k] = ((2 / (k * Math.PI)) * Math.sin(k * Math.PI * duty));
+      this.pulse[duty] = c.createPeriodicWave(real, imag);
+    }
+    // The triangle channel (bass and kick).
+    const n = 64;
+    const tri = new Float32Array(n);
+    const triIm = new Float32Array(n);
+    for (let k = 1; k < n; k += 2) triIm[k] = (8 / (Math.PI * Math.PI)) * (((k - 1) / 2) % 2 ? -1 : 1) / (k * k);
+    this.triWave = c.createPeriodicWave(tri, triIm);
     this.next = c.currentTime + 0.1;
     this.timer = setInterval(() => this.tick(), 25);
     return true;
   }
 
   // Called every frame with what the game is doing.
-  update({ level, boss = false, bpm = 140, paused = false }) {
-    this.want = { level, boss, bpm, paused };
+  update({ theme = 'rampage', level, bpm = 140, paused = false }) {
+    this.want = { theme, level, bpm, paused };
     if (!this.ensure()) return;
     const c = this.sfx.ctx;
-    const vol = this.sfx.muted || !this.enabled || level < 0 ? 0 : 0.42;
+    const vol = this.sfx.muted || !this.enabled || level < 0 ? 0 : 0.3;
     this.bus.gain.setTargetAtTime(vol, c.currentTime, 0.4);
-    this.tone.frequency.setTargetAtTime(paused ? 700 : 18000, c.currentTime, 0.15);
+    this.tone.frequency.setTargetAtTime(paused ? 900 : 18000, c.currentTime, 0.15);
   }
 
   setEnabled(on) {
@@ -517,11 +565,13 @@ export class Music {
     if (this.next < c.currentTime - 0.3) this.next = c.currentTime + 0.05; // the tab was asleep
     while (this.next < c.currentTime + 0.15) {
       if (this.step % 16 === 0) {
-        // New bar: take on the wanted intensity, boss mode and tempo.
+        // New bar: take on the wanted theme, intensity and tempo. A new theme starts from its
+        // top, with a drum roll in.
         const w = this.want;
-        if (w.boss !== this.cur.boss || w.level > this.cur.level + 0) this.riser(this.next);
-        this.cur = { level: w.level, boss: w.boss, bpm: w.bpm };
-        this.bar = (this.bar + 1) % 4;
+        const newTheme = w.theme !== this.cur.theme;
+        if (newTheme || w.level > this.cur.level) this.roll(this.next);
+        this.cur = { theme: w.theme, level: w.level, bpm: w.bpm };
+        this.bar = newTheme ? 0 : (this.bar + 1) % 8;
       }
       if (this.cur.level >= 0 && !this.sfx.muted && this.enabled) this.play(this.step % 16, this.next);
       this.next += this.stepDur();
@@ -530,159 +580,141 @@ export class Music {
   }
 
   play(s, t) {
-    const { level, boss } = this.cur;
-    const prog = PROGRESSIONS[boss ? 'boss' : 'rampage'];
-    const [root, minor] = prog[this.bar];
-    const chord = [0, minor ? 3 : 4, 7].map((n) => n + root);
-    const lastBar = this.bar === 3;
-    const beat = this.stepDur() * 4;
-    // Drums
-    if (level >= 1) {
-      const kicks = level >= 4 ? [0, 3, 4, 8, 10, 11, 12, 14] : level >= 3 ? [0, 4, 8, 10, 12] : [0, 4, 8, 12];
+    const { theme, level } = this.cur;
+    const song = SONGS[theme] || SONGS.rampage;
+    const { root, minor } = song.roots[this.bar];
+    const sd = this.stepDur();
+    const menu = theme === 'menu';
+    const boss = theme === 'boss';
+    // Layers: the menu always has its tune (drums from level 1); a run builds from bass and
+    // drums, adds the arpeggios, then the melody; the boss theme has everything.
+    const drums = menu ? level >= 1 : level >= 1;
+    const arps = menu || boss || level >= 2;
+    const melody = menu || boss || level >= 3;
+    // Noise-channel drums.
+    if (drums) {
+      const heavy = boss || level >= 4;
+      const kicks = heavy ? [0, 3, 6, 8, 10, 11, 14] : menu ? [0, 8] : level >= 3 ? [0, 6, 8, 10] : [0, 8];
       if (kicks.includes(s)) this.kick(t);
+      if (s === 4 || s === 12) this.snare(t, 0.22);
+      if (!menu && this.bar % 4 === 3 && level >= 2 && s >= 12) this.snare(t, 0.09 + (s - 12) * 0.04); // fill
+      if (menu ? s % 4 === 2 : level >= 2 || s % 2 === 0) this.hat(t, s % 4 === 2 ? 0.08 : 0.045);
+    } else if (menu && s % 4 === 2) this.hat(t, 0.04);
+    // Triangle bass: bouncing octaves, a gallop for the boss.
+    const pattern = boss ? [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15] : menu ? [0, 3, 6, 8, 11, 14] : [0, 2, 4, 6, 8, 10, 12, 14];
+    if (pattern.includes(s)) {
+      const up = boss ? s % 4 === 3 : s % 4 === 2 || (menu && s % 8 === 3);
+      this.bass(root + 12 + (up ? 12 : 0), t, sd * (boss ? 0.9 : 1.6));
     }
-    if (level >= 2) {
-      if (s === 4 || s === 12) this.snare(t, 0.32);
-      if (lastBar && level >= 3 && s >= 13) this.snare(t, 0.12 + (s - 13) * 0.06); // fill
-      if (level >= 3 ? true : s % 2 === 0) this.hat(t, s % 4 === 2 ? 0.11 : 0.05, s % 4 === 2 && level >= 3);
+    // Pulse 2: the chord as a fast arpeggio, the classic chip-tune "chord".
+    if (arps && (boss || s % 2 === 0)) {
+      const chord = [0, minor ? 3 : 4, 7].map((n) => root + 24 + n);
+      this.arp(chord, t, sd * (boss ? 1 : 2), boss ? 0.15 : 0.17);
     }
-    // Bass: eighths at first, a gallop when it gets heavy.
-    if (level >= 1) {
-      const gallop = level >= 3 ? [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15] : [0, 2, 4, 6, 8, 10, 12, 14];
-      if (gallop.includes(s)) this.bass(28 + root + (level >= 3 && s % 4 === 3 ? 12 : 0), t, this.stepDur() * 1.6, level >= 3);
-    }
-    // Arpeggio over two octaves
-    if (level >= 0 && (level >= 2 || s % 2 === 0)) {
-      const n = chord[s % 3] + 12 * (Math.floor(s / 3) % 2) + 64;
-      this.pluck(n, t, level >= 2 ? 0.045 : 0.035);
-    }
-    // Pad on each bar
-    if (s === 0) this.pad(chord.map((n) => n + 52), t, beat * 4, level >= 3 ? 0.035 : 0.05);
-    // Lead riff
-    if (level >= 3) {
-      const r = RIFF[(s + this.bar * 4) % 16];
-      if (r !== null) {
-        const n = (chord[r % 3] ?? chord[0]) + (r === 3 ? 12 : 0) + 76;
-        this.lead(n, t, this.stepDur() * 1.8, boss ? 0.05 : 0.04);
+    // Pulse 1: the melody.
+    if (melody) {
+      const steps = song.steps[this.bar];
+      const n = steps[s];
+      if (n !== null && n > 0) {
+        let len = 1;
+        while (s + len < 16 && steps[s + len] === null) len++;
+        this.lead(n, t, sd * len, boss ? 0.125 : 0.25, menu ? 0.34 : 0.38);
       }
     }
-    // Boss stabs on the off-beat accents
-    if (boss && [0, 6, 12].includes(s)) this.stab(chord.map((n) => n + 64), t);
   }
 
-  // ---- instruments
-  voice(type, f, t, dur, vol, { attack = 0.005, dest = this.bus, filter = 0, detune = 0 } = {}) {
+  // ---- the chip's channels
+  // A pulse or triangle note with the chip's stepped volume envelope (a quick attack, then a
+  // decay in four steps), and vibrato on long notes.
+  chip(wave, f, t, dur, vol, { decay = 0.6, vibrato = false } = {}) {
     const c = this.sfx.ctx;
     const o = c.createOscillator();
-    o.type = type;
-    o.frequency.value = f;
-    o.detune.value = detune;
-    const g = c.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + attack);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    let node = o;
-    if (filter) {
-      const fl = c.createBiquadFilter();
-      fl.type = 'lowpass';
-      fl.frequency.setValueAtTime(filter, t);
-      fl.frequency.exponentialRampToValueAtTime(Math.max(80, filter * 0.25), t + dur);
-      o.connect(fl);
-      node = fl;
+    o.setPeriodicWave(wave);
+    o.frequency.setValueAtTime(f, t);
+    if (vibrato && dur > 0.3) {
+      // A wobble that starts after the note has sounded for a moment.
+      for (let x = t + 0.18, up = true; x < t + dur; x += 1 / 12, up = !up) o.detune.setValueAtTime(up ? 18 : -18, x);
     }
-    node.connect(g).connect(dest);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-    return g;
-  }
-
-  kick(t) {
-    const c = this.sfx.ctx;
-    const o = c.createOscillator();
     const g = c.createGain();
-    o.frequency.setValueAtTime(160, t);
-    o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
-    g.gain.setValueAtTime(0.9, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    g.gain.setValueAtTime(vol, t);
+    for (let i = 1; i <= 4; i++) g.gain.setValueAtTime(vol * (1 - (i / 4) * (1 - decay)), t + (dur * i) / 5);
+    g.gain.setValueAtTime(0, t + dur);
     o.connect(g).connect(this.bus);
     o.start(t);
-    o.stop(t + 0.32);
+    o.stop(t + dur + 0.02);
   }
 
-  noiseHit(t, dur, vol, type, f, q = 0.8) {
+  lead(m, t, dur, duty, vol) {
+    this.chip(this.pulse[duty], midiHz(m), t, dur * 0.92, vol, { vibrato: true });
+  }
+
+  // Cycles the chord's notes every 1/60 s, like a chip arpeggio.
+  arp(chord, t, dur, vol) {
+    const c = this.sfx.ctx;
+    const o = c.createOscillator();
+    o.setPeriodicWave(this.pulse[0.125]);
+    for (let x = t, i = 0; x < t + dur; x += 1 / 60, i++) o.frequency.setValueAtTime(midiHz(chord[i % chord.length]), x);
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.setValueAtTime(vol * 0.6, t + dur * 0.5);
+    g.gain.setValueAtTime(0, t + dur * 0.95);
+    o.connect(g).connect(this.bus);
+    o.start(t);
+    o.stop(t + dur);
+  }
+
+  bass(m, t, dur) {
+    this.chip(this.triWave, midiHz(m), t, dur, 0.22, { decay: 1 });
+  }
+
+  noiseHit(t, dur, vol, type, f) {
     const c = this.sfx.ctx;
     const s = c.createBufferSource();
     s.buffer = this.sfx.noiseBuf;
     const fl = c.createBiquadFilter();
     fl.type = type;
     fl.frequency.value = f;
-    fl.Q.value = q;
     const g = c.createGain();
+    // Stepped decay, like the chip's envelope.
     g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    for (let i = 1; i <= 3; i++) g.gain.setValueAtTime(vol * (1 - i / 4), t + (dur * i) / 4);
+    g.gain.setValueAtTime(0, t + dur);
     s.connect(fl).connect(g).connect(this.bus);
     s.start(t, Math.random() * 0.5);
     s.stop(t + dur + 0.02);
   }
 
-  snare(t, vol) {
-    this.noiseHit(t, 0.18, vol, 'bandpass', 1900, 0.7);
-    this.voice('triangle', 190, t, 0.1, vol * 0.6);
-  }
-
-  hat(t, vol, open) {
-    this.noiseHit(t, open ? 0.14 : 0.04, vol, 'highpass', 8000);
-  }
-
-  bass(m, t, dur, heavy) {
-    const f = midiHz(m);
-    this.voice('sawtooth', f, t, dur, heavy ? 0.16 : 0.2, { filter: heavy ? 1600 : 900, dest: heavy ? this.drive : this.bus });
-    this.voice('sine', f, t, dur, 0.22);
-  }
-
-  pluck(m, t, vol) {
-    const g = this.voice('square', midiHz(m), t, this.stepDur() * 1.5, vol, { filter: 3200 });
-    g.connect(this.echo);
-  }
-
-  pad(notes, t, dur, vol) {
-    for (const n of notes) {
-      for (const d of [-9, 9]) this.voice('sawtooth', midiHz(n), t, dur, vol, { attack: dur * 0.3, filter: 1400, detune: d });
-    }
-  }
-
-  lead(m, t, dur, vol) {
-    for (const d of [-7, 7]) {
-      const g = this.voice('sawtooth', midiHz(m), t, dur, vol, { filter: 4200, detune: d });
-      g.connect(this.echo);
-    }
-  }
-
-  stab(notes, t) {
-    for (const n of notes) this.voice('sawtooth', midiHz(n), t, 0.16, 0.06, { filter: 2600 });
-  }
-
-  // A noise sweep up into the next bar when the music steps up.
-  riser(t) {
+  // A chip kick: the triangle swept down fast, with a tick of noise.
+  kick(t) {
     const c = this.sfx.ctx;
-    const s = c.createBufferSource();
-    s.buffer = this.sfx.noiseBuf;
-    s.loop = true;
-    const fl = c.createBiquadFilter();
-    fl.type = 'bandpass';
-    fl.Q.value = 3;
-    const t0 = Math.max(c.currentTime, t - this.stepDur() * 8);
-    if (t - t0 < 0.1) return;
-    fl.frequency.setValueAtTime(400, t0);
-    fl.frequency.exponentialRampToValueAtTime(6000, t);
+    const o = c.createOscillator();
+    o.setPeriodicWave(this.triWave);
+    o.frequency.setValueAtTime(180, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.09);
     const g = c.createGain();
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.12, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-    s.connect(fl).connect(g).connect(this.bus);
-    s.start(t0);
-    s.stop(t + 0.15);
-    this.kick(t);
-    this.noiseHit(t, 0.8, 0.12, 'lowpass', 3000);
+    g.gain.setValueAtTime(0.42, t);
+    g.gain.setValueAtTime(0, t + 0.11);
+    o.connect(g).connect(this.bus);
+    o.start(t);
+    o.stop(t + 0.12);
+    this.noiseHit(t, 0.03, 0.12, 'lowpass', 2500);
+  }
+
+  snare(t, vol) {
+    this.noiseHit(t, 0.13, vol, 'bandpass', 2200);
+  }
+
+  hat(t, vol) {
+    this.noiseHit(t, 0.035, vol, 'highpass', 7000);
+  }
+
+  // A noise-drum roll into the next bar when the music steps up or changes theme.
+  roll(t) {
+    const sd = this.stepDur();
+    const c = this.sfx.ctx;
+    for (let i = 4; i >= 1; i--) {
+      const x = t - (sd / 2) * i;
+      if (x > c.currentTime) this.noiseHit(x, sd * 0.4, 0.06 + (4 - i) * 0.03, 'bandpass', 2600);
+    }
   }
 }
