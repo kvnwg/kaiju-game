@@ -1,6 +1,23 @@
 // Tuning tables taken from the Kaiju Rampage game design doc.
 // Numbers are prototype starting points, meant to be tuned in playtests.
 
+// What each chapter's city leans towards (see world.js): its district odds (multipliers; 'rural'
+// is farmland, desert or snow by climate), the climate of its countryside, the style of the second
+// district near home (normally brick), and wet: more sea about (the sea's threshold; 0.77 is usual).
+export const CHAPTER_THEMES = [
+  null,
+  { name: 'Harbor Town', blurb: 'Suburbs, a neon downtown and a brick district' },
+  { name: 'Pastel Bay', blurb: 'Pastel old towns along a sunny coast', odds: { pastel: 4, garden: 1.5 }, near: 'pastel', wet: 0.7 },
+  { name: 'Brickport', blurb: 'Red-brick tenements and factories', odds: { brick: 3.5 }, near: 'brick' },
+  { name: 'Neon Heights', blurb: 'Glowing towers and lantern streets', odds: { neon: 3.5, lantern: 1.5 }, near: 'neon' },
+  { name: 'Garden City', blurb: 'Green roofs, parks and leafy suburbs', odds: { garden: 3.5, suburb: 1.5 }, near: 'garden' },
+  { name: 'Iron Docks', blurb: 'Warehouses and cranes on the water', odds: { brick: 2.5 }, near: 'brick', wet: 0.64 },
+  { name: 'Neo Tokyo', blurb: 'Lantern districts under neon towers', odds: { lantern: 4, neon: 2 }, near: 'lantern' },
+  { name: 'Frostgate', blurb: 'Snowy villages and ski lodges', odds: { rural: 3 }, climate: 'snow', near: 'snow' },
+  { name: 'Sunset Strip', blurb: 'Desert towns, motels and fairgrounds', odds: { rural: 2.5, fair: 3 }, climate: 'desert', near: 'desert' },
+  { name: 'Capital City', blurb: 'Grand avenues, gardens and pastel squares', odds: { garden: 2, pastel: 2, neon: 1.5 }, near: 'garden' },
+];
+
 export const WORLD = {
   cell: 420, // one city block plus its road
   road: 60,

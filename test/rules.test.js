@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STAGES, MAX_STAGE, LAST_STAGE, REALMS, canDamage, isSnack, lootFor, TIER_HP, WORLD } from '../src/config.js';
+import { STAGES, MAX_STAGE, LAST_STAGE, REALMS, canDamage, isSnack, lootFor, TIER_HP, WORLD, CHAPTER_THEMES } from '../src/config.js';
 import { World } from '../src/world.js';
 
 test('six city sizes from human to skyline, each roughly doubling, then five more past the city', () => {
@@ -109,6 +109,27 @@ test('the countryside: farms, desert towns, snowy villages, lantern streets and 
     const built = new Set(chunk.objects.filter((o) => o.kind === 'building').map((o) => o.type));
     assert.ok(types.some((t) => built.has(t)), `${st}: ${[...built]}`);
   }
+});
+
+test("each chapter's city leans towards its name", () => {
+  const mix = (ch) => {
+    const w = new World(7, CHAPTER_THEMES[ch]);
+    const n = {};
+    for (let r = -40; r < 40; r++) for (let c = -40; c < 40; c++) {
+      const st = w.zoneFor(c, r).style;
+      n[st] = (n[st] || 0) + 1;
+    }
+    return (st) => n[st] || 0;
+  };
+  const harbor = mix(1);
+  const byName = Object.fromEntries(CHAPTER_THEMES.slice(1).map((t, i) => [t.name, i + 1]));
+  assert.ok(mix(byName['Pastel Bay'])('pastel') > harbor('pastel') * 2, 'Pastel Bay is pastel');
+  assert.ok(mix(byName['Neo Tokyo'])('lantern') > harbor('lantern') * 2, 'Neo Tokyo has lantern streets');
+  const frost = mix(byName.Frostgate);
+  assert.ok(frost('snow') > harbor('snow') && frost('desert') === 0 && frost('farm') === 0, 'Frostgate is all snow');
+  const sunset = mix(byName['Sunset Strip']);
+  assert.ok(sunset('desert') > harbor('desert') && sunset('snow') === 0, 'Sunset Strip is desert');
+  assert.ok(mix(byName['Iron Docks'])('water') > harbor('water'), 'Iron Docks is wetter');
 });
 
 test('no buildings stand in the water (bridges and piers aside)', () => {

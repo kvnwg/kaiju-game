@@ -1,5 +1,5 @@
 import {
-  WORLD, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
+  WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
   UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
@@ -120,7 +120,8 @@ export class Game {
     this.collapsing = 0;
     // Every run gets its own endless world, generated cell by cell around the kaiju; the
     // hatchling always starts in the home neighbourhood.
-    this.attachWorld(new World(citySeed));
+    this.cityTheme = CHAPTER_THEMES[chapter] || null; // the chapter's city leans towards its name
+    this.attachWorld(new World(citySeed, this.cityTheme));
 
     const s1 = STAGES[1];
     this.kaiju = {
@@ -1673,7 +1674,7 @@ export class Game {
   enterRealm(realm, stage) {
     const seed = Math.floor(this.rng.next() * 1e9) + 1;
     this.realm = realm;
-    this.attachWorld(realm === 'city' ? new World(seed) : new RealmWorld(realm, seed));
+    this.attachWorld(realm === 'city' ? new World(seed, this.cityTheme) : new RealmWorld(realm, seed));
     const k = this.kaiju;
     k.x = this.city.spawn.x;
     k.y = this.city.spawn.y;

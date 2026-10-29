@@ -5,6 +5,7 @@
 // No DOM: everything here is plain functions over a save object, with the time passed in, so it
 // can be tested and later moved behind a server without changes.
 import { createRng } from './rng.js';
+import { CHAPTER_THEMES } from './config.js';
 
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -98,10 +99,8 @@ export const SHARD_UNLOCK = 30;
 export const STAR_SHARDS = [30, 60, 120, 240];
 export const STAR_BONUS = 0.08;
 
-export const CHAPTERS = [
-  'Harbor Town', 'Pastel Bay', 'Brickport', 'Neon Heights', 'Garden City',
-  'Iron Docks', 'Neo Tokyo', 'Frostgate', 'Sunset Strip', 'Capital City',
-].map((name, i) => ({ n: i + 1, name, seed: 1101 + i * 7919, featured: GEAR_SLOTS[i % GEAR_SLOTS.length].id }));
+// Each chapter's city leans towards its name (see CHAPTER_THEMES in config.js and world.js).
+export const CHAPTERS = CHAPTER_THEMES.slice(1).map((t, i) => ({ n: i + 1, name: t.name, blurb: t.blurb, seed: 1101 + i * 7919, featured: GEAR_SLOTS[i % GEAR_SLOTS.length].id }));
 export const CHAPTER_MUL = 1.35;
 export const MODES = {
   normal: { id: 'normal', name: 'Normal', firstClearGems: 100 },

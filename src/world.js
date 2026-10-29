@@ -140,7 +140,17 @@ const COURTYARD = {
   lantern: { tree_blossom: 3, stone_lion: 1, lantern_post: 2, bench: 1, planter: 2 },
 };
 
-function makeParams(seed) {
+// A chapter's theme (CHAPTER_THEMES) reweights the district odds, picks the countryside's climate
+// and the style of the second district near home; no theme is Harbor Town as it always was.
+function themedOdds(theme) {
+  const odds = { ...STYLE_ODDS };
+  for (const [st, m] of Object.entries((theme && theme.odds) || {})) odds[st] = (odds[st] || 0) * m;
+  const total = Object.values(odds).reduce((a, b) => a + b, 0);
+  for (const st of Object.keys(odds)) odds[st] /= total;
+  return odds;
+}
+
+function makeParams(seed, theme = null) {
   const rng = createRng(seed * 7919 + 13);
   const s = rng.int(1, 1 << 20);
   // A downtown always sits a short walk from home, so the climb to skyscraper size never
@@ -158,8 +168,11 @@ function makeParams(seed) {
     extra: [
       { style: 'suburb', cx: 0.5, cy: 0.5, r: 5, peak: 0.6, home: true, nk: 0 },
       { style: 'neon', cx: 0.5 + Math.cos(a) * d, cy: 0.5 + Math.sin(a) * d, r: 6.5, peak: 1.2, nk: 3 },
-      { style: 'brick', cx: 0.5 + Math.cos(b) * 7, cy: 0.5 + Math.sin(b) * 7, r: 4.8, peak: 0.95, nk: 7 },
+      { style: (theme && theme.near) || 'brick', cx: 0.5 + Math.cos(b) * 7, cy: 0.5 + Math.sin(b) * 7, r: 4.8, peak: 0.95, nk: 7 },
     ],
+    odds: themedOdds(theme),
+    climate: (theme && theme.climate) || null,
+    sea: (theme && theme.wet) || 0.77,
     sites: new Map(),
     zones: new Map(),
     edges: new Map(),
@@ -178,7 +191,7 @@ export function waterField(x, y, p = CUR) {
   const t = clamp01((Math.sqrt(dx * dx + dy * dy) - 1400) / 1800);
   const near = 1 - t * t * (3 - 2 * t);
   const lake = (fbm(x / 2400, y / 2400, s + 11, 3) - 0.7) * 1600 + (vnoise(x / 260, y / 260, s + 12) - 0.5) * 30;
-  const sea = (fbm(x / 9000, y / 9000, s + 13, 2) - 0.77) * 6000;
+  const sea = (fbm(x / 9000, y / 9000, s + 13, 2) - (p.sea ?? 0.77)) * 6000;
   let v = lake > sea ? lake : sea;
   const gate = clamp01((vnoise(x / 6500, y / 6500, s + 15) - 0.55) / 0.2);
   if (gate > 0) {
@@ -199,7 +212,7 @@ function siteFor(I, J, p) {
   const h = (k) => ihash(I * 13 + k, J * 7 - k * 3, p.s + 101);
   let roll = h(0);
   let style = 'none';
-  for (const [st, w] of Object.entries(STYLE_ODDS)) {
+  for (const [st, w] of Object.entries(p.odds || STYLE_ODDS)) {
     roll -= w;
     if (roll < 0) {
       style = st;
@@ -209,7 +222,7 @@ function siteFor(I, J, p) {
   site = null;
   if (style === 'rural') {
     const heat = vnoise(I / 4, J / 4, p.s + 131);
-    style = heat > 0.64 ? 'desert' : heat < 0.34 ? 'snow' : 'farm';
+    style = p.climate || (heat > 0.64 ? 'desert' : heat < 0.34 ? 'snow' : 'farm');
   }
   if (style !== 'none') {
     const def = SITE[style];
@@ -999,11 +1012,12 @@ function generateChunk(world, c, r) {
 const roadKey = (x, y) => `${Math.round(x)},${Math.round(y)}`;
 
 export class World {
-  constructor(seed = 1) {
+  constructor(seed = 1, theme = null) {
     this.seed = seed;
+    this.theme = theme;
     this.realm = 'city';
     this.cell = cell;
-    this.p = makeParams(seed);
+    this.p = makeParams(seed, theme);
     CUR = this.p;
     this.spawn = { ...this.p.spawn };
     this.grid = new SpatialHash(128);

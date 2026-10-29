@@ -316,7 +316,7 @@ export class Hub {
       <div class="chapter-card">
         <div class="ch-row">
           <button class="arrow" data-act="chapter" data-dir="-1" ${n > 1 ? '' : 'disabled'}>&lsaquo;</button>
-          <div class="ch-title"><small>Chapter ${n}</small><b>${ch.name}</b></div>
+          <div class="ch-title"><small>Chapter ${n}</small><b>${ch.name}</b><em>${ch.blurb || ''}</em></div>
           <button class="arrow" data-act="chapter" data-dir="1" ${n < s.chapter.unlocked ? '' : 'disabled'}>&rsaquo;</button>
         </div>
         <div class="ch-stars">${ms}${cleared ? '<span class="cleared">Cleared</span>' : ''}</div>
@@ -473,24 +473,46 @@ export class Hub {
         return `<button class="deal ${sold ? 'sold' : ''}" data-act="deal" data-i="${i}" ${sold ? 'disabled' : ''}>${rewardChips(d.give, 'big')}<span class="dprice">${sold ? 'Sold out' : price}</span></button>`;
       }).join('')}</div>`
       : `<p class="locked-note">Daily Deals unlock at account level ${FEATURES.deals}.</p>`;
-    // Crates
+    // Crates: a showcase card each, the crate or egg on a lit stage, what it can hold, how close
+    // the guarantee is, and the ways to open it.
     const crate = (id) => {
       const c = CRATES[id];
+      const egg = id === 'egg';
       const keys = s.cur.keys[id] || 0;
       const pity = pityLeft(s, id);
       const adOk = this.ads && (id === 'supply' ? adsLeft(s, 'crate', now) > 0 : featureOpen(s, 'eggAd') && adsLeft(s, 'egg', now) > 0);
       const free = id === 'supply' && !s.crates.freeFirst;
-      return `<div class="crate-card ${id}">
-        <div class="crate-art">${ico(id === 'egg' ? 'egg' : 'crate', 'huge')}</div>
-        <div class="crate-info"><b>${c.name}</b><small>${c.text}</small>
-          <small class="pity">${id === 'supply' ? `Rare guaranteed in ${pity.rare}` : `Epic in ${pity.epic} · Legendary in ${pity.legendary}`}</small>
-          <button class="link" data-act="odds" data-id="${id}">Odds</button></div>
-        <div class="crate-buy">
-          ${free ? `<button class="btn gold" data-act="crate" data-id="${id}" data-how="free">Free!</button>` : ''}
-          ${keys ? `<button class="btn gold" data-act="crate" data-id="${id}" data-how="key">${ico(id === 'egg' ? 'egg' : 'crate')}Open (${keys})</button>` : ''}
-          ${adOk && !free ? `<button class="btn ghost ad" data-act="crate" data-id="${id}" data-how="ad">Free</button>` : ''}
-          <button class="btn primary" data-act="crate" data-id="${id}" data-how="gems">${ico('gem')}${c.gems}</button>
-          ${c.ten ? `<button class="btn primary" data-act="crate" data-id="${id}" data-how="gems" data-n="10">10× ${ico('gem')}${hfmt(c.ten)}</button>` : ''}
+      const odds = crateOdds(id).map((o) => `<span style="--rc:${o.rarity.color}"><i></i>${o.rarity.name}<b>${o.pct < 1 ? o.pct.toFixed(1) : Math.round(o.pct)}%</b></span>`).join('');
+      // How far along the guarantees are: a pip per open towards the next one.
+      const track = (left, every, label, color) => {
+        const done = every - left;
+        const pips = every <= 10 ? Array.from({ length: every }, (_, i) => `<i class="${i < done ? 'on' : ''}"></i>`).join('') : `<em style="width:${(100 * done) / every}%"></em>`;
+        return `<div class="chest-pity" style="--rc:${color}"><div class="pity-track ${every > 10 ? 'bar' : ''}">${pips}</div><small>${label} in <b>${left}</b></small></div>`;
+      };
+      const pityRows = egg
+        ? track(pity.epic, c.pity.every, 'Epic guaranteed', RARITY[3].color) + track(pity.legendary, c.legendary, 'Legendary guaranteed', RARITY[4].color)
+        : track(pity.rare, c.pity.every, 'Rare guaranteed', RARITY[2].color);
+      const flag = free ? '<span class="chest-flag">Free!</span>' : keys ? `<span class="chest-flag key">${keys} to open</span>` : '';
+      const save10 = c.ten ? Math.round((1 - c.ten / (c.gems * 10)) * 100) : 0;
+      return `<div class="chest ${id}">
+        <div class="chest-stage">
+          <i class="chest-rays"></i><i class="chest-spark s1"></i><i class="chest-spark s2"></i><i class="chest-spark s3"></i><i class="chest-spark s4"></i>
+          <div class="chest-art">${ico(egg ? 'egg-hero' : 'chest-hero', 'mega')}</div><i class="chest-shadow"></i>${flag}
+        </div>
+        <div class="chest-body">
+          <div class="chest-name"><b>${c.name}</b><small>${c.text}</small></div>
+          <div class="chest-odds">${odds}</div>
+          ${pityRows}
+          <div class="chest-buy">
+            ${free ? `<button class="btn gold big" data-act="crate" data-id="${id}" data-how="free">Open free</button>` : ''}
+            ${keys ? `<button class="btn gold big" data-act="crate" data-id="${id}" data-how="key">${ico(egg ? 'egg' : 'crate')}Open (${keys})</button>` : ''}
+            ${adOk && !free ? `<button class="btn ghost ad" data-act="crate" data-id="${id}" data-how="ad">Open free</button>` : ''}
+            <div class="chest-prices">
+              <button class="btn primary" data-act="crate" data-id="${id}" data-how="gems"><small>Open 1</small><span class="price">${ico('gem')}${c.gems}</span></button>
+              ${c.ten ? `<button class="btn primary best" data-act="crate" data-id="${id}" data-how="gems" data-n="10"><span class="deal-tag">Save ${save10}%</span><small>Open 10</small><span class="price">${ico('gem')}${hfmt(c.ten)}</span></button>` : ''}
+            </div>
+          </div>
+          <button class="link" data-act="odds" data-id="${id}">Odds and details</button>
         </div></div>`;
     };
     const skins = Object.entries(SKINS).map(([id, sk]) => {
@@ -510,7 +532,7 @@ export class Hub {
       : '';
     return `<div class="shop">
       ${freeGems}
-      <h3>Crates</h3>${crate('supply')}${crate('egg')}
+      <h3>Crates</h3><div class="chests">${crate('supply')}${crate('egg')}</div>
       <h3>Daily Deals <small data-timer="${new Date(new Date(now).setHours(24, 0, 0, 0)).getTime()}"></small></h3>${deals}
       <h3>Energy</h3>${energyRow}
       <h3>Rampage Pass</h3><div class="offers">
@@ -680,7 +702,7 @@ export class Hub {
     const best = Math.max(...drops.map((d) => d.item.rarity));
     const many = drops.length > 1;
     this.openModal('crate', `<div class="crate-open ${many ? 'many' : ''}" style="--rc:${RARITY[best].color}">
-      <div class="crate-shake">${ico(id === 'egg' ? 'egg' : 'crate', 'huge')}</div>
+      <div class="crate-shake">${ico(id === 'egg' ? 'egg-hero' : 'chest-hero', 'huge')}</div>
       <div class="crate-cards">${drops.map((d, i) => {
         const g = GEAR[d.item.id];
         const r = RARITY[d.item.rarity];
