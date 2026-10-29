@@ -623,7 +623,14 @@ async function boot() {
   // CrazyGames' SDK first: it brings the player's save with it. A stalled SDK doesn't hold the
   // game up for long; the save then stays in this browser for the session.
   await Promise.race([platform.ready, new Promise((done) => setTimeout(done, 8000))]);
-  store = platform.storage;
+  // `#new` on the address (anywhere but CrazyGames) plays as a brand-new player, title and intro
+  // and all, on a throwaway save that is never written back: a look at the first-time experience
+  // that leaves real progress alone.
+  const freshLook = location.hash === '#new' && !platform.sdk;
+  const scratch = new Map();
+  store = freshLook
+    ? { getItem: (key) => (scratch.has(key) ? scratch.get(key) : null), setItem: (key, v) => scratch.set(key, String(v)), removeItem: (key) => scratch.delete(key) }
+    : platform.storage;
   save = loadSave(store, now());
   rollover(save, now());
   pace = paceState(save, now(), params.get('adarm'));
