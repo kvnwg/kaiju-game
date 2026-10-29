@@ -320,6 +320,21 @@ export const BOSS = {
 // A boss guards every size-up: fill the growth bar and one is sent after you; beat it to grow.
 // Sizes are in units of your radius at that stage, damage in fractions of that stage's max health,
 // and health in hits of your current base damage (so augments still make the fight shorter).
+// Boss fights, so a long fight never turns into a grind (the meter and phase breaks are for the
+// tanky bosses: health x`tanky` or more, and the final boss):
+// - a stagger meter fills a little for each of the boss's attacks you dodge (`whiff`, at most once
+//   per `whiffGap` s), more for a perfect dodge, and with damage (`dmgShare` of its health fills it
+//   all); full, the boss staggers for `staggerT` s: no attacks, `staggerMul` x damage. Each stagger
+//   makes the next need `needGrow` more.
+// - phase breaks at the `phases` health fractions: a `phaseStagger` s stagger, and Fury for the
+//   kaiju (`furyMul` x damage on the boss for `furyT` s).
+// - rage: from `rageAfter` s into a fight the kaiju's damage on the boss climbs `rage` a second, up
+//   to +`rageMax`.
+export const BOSS_FIGHT = {
+  whiff: 0.12, whiffGap: 1.2, perfect: 0.25, dmgShare: 0.3, staggerT: 5, staggerMul: 3, needGrow: 0.25,
+  phases: [0.66, 0.33], tanky: 10, phaseStagger: 3, furyT: 8, furyMul: 1.5, rageAfter: 45, rage: 0.03, rageMax: 3,
+};
+
 export const GATE = { warn: 2.5, hits: 46, hitsPerLevel: 0.6, interval: 3.1, furious: 0.7, heal: 0.15, secondWind: 0.5 };
 export const GATE_BOSSES = [
   null,

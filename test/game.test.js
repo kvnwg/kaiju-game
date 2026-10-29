@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect } from '../src/game.js';
-import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, AD_PRESSURE, TRAITS, DASH } from '../src/config.js';
+import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, AD_PRESSURE, TRAITS, DASH, BOSS_FIGHT } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { waterField } from '../src/world.js';
@@ -712,4 +712,44 @@ test("Ember Lizard sets what it wrecks alight, and the fire spreads", () => {
   const hp = k.hp;
   for (let i = 0; i < 30; i++) g.update(1 / 30);
   assert.ok(k.hp > hp, 'healed standing in fire');
+});
+
+test('tanky bosses stagger when their meter fills, break at phase lines and give way to rage', () => {
+  const g = new Game({ seed: 3 });
+  // A quick early boss: no meter, no phase breaks.
+  g.spawnGateBoss();
+  let b = g.boss;
+  b.state = 'idle';
+  assert.equal(b.tanky, false);
+  g.addPoise(5);
+  assert.equal(b.staggerT, 0, 'no stagger on a quick fight');
+  // A tanky one (Wrecking Bill, size 4).
+  for (let s = 1; s < 4; s++) {
+    g.gateCleared[s] = true;
+    g.kaiju.stage = s + 1;
+  }
+  g.boss = null;
+  g.spawnGateBoss();
+  b = g.boss;
+  b.state = 'idle';
+  assert.ok(b.tanky);
+  g.addPoise(0.5);
+  assert.equal(b.staggerT, 0);
+  g.addPoise(0.6);
+  assert.ok(b.staggerT > 0, 'a full meter staggers it');
+  assert.ok(b.poiseNeed > 1, 'the next one takes more');
+  const hp = b.hp;
+  g.damageBoss(100);
+  assert.ok(Math.abs(hp - b.hp - 100 * BOSS_FIGHT.staggerMul) < 1e-6, 'staggered, it takes extra damage');
+  // Fresh fight clock: past the first phase line it breaks and the kaiju gets Fury.
+  b.staggerT = 0;
+  b.hp = b.maxHp * (BOSS_FIGHT.phases[0] + 0.01);
+  g.damageBoss(b.maxHp * 0.02);
+  assert.equal(b.phaseBreaks, 1);
+  assert.ok(b.staggerT > 0 && g.furyT > 0);
+  assert.equal(g.bossRage(b), 1);
+  b.fight = BOSS_FIGHT.rageAfter + 20;
+  assert.ok(g.bossRage(b) > 1.5, 'a long fight brings rage');
+  b.fight = 1e6;
+  assert.equal(g.bossRage(b), 1 + BOSS_FIGHT.rageMax);
 });

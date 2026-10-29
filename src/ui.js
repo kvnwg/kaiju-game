@@ -116,6 +116,8 @@ export class UI {
     this.bossFill = $('#bossbar .fill');
     this.bossName = $('#bossbar span');
     this.bossQuip = $('#bossbar .quip');
+    this.bossPoise = $('#bossbar .poise i');
+    this.bossRage = $('#bossbar .rage');
     this.augbar = $('#augbar');
     this.bannerEl = $('#banner');
     this.hintEl = $('#hint');
@@ -298,9 +300,17 @@ export class UI {
     if (bossOn) {
       const name = b.phase === 2 ? `${b.name} · ${b.gate ? 'furious' : 'enraged'}` : b.name;
       if (this.bossName.textContent !== name) this.bossName.textContent = name;
-      const quip = b.quip && game.time < b.quipUntil ? `“${b.quip}”` : b.shield ? 'Filibustering: immune' : b.state === 'break' ? 'On break: takes extra damage' : '';
+      const staggered = b.staggerT > 0;
+      const quip = staggered ? 'Staggered: hit it now!' : b.quip && game.time < b.quipUntil ? `“${b.quip}”` : b.shield ? 'Filibustering: immune' : b.state === 'break' ? 'On break: takes extra damage' : '';
       if (this.bossQuip.textContent !== quip) this.bossQuip.textContent = quip;
       this.bossFill.style.width = `${(100 * b.hp) / b.maxHp}%`;
+      // The stagger meter (full and flashing while it reels), and Rage once a fight runs long.
+      this.bossPoise.style.width = `${staggered ? 100 : Math.min(100, (100 * b.poise) / b.poiseNeed)}%`;
+      this.bossbar.classList.toggle('staggered', staggered);
+      this.bossbar.classList.toggle('phased', Boolean(b.tanky));
+      const rage = game.bossRage ? Math.round((game.bossRage(b) - 1) * 100) : 0;
+      const rageText = rage > 0 ? `Rage +${rage}%` : '';
+      if (this.bossRage.textContent !== rageText) this.bossRage.textContent = rageText;
     }
 
     const sig = [...game.held.entries()].map(([id, l]) => `${id}${l}`).join(',');

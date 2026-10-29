@@ -1,6 +1,6 @@
 import {
   WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
-  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -97,6 +97,10 @@ function routesMeet(p, q, clear) {
 }
 
 export { distToRect, distToSegment };
+
+// A fresh boss's stagger meter, phase breaks and fight clock (see BOSS_FIGHT). Only the tanky
+// bosses get the meter and the phase breaks.
+const fightState = (tanky) => ({ poise: 0, poiseNeed: 1, staggerT: 0, dazeT: 0, tanky, phaseBreaks: tanky ? 0 : BOSS_FIGHT.phases.length, fight: 0 });
 
 export class Game {
   // `ascend`: beating the city's final boss sends the kaiju on into space instead of ending the
@@ -198,6 +202,7 @@ export class Game {
     this.eventsUsed = [];
     this.blackoutT = 0;
     this.pressure = null; // an ad-pressure surge under way (see startPressure)
+    this.furyT = 0; // Fury after a boss phase break (see BOSS_FIGHT)
     this.pressureUsed = false;
     this.vault = null;
     Object.assign(this.stats, { vaultGems: 0, vaults: 0, frenzies: 0, bigTopples: 0, objectiveDone: false });
@@ -1652,6 +1657,7 @@ export class Game {
     const k = this.kaiju;
     if (k.dodging <= 0 || k.perfect) return;
     k.perfect = true;
+    this.addPoise(BOSS_FIGHT.perfect);
     k.dashCd *= 1 - DASH.refund;
     this.bumpCombo();
     this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.8, text: 'PERFECT DODGE', color: '#7ff0ff', life: 1.2, max: 1.2 });
@@ -3198,11 +3204,25 @@ export class Game {
         this.spawnGateBoss();
       }
     }
+    if (this.furyT > 0) this.furyT -= dt;
     const b = this.boss;
     if (!b || b.dead) return;
     const k = this.kaiju;
     const g = b.gate ? b.def : null;
     b.flash = Math.max(0, b.flash - dt);
+    if (b.state !== 'enter') b.fight += dt;
+    // Staggered: it reels, dazed, and does nothing at all.
+    if (b.staggerT > 0) {
+      b.staggerT -= dt;
+      b.dazeT -= dt;
+      if (b.dazeT <= 0) {
+        b.dazeT = 0.35;
+        const a = this.rng.range(0, Math.PI * 2);
+        this.fx.floaters.push({ x: b.x + Math.cos(a) * b.r * 0.6, y: b.y + Math.sin(a) * b.r * 0.6, h: b.r * 2.2, text: '★', color: '#ffe066', life: 0.7, max: 0.7 });
+      }
+      if (b.staggerT <= 0) b.next = Math.max(b.next, 1);
+      return;
+    }
     b.swingT = Math.max(0, (b.swingT || 0) - dt);
     const dx = k.x - b.x;
     const dy = k.y - b.y;
@@ -3364,6 +3384,48 @@ export class Game {
     }
   }
 
+  // ---------------------------------------------------------------- stagger, phase breaks, rage
+  // The boss's stagger meter (see BOSS_FIGHT): full, it staggers. Only the tanky bosses have one;
+  // the quick early fights stay as they are.
+  addPoise(v) {
+    const b = this.boss;
+    if (!b || !b.tanky || b.dead || b.state === 'enter' || b.staggerT > 0 || !(v > 0)) return;
+    b.poise += v;
+    if (b.poise >= b.poiseNeed) {
+      b.poise = 0;
+      b.poiseNeed *= 1 + BOSS_FIGHT.needGrow;
+      this.staggerBoss(BOSS_FIGHT.staggerT, `STAGGERED! ×${BOSS_FIGHT.staggerMul} DAMAGE`);
+    }
+  }
+
+  staggerBoss(t, text) {
+    const b = this.boss;
+    b.staggerT = Math.max(b.staggerT, t);
+    b.dazeT = 0;
+    if (b.state !== 'enter') b.state = 'idle';
+    b.shield = false;
+    this.slowmo = Math.max(this.slowmo, 0.5);
+    this.shake = Math.max(this.shake, 0.5);
+    this.fx.rings.push({ x: b.x, y: b.y, r0: b.r, r1: b.r * 3, life: 0.6, max: 0.6, color: 0xffe066, width: b.r * 0.25 });
+    this.fx.floaters.push({ x: b.x, y: b.y, h: b.r * 2.6, text, color: '#ffe066', life: 1.8, max: 1.8 });
+    this.emit('bossStagger', { name: b.name, t });
+  }
+
+  // Health crosses a phase line: the boss reels, and the kaiju gets a burst of Fury.
+  phaseBreak(b) {
+    this.staggerBoss(BOSS_FIGHT.phaseStagger, 'PHASE BREAK!');
+    this.furyT = BOSS_FIGHT.furyT;
+    const k = this.kaiju;
+    this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.8, text: `FURY! +${Math.round((BOSS_FIGHT.furyMul - 1) * 100)}% DAMAGE`, color: '#ff8a3a', life: 1.6, max: 1.6 });
+    this.emit('bossPhase', { name: b.name, n: b.phaseBreaks });
+  }
+
+  // How much harder the kaiju hits a boss the longer the fight runs (1 = not yet).
+  bossRage(b) {
+    const F = BOSS_FIGHT;
+    return 1 + Math.min(F.rageMax, Math.max(0, b.fight - F.rageAfter) * F.rage);
+  }
+
   // A line of dialogue over the boss's head (and under its health bar).
   bossQuip(b, key) {
     const lines = b.def && b.def.quips[key];
@@ -3400,7 +3462,7 @@ export class Game {
       x, y, r: def.r * unit, unit, hp, maxHp: hp, D: this.stage.maxHp * dmgMul * 0.6, dmgMul,
       state: 'enter', targetX: k.x + (x - k.x) * 0.45, targetY: k.y + (y - k.y) * 0.45,
       phase: 1, next: 1.5, patterns: def.patterns, patternIndex: 0, strafe: 1,
-      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, shield: false, quip: '', quipUntil: 0,
+      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, shield: false, quip: '', quipUntil: 0, ...fightState((def.hpMul || 1) >= BOSS_FIGHT.tanky),
     };
     this.shake = Math.max(this.shake, 0.6);
     // Second wind: a boss fight never starts on your last legs.
@@ -3421,7 +3483,7 @@ export class Game {
       isBoss: true, name: BOSS.name, x, y, r: BOSS.r, hp: BOSS.hp * this.diff.enemyHp, maxHp: BOSS.hp * this.diff.enemyHp,
       state: 'enter', targetX: Math.max(BOSS.r, k.x - span * 0.45), targetY: y,
       phase: 1, next: 2, patterns: BOSS.patterns, patternIndex: 0,
-      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: 1 + (this.enemyScale().dmg - 1) * 0.5,
+      aim: 0, flash: 0, walk: 0, dead: false, start: this.time, dmgMul: 1 + (this.enemyScale().dmg - 1) * 0.5, ...fightState(true),
     };
     this.shake = 1;
     this.emit('bossSpawn', { name: BOSS.name });
@@ -3760,8 +3822,17 @@ export class Game {
       return true;
     }
     if (b.state === 'break') amount *= 1.6;
+    const F = BOSS_FIGHT;
+    if (b.staggerT > 0) amount *= F.staggerMul;
+    if (this.furyT > 0) amount *= F.furyMul;
+    amount *= this.bossRage(b);
     b.hp -= amount;
     b.flash = 0.08;
+    this.addPoise(amount / (b.maxHp * F.dmgShare));
+    while (b.hp > 0 && b.phaseBreaks < F.phases.length && b.hp <= b.maxHp * F.phases[b.phaseBreaks]) {
+      b.phaseBreaks++;
+      this.phaseBreak(b);
+    }
     if (b.hp <= 0 && b.gate) return this.defeatGateBoss(b);
     if (b.hp <= 0) {
       b.hp = 0;
@@ -3848,6 +3919,8 @@ export class Game {
       h.t += dt;
       if (h.t < h.delay || h.done) continue;
       h.done = true;
+      // A staggered boss's attacks fizzle out.
+      if (h.boss && this.boss && this.boss.staggerT > 0) continue;
       if (h.onHit) h.onHit();
       if (h.visualOnly || h.friendly) continue;
       let hit = false;
@@ -3860,6 +3933,11 @@ export class Game {
       }
       if (hit && k.dodging > 0) this.perfectDodge(h.x, h.y);
       if (hit) this.takeDamage(h.dmg, h.type);
+      // A boss attack that missed fills its stagger meter a little.
+      else if (h.boss && this.time - (this.lastWhiff || -9) > BOSS_FIGHT.whiffGap) {
+        this.lastWhiff = this.time;
+        this.addPoise(BOSS_FIGHT.whiff);
+      }
       if (hit && h.slow && k.invuln <= 0) {
         if (k.netted <= 0) this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'BRAIN FREEZE!', color: '#ffc0e0', life: 1.2, max: 1.2 });
         k.netted = Math.max(k.netted, h.slow);

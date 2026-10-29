@@ -398,7 +398,8 @@ export class Sfx {
   handleEvent(e) {
     if (!this.ctx) return;
     if (e.type === 'grow') this.sizeUp();
-    else if (e.type === 'slam') this.slam();
+    else if (e.type === 'slam' || e.type === 'bossStagger') this.slam();
+    else if (e.type === 'bossPhase') this.sizeUp();
     else if (e.type === 'hop') this.hop();
     else if (e.type === 'comboTier') this.comboTier(e.tier);
     else if (e.type === 'dash') this.dash();

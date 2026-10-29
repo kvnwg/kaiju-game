@@ -1843,3 +1843,16 @@ html, body {
 /* Each kaiju's playstyle and what its signature trait does. */
 .kcard2 .kstyle { font-family: var(--display); font-style: normal; font-size: 9px; color: var(--pink-dark); }
 .kcard2 .kability { margin: 0; font-size: 13px; line-height: 1.35; color: var(--ink-muted); max-width: 46ch; }
+
+/* The boss bar's stagger meter, phase marks and Rage (see BOSS_FIGHT). */
+#bossbar .track .tick { display: none; position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: rgba(255, 240, 200, 0.75); z-index: 1; }
+#bossbar.phased .track .tick { display: block; }
+#bossbar.phased .poise { display: flex; }
+#bossbar .poise { position: relative; display: none; align-items: center; height: 9px; margin-top: 4px; background: #2a1820; box-shadow: 0 0 0 2px var(--ink); }
+#bossbar .poise i { display: block; height: 100%; width: 0; background: #ffd23f; box-shadow: inset 0 -2px 0 #b8860b; transition: width 0.15s steps(3); }
+#bossbar .poise small { position: absolute; right: 4px; font-family: var(--display); font-size: 6px; color: #fff3b0; text-shadow: var(--outline); }
+#bossbar.staggered .poise i { background: #fff3b0; animation: staggerFlash 0.3s steps(2) infinite; }
+#bossbar.staggered .track { box-shadow: 0 0 0 2px #ffd23f; }
+#bossbar .rage { float: right; font-family: var(--display); font-weight: 400; font-size: 9px; color: #ff8a3a; text-shadow: var(--outline); }
+#bossbar .rage:empty { display: none; }
+@keyframes staggerFlash { 50% { filter: brightness(1.6); } }

@@ -262,6 +262,12 @@ function handleEvents(events) {
       case 'gateBossDefeated':
         ui.banner(`${e.name} defeated`, e.text, 'grow');
         break;
+      case 'bossStagger':
+        ui.callout('Stagger!', 2);
+        break;
+      case 'bossPhase':
+        ui.banner('Phase break!', 'Fury: you hit it 50% harder for a few seconds', 'grow');
+        break;
       case 'bossWarning':
         ui.banner('Warning', `${e.name} approaching from the harbor`, 'warning');
         break;
