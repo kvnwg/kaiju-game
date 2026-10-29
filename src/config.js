@@ -88,10 +88,9 @@ export const STAGE_INFO = [
 export const TIER_HP = [0, 10, 40, 160, 640, 2560, 10240, 40960, 163840, 655360, 2621440, 10485760, 41943040, 167772160];
 export const LANDMARK_HP = TIER_HP[6] * 8;
 
-// A player's very first run: the sheds near home are rickety (within this many units), the first
-// size-up lingers in slow motion a little longer, and the first session opens with this many
-// seconds as the full-grown kaiju (see intro.js).
-export const FIRST_RUN = { rickety: 160, sizeUpSlowmo: 1.8, intro: 9 };
+// A player's very first run: the sheds near home are rickety (within this many units), and the
+// first size-up lingers in slow motion a little longer.
+export const FIRST_RUN = { rickety: 160, sizeUpSlowmo: 1.8 };
 
 // Ad pressure: once per run, when a revive ad is ready and the run is closing in on the player's
 // best, the military surges for a while (harder hits, extra strike waves) so a knockdown, and with
