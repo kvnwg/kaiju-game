@@ -33,27 +33,6 @@ const VERY_SLOW_FRAME = 80;
 const YAW = 0.62;
 const PITCH = 0.92; // ~53 degrees down
 
-// Searchlight beams (the title shot): brightest at the lamp and down the beam's middle, fading
-// out along its length and toward its edges.
-const BEAM_VS = `
-varying float vH;
-varying float vRim;
-void main() {
-  vH = uv.y;
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  vRim = abs(dot(normalize(normalMatrix * normal), normalize(-mv.xyz)));
-  gl_Position = projectionMatrix * mv;
-}`;
-const BEAM_FS = `
-uniform vec3 uColor;
-uniform float uAlpha;
-varying float vH;
-varying float vRim;
-void main() {
-  float a = uAlpha * pow(vRim, 1.6) * (1.0 - vH) * (1.0 - vH) * smoothstep(0.0, 0.03, vH);
-  gl_FragColor = vec4(uColor * a, 1.0);
-}`;
-
 // Lighting keyframes: golden afternoon -> sunset -> neon night.
 const SKY = [
   { sun: 0xffdcb0, sunI: 0.8, elev: 0.6, az: -0.9, hemiS: 0xe4eaf6, hemiG: 0xa0907a, hemiI: 0.68, fog: 0xf0d6b8, night: 0, bloom: 0.2, water: 0x3a8ac0 },
@@ -192,7 +171,6 @@ export class Renderer3D {
     this.flashPool = [];
     this.t = 0;
     this.dusk = 0;
-    this.cinematic = null; // the title's fixed shot: { eye, focus, frameX, dusk }
     this.lodBias = 1; // above 1, buildings and props switch to coarser voxels sooner
     this.camDist = 200;
     this.target = new THREE.Vector3();
@@ -387,57 +365,6 @@ export class Renderer3D {
     this.hospitalMarks.delete(o);
   }
 
-  // Searchlights from around the kaiju sweeping the night sky, only in the title shot.
-  updateSearchlights(cine) {
-    if (!cine) {
-      if (this.searchlights) {
-        for (const m of this.searchlights.beams) this.scene.remove(m);
-        this.searchlights.geo.dispose();
-        this.searchlights.mat.dispose();
-        this.searchlights = null;
-      }
-      return;
-    }
-    const e = cine.eye;
-    const f = cine.focus;
-    const d = Math.hypot(f.x - e.x, f.z - e.z);
-    const ux = (f.x - e.x) / d;
-    const uz = (f.z - e.z) / d;
-    if (!this.searchlights) {
-      const len = d * 0.9;
-      const geo = new THREE.CylinderGeometry(len * 0.035, len * 0.004, len, 16, 1, true);
-      geo.translate(0, len / 2, 0);
-      const mat = new THREE.ShaderMaterial({
-        vertexShader: BEAM_VS, fragmentShader: BEAM_FS, uniforms: { uColor: { value: new THREE.Color(0xcfe0ff) }, uAlpha: { value: 0.22 } },
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      });
-      // Out to either side of the kaiju and behind it, so the beams climb out of the skyline.
-      const spots = [[-1.4, 0.45], [-0.6, 0.75], [0.5, 0.6], [1.3, 0.35]];
-      const beams = spots.map(([side, back], i) => {
-        const m = new THREE.Mesh(geo, mat);
-        m.position.set(f.x - uz * side * d * 0.5 + ux * back * d * 0.5, 0, f.z + ux * side * d * 0.5 + uz * back * d * 0.5);
-        m.userData = { phase: i * 1.7, speed: 0.11 + i * 0.023, lean: side > 0 ? -0.35 : 0.35 };
-        m.renderOrder = 4;
-        m.frustumCulled = false;
-        this.scene.add(m);
-        return m;
-      });
-      this.searchlights = { geo, mat, beams };
-    }
-    const up = new THREE.Vector3(0, 1, 0);
-    const dir = new THREE.Vector3();
-    for (const m of this.searchlights.beams) {
-      const u = m.userData;
-      // Swing across the sky (relative to the view: 0 points away from the camera), rising and dipping.
-      const az = u.lean + Math.sin(this.t * u.speed + u.phase) * 0.9;
-      const el = 0.95 + Math.sin(this.t * u.speed * 0.7 + u.phase * 2) * 0.28;
-      const across = Math.sin(az) * Math.cos(el);
-      const away = Math.cos(az) * Math.cos(el);
-      dir.set(ux * away - uz * across, Math.sin(el), uz * away + ux * across).normalize();
-      m.quaternion.setFromUnitVectors(up, dir);
-    }
-  }
-
   // The golden vault: a pulsing gold frame and a spinning gem above the building.
   updateVaultMark(game) {
     const o = game.vault && game.vault.state === 'intact' ? game.vault : null;
@@ -484,7 +411,7 @@ export class Renderer3D {
 
   // Hospitals glow while they are worth smashing: within two sizes of the kaiju (a 5% heal or
   // more). Smaller ones go dark, which also keeps a big kaiju's view free of markers.
-  updateHospitalMarks(stage, hidden = false) {
+  updateHospitalMarks(stage) {
     if (!this.hospitalMarks) return;
     const pulse = 0.6 + 0.4 * Math.sin(this.t * 4);
     this.healMat.opacity = 0.55 + 0.4 * pulse;
@@ -493,7 +420,7 @@ export class Renderer3D {
         this.removeHospitalMark(o);
         continue;
       }
-      g.visible = !hidden && stage - o.tier <= 2;
+      g.visible = stage - o.tier <= 2;
       if (!g.visible) continue;
       const c = g.userData.cross;
       c.rotation.y = this.t * 1.5;
@@ -1150,8 +1077,6 @@ export class Renderer3D {
     // Out in space it bursts in a puff of stardust instead of a cloud of dust off the ground.
     if (o.vanish) this.fx.dustCloud(o.x, o.height * 0.45, o.y, size * 0.6, 14, 0xd8c8ff);
     else this.fx.dustCloud(o.x, 0, o.y, size * 0.6, 12);
-    // In the title shot what falls keeps burning: a column of smoke over the skyline.
-    if (this.cinematic && o.height > 30 && Math.random() < 0.6) this.fx.plume(o.x, o.y, Math.min(80, Math.max(24, size * 0.45)), 25 + Math.random() * 20);
     if (e.animated) {
       rec.collapse = { t: 0, dur: 0.9 + o.tier * 0.15, dir: e.dir, nextBurst: 0.1 };
       this.collapses.add(rec);
@@ -1522,11 +1447,8 @@ export class Renderer3D {
     this.fx.zeroG = space;
     this.handleVfx(game);
 
-    // Time of day follows run progress (a cinematic shot picks its own); past the city each realm
-    // has its own light.
-    const cine = this.cinematic;
-    if (cine && cine.dusk !== undefined) this.dusk = cine.dusk;
-    else this.dusk += ((game.blackoutT > 0 ? 1 : game.dusk) - this.dusk) * Math.min(1, dt * (game.blackoutT > 0 ? 2 : 0.6));
+    // Time of day follows run progress; past the city each realm has its own light.
+    this.dusk += ((game.blackoutT > 0 ? 1 : game.dusk) - this.dusk) * Math.min(1, dt * (game.blackoutT > 0 ? 2 : 0.6));
     const key = realm === 'city' ? lerpKey(this.dusk) : this.realmLook.key(realm);
     this.uniforms.uNight.value = key.night;
     this.hemi.color.copy(key.hemiS);
@@ -1573,55 +1495,27 @@ export class Renderer3D {
     // Shake scales with how much of the city is on screen, so a thump reads the same at every size.
     const shake = game.shake * span * 0.022;
     // Zoom punch: big kills kick the camera in a touch, then it eases back out.
-    let d = this.camDist * (1 - game.punch * 0.06);
-    if (cine) {
-      // A fixed shot (the title): the camera stands still among the towers, looking out at the
-      // kaiju's anchor, turned so the anchor sits at cine.frameX across a wide screen. Only a
-      // slow handheld sway, and a tremble when something big goes off.
-      const e = cine.eye;
-      const f = cine.focus;
-      d = Math.hypot(f.x - e.x, f.z - e.z);
-      const at = aspect > 1 ? cine.frameX : 0;
-      const fov = cine.fov ? cine.fov(aspect) : FOV;
-      const jolt = game.shake * 0.002;
-      const yaw = Math.atan2(f.z - e.z, f.x - e.x) - Math.atan(at * Math.tan((fov * Math.PI) / 360) * aspect) + Math.sin(this.t * 0.11) * 0.004 + (Math.random() - 0.5) * jolt;
-      const pitch = Math.atan2(f.y - e.y, d) + Math.sin(this.t * 0.07) * 0.003 + (Math.random() - 0.5) * jolt;
-      this.camera.position.set(e.x, e.y, e.z);
-      this.camera.lookAt(e.x + Math.cos(yaw) * Math.cos(pitch), e.y + Math.sin(pitch), e.z + Math.sin(yaw) * Math.cos(pitch));
-      this.camera.fov = fov;
-      this.camera.near = 10;
-      this.camera.far = d * 2;
-      this.camera.updateProjectionMatrix();
-      this.scene.fog.near = d * 0.5;
-      this.scene.fog.far = d * 1.95;
-      // What gets streamed in and lit: the stretch between the camera and the kaiju.
-      this.target.set(e.x + (f.x - e.x) * 0.6, 0, e.z + (f.z - e.z) * 0.6);
-    } else {
-      this.camera.fov = FOV;
-      this.camera.position.set(
-        this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
-        this.target.y + Math.sin(PITCH) * d + (Math.random() - 0.5) * shake,
-        this.target.z + Math.cos(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
-      );
-      this.camera.lookAt(this.target);
-      // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
-      this.camera.near = Math.max(1, d * 0.25);
-      const reach = space ? 1 : this.quality.far;
-      this.camera.far = d * 4.5 * reach;
-      this.camera.updateProjectionMatrix();
-      // (Space has no haze: what is out there stays sharp against the stars.)
-      this.scene.fog.near = d * (space ? 3.5 : 1.05 * reach);
-      this.scene.fog.far = d * (space ? 9 : 3.4 * reach);
-    }
-    if (this.tilt) this.tilt.enabled = !cine;
+    const d = this.camDist * (1 - game.punch * 0.06);
+    this.camera.fov = FOV;
+    this.camera.position.set(
+      this.target.x + Math.sin(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
+      this.target.y + Math.sin(PITCH) * d + (Math.random() - 0.5) * shake,
+      this.target.z + Math.cos(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
+    );
+    this.camera.lookAt(this.target);
+    // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
+    this.camera.near = Math.max(1, d * 0.25);
+    const reach = space ? 1 : this.quality.far;
+    this.camera.far = d * 4.5 * reach;
+    this.camera.updateProjectionMatrix();
+    // (Space has no haze: what is out there stays sharp against the stars.)
+    this.scene.fog.near = d * (space ? 3.5 : 1.05 * reach);
+    this.scene.fog.far = d * (space ? 9 : 3.4 * reach);
     if (this.camera.fov !== this.fxFov) {
       this.fxFov = this.camera.fov;
       this.fx.setScale((this.h * this.renderer.getPixelRatio()) / (2 * Math.tan((this.fxFov * Math.PI) / 360)));
     }
-    // The title looks out across the whole city from street level: coarser voxels for what is
-    // not close, and no x-ray outline (there, buildings hiding its feet are the point).
-    this.lodBias = (cine ? 2.5 : [1, 1, 1, 1.15, 1.6, 2.4, 3.4][look] * (realm === 'garden' ? 1.4 : 1)) * this.quality.lod;
-    this.actors.setXray(!cine);
+    this.lodBias = [1, 1, 1, 1.15, 1.6, 2.4, 3.4][look] * (realm === 'garden' ? 1.4 : 1) * this.quality.lod;
 
     // Sun / moon with a shadow box around the view.
     const sdir = new THREE.Vector3(Math.cos(key.az) * Math.cos(key.elev), Math.sin(key.elev), Math.sin(key.az) * Math.cos(key.elev));
@@ -1642,15 +1536,14 @@ export class Renderer3D {
       this.sun.shadow.normalBias = texel * 1.2;
     }
 
-    const half = cine ? d * 0.75 : span * 0.75;
-    if (realm === 'city') this.terrain.update(cine ? Math.min(k.stage, 4) : k.stage, this.target.x, this.target.z, cine ? d * 1.1 : span, key.night, key.water, this.t);
+    const half = span * 0.75;
+    if (realm === 'city') this.terrain.update(k.stage, this.target.x, this.target.z, span, key.night, key.water, this.t);
     else this.realmLook.update(this.t, this.target.x, this.target.z, span);
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
-    this.updateHospitalMarks(k.stage, Boolean(cine));
-    this.updateSearchlights(cine);
+    this.updateHospitalMarks(k.stage);
     this.updateVaultMark(game);
     if (realm === 'city') this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Charge trail

@@ -1,5 +1,5 @@
 // Builds the release in dist/: the page, one minified game script, three.js, the stylesheet with
-// the fonts, all on relative paths, plus dist/kaiju-rampage.zip with index.html at its root, ready
+// the fonts, the title art, all on relative paths, plus dist/kaiju-rampage.zip with index.html at its root, ready
 // to upload to CrazyGames. Usage: npm run build
 import { build, transform } from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, readdirSync, statSync } from 'node:fs';
@@ -36,6 +36,10 @@ for (const f of readdirSync(join(root, 'vendor/fonts'))) {
   if (f.endsWith('.woff2')) copyFileSync(join(root, 'vendor/fonts', f), join(out, 'fonts', f));
   if (f.startsWith('OFL-')) copyFileSync(join(root, 'vendor/fonts', f), join(out, 'licenses', f));
 }
+
+// The title art (rendered by tools/title-art.mjs), on the same relative paths as in styles.css.
+mkdirSync(join(out, 'art'), { recursive: true });
+for (const f of readdirSync(join(root, 'art'))) if (f.endsWith('.jpg')) copyFileSync(join(root, 'art', f), join(out, 'art', f));
 
 // The page: marked as a release (no debug keys), pointing at the files above.
 const swap = (from, to) => {

@@ -163,10 +163,6 @@ export class Actors {
     this.scene.add(rig.root);
   }
 
-  setXray(on) {
-    if (this.kaiju) for (const g of this.kaiju.ghosts) g.visible = on;
-  }
-
   clear() {
     if (this.boss) {
       this.scene.remove(this.boss.root);

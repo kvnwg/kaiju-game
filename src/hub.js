@@ -1,4 +1,4 @@
-// The hub between runs: a cinematic title screen, then a Habby-style home with currencies on
+// The hub between runs: a painted title screen, then a Habby-style home with currencies on
 // top, a bottom bar (Shop, Gear, Battle, Kaiju, Mutations) and every meta-game screen: crates,
 // quests, the login calendar, the Rampage Pass, Patrol, the Lucky Wheel and the shop. There are
 // no real-money purchases: the shop runs on gems, scrap and rewarded ads, which play through the
@@ -123,6 +123,9 @@ export class Hub {
     this.rng = createRng(Date.now());
     app.insertAdjacentHTML('beforeend', `
       <div id="title" class="title-screen hidden">
+        <div class="title-art"></div>
+        <div class="title-glow"></div>
+        <div class="title-embers"></div>
         <div class="title-grade"></div>
         <div class="title-logo"><span class="t1">KAIJU</span><span class="t2">RAMPAGE</span></div>
         <div class="title-tap">Tap to begin</div>

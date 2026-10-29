@@ -7,7 +7,6 @@ import { KAIJU, STAGES, MAX_STAGE } from './config.js';
 import { Sfx, Music } from './audio.js';
 import { Hub } from './hub.js';
 import { Platform } from './platform.js';
-import { setupTitle, TITLE } from './title.js';
 import { frontPage } from './news.js';
 import { WarpOverlay } from './warp.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
@@ -78,7 +77,6 @@ let game = null;
 let paused = false;
 let lastSettings = { kaijuId: 'rex', chapter: 1, mode: 'normal' };
 let titleActive = false;
-let title = null; // the title shot's kaiju, kept in frame
 let runCtx = null;
 let hintUntil = 0;
 let movedFor = 0;
@@ -109,7 +107,6 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   persist();
   lastSettings = { kaijuId, chapter, mode };
   runCtx = { chapter, mode, kaijuId };
-  renderer.cinematic = null;
   titleActive = false;
   hub.hide();
   game = new Game({ kaijuId, difficulty: mode, firstRun, chapter, meta: loadout(save, kaijuId), seed: Number(params.get('seed')) || Date.now() });
@@ -134,7 +131,6 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
 
 // The hub, with the city (or the wreckage of the last run) behind it.
 function showHub(tab) {
-  renderer.cinematic = null;
   titleActive = false;
   warpFx.cancel();
   if (!game || game.state === 'playing' || game.state === 'dead' || game.state === 'picking') {
@@ -149,19 +145,13 @@ function showHub(tab) {
   if (loginReady(save, now()) && save.tutorialDone) hub.openLogin();
 }
 
-// The title: a fixed shot from among the towers, looking out across the skyline at a colossal
-// kaiju wrecking the city in the distance. The camera never follows it.
+// The title: a painted voxel scene of the city burning at sundown with the kaiju vast on the
+// horizon (art/, rendered by tools/title-art.mjs); nothing runs behind it.
 function showTitle() {
-  game = new Game({ seed: 11, kaijuId: 'rex' });
-  title = setupTitle(game);
-  renderer.startRun(game);
-  renderer.cinematic = title.view;
   titleActive = true;
   ui.show('hud', false);
   hub.showTitle(() => {
     titleActive = false;
-    title = null;
-    renderer.cinematic = null;
     if (!save.tutorialDone) startRun({ kaijuId: 'rex', firstRun: true });
     else showHub('battle');
   });
@@ -465,13 +455,6 @@ let last = performance.now();
 function frame(stamp) {
   const dt = Math.min(0.05, (stamp - last) / 1000);
   last = stamp;
-  if (game && renderer && titleActive) {
-    // The title's kaiju rampages in frame, out in the distance.
-    title.update(dt, renderer.w / renderer.h);
-    if (game.state === 'playing') game.update(dt);
-    game.kaiju.r = TITLE.r;
-    game.drainEvents();
-  }
   if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
     const playing = inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying;
@@ -500,8 +483,8 @@ function frame(stamp) {
         ui.hint('');
       }
     }
-    // Behind the hub, wreckage settles in slow motion; the title and a run play at full speed.
-    renderer.render(game, titleActive || (inRun && !paused && !newsUp) ? dt : dt * 0.25);
+    // Behind the hub, wreckage settles in slow motion; a run plays at full speed.
+    renderer.render(game, inRun && !paused && !newsUp ? dt : dt * 0.25);
     // The newspaper's photo is the frame just drawn, so it has to be taken straight after render.
     if (newsAt && stamp >= newsAt && inRun && !paused && (game.state === 'playing' || game.state === 'picking')) {
       newsAt = 0;
@@ -611,7 +594,7 @@ async function boot() {
     clearSave(store);
     location.reload();
   };
-  // `?play` skips straight into a run; otherwise the cinematic title comes first.
+  // `?play` skips straight into a run; otherwise the title comes first.
   if (params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', firstRun: true });
   else if (params.has('hub')) showHub('battle');
   else showTitle();
@@ -636,4 +619,4 @@ window.addEventListener('resize', () => {
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, get title() { return title; }, sfx, music, platform, startRun, showHub, save: () => save, persist, adPace: () => pace && paceReport(pace) };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, sfx, music, platform, startRun, showHub, save: () => save, persist, adPace: () => pace && paceReport(pace) };

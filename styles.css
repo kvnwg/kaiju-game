@@ -604,7 +604,9 @@ html, body {
   text-shadow: var(--outline);
   white-space: nowrap;
 }
-#loading { background: var(--bg); }
+/* Loading: the title art behind the logo while the city is built. */
+#loading { background: #140604 url(art/title-wide.jpg) center 55% / cover no-repeat; }
+#loading .loading-card { padding: 20px 28px; background: radial-gradient(ellipse at center, rgba(16, 4, 2, 0.72), transparent 75%); }
 .loading-card { text-align: center; }
 .loading-card .muted { font-size: 16px; animation: blink 1s steps(1) infinite; }
 .panel h3 + .segs { margin-top: 0; }
@@ -922,7 +924,22 @@ html, body {
 .title-screen::before, .title-screen::after { content: ''; position: absolute; left: 0; right: 0; height: 9vh; background: #000; }
 .title-screen::before { top: 0; }
 .title-screen::after { bottom: 0; }
-.title-grade { position: absolute; inset: 0; background: radial-gradient(ellipse at 70% 45%, transparent 35%, rgba(30, 14, 38, 0.55) 100%), linear-gradient(90deg, rgba(30, 14, 38, 0.55), transparent 55%); pointer-events: none; }
+/* The title art: the city burning at sundown, the kaiju vast on the horizon (art/, rendered by
+   tools/title-art.mjs), pushing in slowly, with embers rising and the fires flickering. */
+.title-screen { overflow: hidden; background: #140604; }
+.title-art { position: absolute; inset: 0; background: #140604 url(art/title-wide.jpg) center 55% / cover no-repeat; animation: titlePush 36s ease-in-out infinite alternate; }
+.title-glow { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 32% at 50% 88%, rgba(255, 110, 40, 0.3), transparent 70%); mix-blend-mode: screen; animation: titleFlicker 3.4s steps(6) infinite; pointer-events: none; }
+.title-embers::before, .title-embers::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(circle at 12% 30%, #ffcf6a 0 1.5px, transparent 2.5px), radial-gradient(circle at 47% 65%, #ff9a3c 0 1.5px, transparent 2.5px), radial-gradient(circle at 78% 12%, #ffd88a 0 1px, transparent 2px), radial-gradient(circle at 63% 88%, #ff7a2a 0 2px, transparent 3px), radial-gradient(circle at 28% 92%, #ffb04a 0 1px, transparent 2px);
+  background-size: 260px 300px; animation: embersNear 11s linear infinite; }
+.title-embers::after { background-size: 410px 470px; opacity: 0.6; animation-name: embersFar; animation-duration: 21s; }
+.title-grade { position: absolute; inset: 0; background: radial-gradient(ellipse at 60% 45%, transparent 40%, rgba(16, 4, 2, 0.6) 100%), linear-gradient(90deg, rgba(16, 4, 2, 0.62), transparent 55%); pointer-events: none; }
+@keyframes titlePush { from { transform: scale(1); } to { transform: scale(1.08) translateY(-1.5%); } }
+@keyframes titleFlicker { 0%, 100% { opacity: 0.7; } 20% { opacity: 1; } 40% { opacity: 0.55; } 60% { opacity: 0.9; } 80% { opacity: 0.65; } }
+@keyframes embersNear { from { background-position: 0 0; } to { background-position: 40px -300px; } }
+@keyframes embersFar { from { background-position: 0 0; } to { background-position: -60px -470px; } }
+@media (max-aspect-ratio: 1/1) { .title-art, #loading { background-image: url(art/title-tall.jpg); } }
+@media (prefers-reduced-motion: reduce) { .title-art, .title-glow, .title-embers::before, .title-embers::after { animation: none; } }
 .title-logo { position: relative; display: flex; flex-direction: column; font-family: var(--display); line-height: 1.05; text-transform: uppercase; animation: titleIn 1.6s ease-out both; }
 .title-logo .t1 { font-size: clamp(30px, 7vw, 76px); color: #fff4fb; text-shadow: 0 4px 0 var(--pink), 0 8px 0 var(--pink-dark), var(--outline-big), 4px 14px 0 rgba(42, 23, 54, 0.6); letter-spacing: 0.06em; }
 .title-logo .t2 { font-size: clamp(22px, 5vw, 54px); color: var(--lav); text-shadow: 0 4px 0 #8a5aa8, var(--outline-big), 4px 12px 0 rgba(42, 23, 54, 0.6); letter-spacing: 0.1em; margin-top: 6px; }
@@ -935,7 +952,7 @@ html, body {
 @media (max-aspect-ratio: 1/1) {
   .title-screen { justify-content: flex-start; padding-top: calc(9vh + 5vh); padding-bottom: calc(9vh + 7vh); }
   .title-tap { margin-top: auto; text-align: center; }
-  .title-grade { background: linear-gradient(rgba(30, 14, 38, 0.55), transparent 30%, transparent 70%, rgba(30, 14, 38, 0.5)); }
+  .title-grade { background: linear-gradient(rgba(16, 4, 2, 0.6), transparent 30%, transparent 70%, rgba(16, 4, 2, 0.55)); }
 }
 
 /* ---------- hub frame ---------- */
