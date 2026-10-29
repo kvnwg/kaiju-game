@@ -12,7 +12,7 @@ import { frontPage } from './news.js';
 import { setupIntro, introPhase, shrinkRadius } from './intro.js';
 import { WarpOverlay } from './warp.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
-import { paceState, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded, paceReport } from './adpacing.js';
+import { paceState, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded, paceReport, pressureDue, pressureStarted } from './adpacing.js';
 
 const canvas = document.getElementById('game');
 const input = new Input(canvas, document.getElementById('stick'));
@@ -30,6 +30,7 @@ platform.loadingStart();
 // boot(), once the platform is ready, from wherever the platform keeps it.
 let save = null;
 let pace = null; // ad pacing for this player (see adpacing.js)
+let pressureCheck = 0; // seconds to the next look at whether this run's ad-pressure surge is due
 let intro = null; // a new player's opening seconds as the full-grown kaiju (see intro.js): { t, phase }
 let settings = null;
 let store = null;
@@ -343,11 +344,11 @@ function handleEvents(events) {
         reviveAdOffered = hub.showRevive({
           free: game.freeRevives > 0, ad: game.reviveAvailable && offer.ad, gems: price, gift: game.reviveAvailable ? offer.gift : null, near: offer,
           onRevive: (how) => {
-            reviveTaken(pace, how);
+            reviveTaken(pace, how, { pressured: Boolean(game.pressure) });
             game.revive(how === 'gems');
           },
           onGiveUp: () => {
-            reviveTaken(pace, 'quit');
+            reviveTaken(pace, 'quit', { pressured: Boolean(game.pressure) });
             game.giveUp();
           },
         });
@@ -536,6 +537,16 @@ function frame(now) {
       if (v.x || v.y) movedFor += dt;
       game.update(dt);
       handleEvents(game.drainEvents());
+      // Ad pressure: once a run, when an ad revive could follow and the run nears the player's best
+      // (see AD_PRESSURE and adpacing.js). Never without ads, never on a first run.
+      if (pace && !game.firstRun && !game.pressureUsed && game.state === 'playing' && (pressureCheck -= dt) <= 0) {
+        pressureCheck = 0.5;
+        const adReady = platform.rewardedAds && game.reviveAvailable && game.freeRevives === 0;
+        if (pressureDue(pace, { damage: game.stats.damage, bestDamage: save.stats.bestDamage, adReady, now: now() }) && game.startPressure()) {
+          pressureStarted(pace);
+          persist();
+        }
+      }
       if (hintUntil && (now > hintUntil || movedFor > 3)) {
         hintUntil = 0;
         ui.hint('');

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect } from '../src/game.js';
-import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES } from '../src/config.js';
+import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, AD_PRESSURE } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { waterField } from '../src/world.js';
@@ -556,4 +556,39 @@ test('a first run starts with a rickety shed close to home and skips the Altar o
     assert.notEqual(g.state, 'altar');
   }
   assert.equal(k.stage, 2);
+});
+
+test('an ad-pressure surge hits harder and brings extra waves, once a run', () => {
+  const g = new Game({ seed: 4 });
+  g.addBiomass(STAGES[1].biomassToNext);
+  g.gateCleared[1] = true;
+  for (let i = 0; i < 300 && g.kaiju.stage < 2; i++) {
+    g.update(1 / 30);
+    if (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  const k = g.kaiju;
+  k.invuln = 0;
+  k.shield = 0;
+  k.hp = k.maxHp;
+  g.takeDamage(10);
+  const normal = k.maxHp - k.hp;
+  assert.ok(g.startPressure());
+  assert.equal(g.startPressure(), false, 'once a run');
+  k.hp = k.maxHp;
+  k.invuln = 0;
+  g.takeDamage(10);
+  assert.ok(Math.abs(k.maxHp - k.hp - normal * AD_PRESSURE.dmgMul) < 1e-6);
+  const before = g.units.length;
+  for (let i = 0; i < 30 * 8; i++) {
+    k.invuln = 99;
+    g.update(1 / 30);
+    if (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  assert.ok(g.units.length > before, 'extra strike waves');
+  for (let i = 0; i < 30 * AD_PRESSURE.duration; i++) {
+    k.invuln = 99;
+    g.update(1 / 30);
+    if (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  assert.equal(g.pressure, null, 'the surge ends');
 });

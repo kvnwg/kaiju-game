@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
-  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -196,6 +196,8 @@ export class Game {
     this.eventT = 75;
     this.eventsUsed = [];
     this.blackoutT = 0;
+    this.pressure = null; // an ad-pressure surge under way (see startPressure)
+    this.pressureUsed = false;
     this.vault = null;
     Object.assign(this.stats, { vaultGems: 0, vaults: 0, frenzies: 0, bigTopples: 0, objectiveDone: false });
     this.trainRespawn = 0;
@@ -1506,7 +1508,7 @@ export class Game {
     const k = this.kaiju;
     if (this.state !== 'playing' || k.invuln > 0) return;
     // The first session is tuned so almost everyone sees the boss go down.
-    let dmg = amount * this.diff.enemyDmg * (this.firstRun ? 0.8 : 1) * (this.meta.perks.graniteHide ? 0.88 : 1);
+    let dmg = amount * this.diff.enemyDmg * (this.firstRun ? 0.8 : 1) * (this.meta.perks.graniteHide ? 0.88 : 1) * (this.pressure ? AD_PRESSURE.dmgMul : 1);
     k.lastHitAt = this.time;
     if ((type === 'bullet' || type === 'shell') && this.has('thickHide')) dmg *= 1 - 0.08 * this.level('thickHide');
     if (k.shield > 0) {
@@ -1527,6 +1529,7 @@ export class Game {
   // Down, not out: the player can revive (free from Nine Lives, by ad, or for gems) or give up.
   die() {
     this.state = 'dead';
+    if (this.pressure) this.stats.pressureKnockdown = true;
     this.emit('dead', { free: this.freeRevives > 0, ad: this.reviveAvailable });
   }
 
@@ -2348,7 +2351,18 @@ export class Game {
   }
 
   // ---------------------------------------------------------------- military
+  // Ad pressure (see AD_PRESSURE): a surge of harder hits and extra strike waves. The caller decides
+  // when (main.js, from adpacing.js); it happens at most once a run.
+  startPressure() {
+    if (this.pressureUsed || this.state !== 'playing' || !this.inCity) return false;
+    this.pressureUsed = true;
+    this.pressure = { t: AD_PRESSURE.duration };
+    for (let i = 0; i < AD_PRESSURE.waves; i++) this.schedule(1 + i * 6, () => this.spawnWave());
+    return true;
+  }
+
   updateDirector(dt) {
+    if (this.pressure && (this.pressure.t -= dt) <= 0) this.pressure = null;
     const k = this.kaiju;
     const esc = ESCALATION[k.stage];
     const dir = this.director;

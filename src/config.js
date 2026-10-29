@@ -76,6 +76,13 @@ export const LANDMARK_HP = TIER_HP[6] * 8;
 // seconds as the full-grown kaiju (see intro.js).
 export const FIRST_RUN = { rickety: 160, sizeUpSlowmo: 1.8, intro: 9 };
 
+// Ad pressure: once per run, when a revive ad is ready and the run is closing in on the player's
+// best, the military surges for a while (harder hits, extra strike waves) so a knockdown, and with
+// it the ad-revive offer, becomes likely. Modelled on what was reported of Block Blast. Never for
+// players who can't watch ads, never in a player's first runs. When it fires is set per player by
+// an A/B arm (see adpacing.js); `enabled: false` switches it off everywhere.
+export const AD_PRESSURE = { enabled: true, minRuns: 3, duration: 25, dmgMul: 1.8, waves: 2 };
+
 // Size rules (design doc): below your size breaks in one hit; one size above takes
 // several hits and drops much more loot; landmarks only break at max size.
 export function canDamage(tier, stage, landmark = false) {

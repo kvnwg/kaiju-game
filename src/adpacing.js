@@ -10,6 +10,8 @@
 // this browser: CrazyGames' SDK has no channel for custom metrics, so comparing arms across players
 // needs a server of our own (see the ad-research report).
 
+import { AD_PRESSURE } from './config.js';
+
 const PACE_DAY = 86400000;
 
 // Pacing arms: minutes between ad breaks and minutes of play before the first one in a session.
@@ -18,6 +20,15 @@ export const PACE_ARMS = [
   { id: 'a', gapMin: 3, firstMin: 3 },
   { id: 'b', gapMin: 4, firstMin: 4 },
   { id: 'c', gapMin: 6, firstMin: 5 },
+];
+
+// Ad-pressure arms: how close to their best damage a player's run must get before the surge
+// (null: never, the control group). Block Blast's equivalent tested when its unwinnable hand could
+// appear, with a "never" arm to compare against.
+export const PRESSURE_ARMS = [
+  { id: 'never', near: null },
+  { id: 'near', near: 0.85 },
+  { id: 'past', near: 1 },
 ];
 
 export const PACE = {
@@ -51,6 +62,8 @@ export function paceState(save, now = Date.now(), arm = null) {
     };
   }
   const st = save.adPace;
+  if (!st.pressureArm) st.pressureArm = PRESSURE_ARMS[paceHash(`p${save.created || now}`) % PRESSURE_ARMS.length].id;
+  st.stats.pressure ||= { surges: 0, knockdowns: 0, adRevives: 0 };
   if (arm && PACE_ARMS.some((a) => a.id === arm)) st.arm = arm;
   return st;
 }
@@ -124,12 +137,33 @@ export function reviveOffer(st, { damage = 0, bestDamage = 0, now = Date.now() }
   return { gift, ad, near, damage, bestDamage };
 }
 
+export const pressureArmOf = (st) => PRESSURE_ARMS.find((a) => a.id === st.pressureArm) || PRESSURE_ARMS[0];
+
+// Whether this run should get its ad-pressure surge now: ads can be watched and an ad revive could
+// be offered, the player is past their first runs (and not on a welcome-back session or a losing
+// streak), and the run's damage has reached their arm's share of their best.
+export function pressureDue(st, { damage = 0, bestDamage = 0, adReady = false, now = Date.now() } = {}) {
+  const arm = pressureArmOf(st);
+  if (!AD_PRESSURE.enabled || arm.near === null || !adReady) return false;
+  if (st.runs < AD_PRESSURE.minRuns || st.welcome || st.rough >= PACE.rough) return false;
+  if (st.lastReviveAdAt && now - st.lastReviveAdAt < PACE.reviveGapMin * 60000) return false;
+  return bestDamage > 0 && damage >= bestDamage * arm.near;
+}
+
+export function pressureStarted(st) {
+  st.stats.pressure.surges++;
+}
+
 // An ad revive was actually offered (its button shown).
 export function markReviveAd(st, now = Date.now()) {
   st.lastReviveAdAt = now;
 }
 
-export function reviveTaken(st, how) {
+export function reviveTaken(st, how, { pressured = false } = {}) {
+  if (pressured) {
+    st.stats.pressure.knockdowns++;
+    if (how === 'ad') st.stats.pressure.adRevives++;
+  }
   if (how === 'gift') {
     st.giftUsed = true;
     st.stats.reviveGift++;
@@ -152,5 +186,6 @@ export function paceReport(st) {
     adBreaks: s.breaks, adBreaksPerRun: s.runs ? +(s.breaks / s.runs).toFixed(2) : 0, skipped: { ...s.skipped },
     revive: { offers: s.reviveOffers, ad: s.reviveAd, free: s.reviveGift, gems: s.reviveGems, declined: s.reviveDeclined },
     rewardedVideos: s.rewarded, cameBackNextDay: s.nextDay,
+    pressure: { arm: pressureArmOf(st).id, ...s.pressure },
   };
 }

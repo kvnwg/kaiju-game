@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PACE, PACE_ARMS, paceState, armOf, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded } from '../src/adpacing.js';
+import { PACE, PACE_ARMS, PRESSURE_ARMS, paceState, armOf, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded, pressureDue } from '../src/adpacing.js';
+import { AD_PRESSURE } from '../src/config.js';
 
 const MIN = 60000;
 const fresh = (arm = 'a', created = 1) => {
@@ -108,4 +109,29 @@ test('an ad revive is not offered on every knockdown: offers keep a gap', () => 
   markReviveAd(st, 10 * MIN);
   assert.equal(reviveOffer(st, { now: 12 * MIN }).ad, false);
   assert.equal(reviveOffer(st, { now: (10 + PACE.reviveGapMin) * MIN }).ad, true);
+});
+
+test('ad pressure: only with ads ready, past the first runs, near the best, per arm', () => {
+  const near = (arm) => {
+    const { st } = veteran();
+    st.pressureArm = arm;
+    return st;
+  };
+  const ok = { damage: 900, bestDamage: 1000, adReady: true, now: 100 * MIN };
+  assert.equal(pressureDue(near('near'), ok), AD_PRESSURE.enabled);
+  assert.equal(pressureDue(near('never'), ok), false, 'the control arm never gets it');
+  assert.equal(pressureDue(near('past'), ok), false, 'not yet past the best');
+  assert.equal(pressureDue(near('past'), { ...ok, damage: 1100 }), AD_PRESSURE.enabled);
+  assert.equal(pressureDue(near('near'), { ...ok, adReady: false }), false, 'never without an ad to offer');
+  assert.equal(pressureDue(near('near'), { ...ok, damage: 500 }), false, 'not far from the best');
+  assert.equal(pressureDue(near('near'), { ...ok, bestDamage: 0 }), false, 'no best yet');
+  const fresh1 = fresh().st;
+  fresh1.pressureArm = 'near';
+  assert.equal(pressureDue(fresh1, ok), false, 'not in the first runs');
+  const rough = near('near');
+  for (let i = 0; i < PACE.rough; i++) runEnded(rough, { won: false, runSec: 30 });
+  assert.equal(pressureDue(rough, ok), false, 'not on a losing streak');
+  const ids = new Set();
+  for (let c = 1; c < 200; c++) ids.add(paceState({ created: c * 7919 }, 0).pressureArm);
+  assert.deepEqual([...ids].sort(), PRESSURE_ARMS.map((a) => a.id).sort());
 });

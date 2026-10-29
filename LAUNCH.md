@@ -63,6 +63,7 @@ Between runs, upgrade your gear, unlock new kaiju and mutate your way to bigger 
 | Not too often / not pushed | Free gems: 10 a day, 3 minutes apart with a countdown on the button; no flashing promos |
 | Skip matches the ad button | Revive / Give up, Spin / Close, energy, patrol and results buttons are the same size and colour |
 | Out-of-lives ads | The ad revive is at most one offer per run and at least 5 minutes apart (not every knock-down), on a 10 s countdown; no ad break follows a knock-down that offered one. New players, players back after a break and players on a losing streak get one free revive a session instead |
+| Ad pressure (`AD_PRESSURE` in `src/config.js`) | Once a run, when an ad revive is ready and the run nears the player's best, enemies hit 1.8x harder for 25 s with two extra strike waves. Never without ads, never in a player's first 3 runs; one A/B arm in three never gets it. **Review risk:** CrazyGames bans ads that "trigger deceptively"; if QA questions it, set `enabled: false` and rebuild |
 | Ads off (Basic Launch) or ad blockers | Detected (`hasAdblock`, `adsDisabled`) and every rewarded button is hidden; the pass bonus and the wheel switch to small gem prices; the game plays normally |
 | No external ads, links, purchases or logins | None in the game |
 | No custom fullscreen button | None (CrazyGames provides fullscreen) |
