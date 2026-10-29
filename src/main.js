@@ -462,9 +462,9 @@ document.addEventListener('visibilitychange', () => {
 });
 
 let last = performance.now();
-function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+function frame(stamp) {
+  const dt = Math.min(0.05, (stamp - last) / 1000);
+  last = stamp;
   if (game && renderer && titleActive) {
     // The title's kaiju rampages in frame, out in the distance.
     title.update(dt, renderer.w / renderer.h);
@@ -495,7 +495,7 @@ function frame(now) {
           persist();
         }
       }
-      if (hintUntil && (now > hintUntil || movedFor > 3)) {
+      if (hintUntil && (stamp > hintUntil || movedFor > 3)) {
         hintUntil = 0;
         ui.hint('');
       }
@@ -503,7 +503,7 @@ function frame(now) {
     // Behind the hub, wreckage settles in slow motion; the title and a run play at full speed.
     renderer.render(game, titleActive || (inRun && !paused && !newsUp) ? dt : dt * 0.25);
     // The newspaper's photo is the frame just drawn, so it has to be taken straight after render.
-    if (newsAt && now >= newsAt && inRun && !paused && (game.state === 'playing' || game.state === 'picking')) {
+    if (newsAt && stamp >= newsAt && inRun && !paused && (game.state === 'playing' || game.state === 'picking')) {
       newsAt = 0;
       newsUp = true;
       const k = game.kaiju;
