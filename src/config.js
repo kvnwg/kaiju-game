@@ -24,7 +24,7 @@ export const FOV = 32; // the camera's vertical field of view, in degrees
 // comfortable range everywhere. Health, damage and biomass keep climbing.
 export const STAGES = [
   null,
-  { n: 1, name: 'Hatchling', size: 'Human', realm: 'city', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 45 },
+  { n: 1, name: 'Hatchling', size: 'Human', realm: 'city', radius: 2.5, maxHp: 100, damage: 5, speed: 26, biomassToNext: 18 },
   { n: 2, name: 'Prowler', size: 'Backyard', realm: 'city', radius: 6, maxHp: 200, damage: 20, speed: 52, biomassToNext: 1100 },
   { n: 3, name: 'Brute', size: 'House', realm: 'city', radius: 14, maxHp: 400, damage: 80, speed: 105, biomassToNext: 6500 },
   { n: 4, name: 'Titan', size: 'Apartment block', realm: 'city', radius: 30, maxHp: 800, damage: 320, speed: 190, biomassToNext: 25000 },
@@ -279,7 +279,7 @@ export const GATE_BOSSES = [
   null,
   {
     id: 'kilowatt', name: 'Agent Kilowatt', title: 'Cyborg hitman. Sent to "handle" you.',
-    r: 1.3, speed: 0.8, keep: 5, patterns: ['pistol', 'blink', 'pistol', 'mines'],
+    r: 1.3, speed: 0.8, keep: 5, hits: 0.5, patterns: ['pistol', 'blink', 'pistol', 'mines'],
     quips: { pistol: ['Nothing personal.', 'Hold still.', 'Bang. Bang. Bang.'], blink: ['Over here.', 'Too slow.'], mines: ["Here's my card.", 'Networking!'] },
     furious: 'Kilowatt has removed his sunglasses.', defeat: 'Agent Kilowatt has been... decommissioned.',
   },
