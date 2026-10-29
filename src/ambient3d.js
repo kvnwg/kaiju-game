@@ -98,12 +98,15 @@ export class Ambient {
           const len = Math.hypot(dx, dy) || 1;
           const px = -dy / len;
           const py = dx / len;
-          for (const off of [-3, 0, 3]) {
+          // Pole lines hang at 18.5; pylon lines (chain.wire) higher and wider apart.
+          const wh = chain.wire ? chain.wire.h : 18.5;
+          const wo = chain.wire ? chain.wire.off : 3;
+          for (const off of chain.wire ? [-wo, wo] : [-wo, 0, wo]) {
             for (let k = 0; k < sagSteps; k++) {
               for (const kk of [k, k + 1]) {
                 const t = kk / sagSteps;
-                const sag = Math.sin(t * Math.PI) * 3;
-                pts.push(a.x + dx * t + px * off, 18.5 - sag - (off === 0 ? 1 : 0), a.y + dy * t + py * off);
+                const sag = Math.sin(t * Math.PI) * (chain.wire ? 6 : 3);
+                pts.push(a.x + dx * t + px * off, wh - sag - (off === 0 ? 1 : 0), a.y + dy * t + py * off);
               }
             }
           }

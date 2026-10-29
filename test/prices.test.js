@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { objectPrice, vehiclePrice, unitPrice, shortMoney } from '../src/prices.js';
+import { CLUTTER_PROPS, CLUTTER_PRICE } from '../src/clutter.js';
 
 const near = (o) => ({ kind: 'building', style: 'suburb', tier: 3, height: 16, ...o });
 
@@ -22,6 +23,9 @@ test('things cost about what they would in real life', () => {
   assert.equal(shortMoney(204e6), '$204M');
   assert.equal(shortMoney(2.5e9), '$2.5B');
   assert.equal(shortMoney(15000), '$15K');
+  // Every bit of street clutter has its own sticker price: a cargo ship is worth more than an ATM.
+  for (const p of CLUTTER_PROPS) assert.ok(p.id in CLUTTER_PRICE, p.id);
+  assert.ok(objectPrice({ kind: 'prop', type: 'cargo_ship', tier: 3 }) > objectPrice({ kind: 'prop', type: 'atm', tier: 1 }));
 });
 
 test('the damage counter adds up what the kaiju destroys, and nothing for eating people', () => {

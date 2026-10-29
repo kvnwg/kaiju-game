@@ -445,6 +445,16 @@ export class Terrain {
             }
           }
           break;
+        case 'dirt':
+          // A building site's churned ground, with tyre ruts.
+          R(d.x, d.y, d.w, d.h, '#8a7052');
+          ctx.fillStyle = 'rgba(60,44,28,0.35)';
+          for (let q = 0; q < 5; q++) ctx.fillRect(d.x - d.w / 2 + 4, d.y - d.h / 2 + (q + 0.5) * (d.h / 5), d.w - 8, 1.2);
+          if (fine(1)) {
+            ctx.fillStyle = 'rgba(180,150,110,0.35)';
+            for (let q = 0; q < 50; q++) ctx.fillRect(d.x - d.w / 2 + cheap(q, d.x, 7) * d.w, d.y - d.h / 2 + cheap(q, d.y, 8) * d.h, 2, 2);
+          }
+          break;
         case 'sandbox':
           R(d.x, d.y, d.w + 4, d.h + 4, '#8a6a48');
           R(d.x, d.y, d.w, d.h, '#e0cc8e');

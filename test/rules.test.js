@@ -184,6 +184,25 @@ test('the city has the things a city has: civic buildings, parks, plazas, a metr
   for (let i = 1; i < xs.length; i++) assert.ok(Math.abs(xs[i] - xs[i - 1] - 40) < 1e-6 || xs[i] - xs[i - 1] > 400, 'continuous track');
 });
 
+test('blocks are full of small things to wreck, and the countryside of big ones', () => {
+  // Small, street-level props per block, by district: plenty to eat at the small sizes.
+  for (const st of ['suburb', 'neon', 'brick', 'garden']) {
+    const cs = chunks.filter((c) => c.zone.style === st);
+    const small = cs.reduce((n, c) => n + c.objects.filter((o) => o.kind === 'prop' && o.tier === 1).length, 0) / cs.length;
+    assert.ok(small >= 40, `${st}: ${small.toFixed(0)} small props a block`);
+  }
+  const types = new Set(city.objects.map((o) => o.type));
+  for (const t of ['trash_bags', 'wheelie_bin', 'hedge', 'pigeons', 'potted_plant', 'mailbox', 'clothesline', 'market_stall', 'billboard']) assert.ok(types.has(t), t);
+  // Nothing scattered in lands inside a building.
+  for (const ch of chunks) {
+    const blds = ch.objects.filter((o) => o.kind === 'building' && !o.walkable);
+    for (const o of ch.objects) {
+      if (o.kind !== 'prop' || !['potted_plant', 'trash_bags', 'pigeons', 'clothesline'].includes(o.type)) continue;
+      assert.ok(!blds.some((b) => Math.abs(o.x - b.x) < (b.w - o.w) / 2 && Math.abs(o.y - b.y) < (b.h - o.h) / 2), `${o.type} inside a building`);
+    }
+  }
+});
+
 test('every seed makes a different world, and the run always starts in the suburbs', () => {
   const sigs = new Set();
   for (const seed of [2, 9, 31]) {
