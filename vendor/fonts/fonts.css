@@ -35,3 +35,15 @@
   font-display: swap;
   src: url(unifraktur-maguntia.woff2) format('woff2');
 }
+/* Pixelify Sans draws its 5 like an S and its 2 like a Z, so numbers borrow Press Start 2P's
+   digits, scaled down to sit with Pixelify's letters. Used first in the body font stack; it
+   only has the digits, so everything else falls through to Pixelify Sans. */
+@font-face {
+  font-family: 'Kaiju Digits';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(press-start-2p.woff2) format('woff2');
+  unicode-range: U+0030-0039;
+  size-adjust: 66%;
+}

@@ -40,6 +40,9 @@ function codex(held) {
 }
 
 // A slot reel: the result on top, random augments below it; the strip rolls down to the result.
+// Card colours by kind: moves warm, passives cool, evolutions gold, bonuses green.
+const KIND_LOOK = { move: ['#ff8a9a', '#c8344a'], passive: ['#8ad4ff', '#2a74c8'], evolution: ['#ffe07a', '#c8901a'], filler: ['#9ee88a', '#3a9a3a'] };
+
 function reel(a, i) {
   const syms = Array.from({ length: 10 + i * 5 }, () => REEL_POOL[Math.floor(Math.random() * REEL_POOL.length)]);
   return `<div class="reel"><div class="strip">${icon(a)}${syms.map(icon).join('')}</div></div>`;
@@ -419,10 +422,12 @@ export class UI {
         const evoLine = !evo ? '' : a.kind === 'evolution' ? 'Evolution!' : st.ready ? `Unlocks ${evo.name}!` : st.done ? `Evolved: ${evo.name}` : `Evolves into ${evo.name}`;
         // An evolution doesn't roll like the others: it slams down into its slot (see spinReels).
         const slam = a.kind === 'evolution';
-        return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}${slam ? ' evo-slam' : ''}" data-id="${id}" style="--i:${i}">
+        const [kc, kc2] = KIND_LOOK[a.kind] || KIND_LOOK.filler;
+        return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}${slam ? ' evo-slam' : ''}" data-id="${id}" style="--i:${i};--kc:${kc};--kc2:${kc2}">
           ${slam ? '<span class="slam-ring"></span><span class="slam-sparks"></span><span class="slam-stamp">Evolution!</span>' : ''}
+          <span class="card-shine"></span>
           <div class="card-top"><span class="tier">${a.kind === 'filler' ? 'Bonus' : a.kind}</span><span class="cat">${tag}</span></div>
-          <div class="card-main">${slam ? `<div class="reel"><div class="strip">${icon(a)}</div></div>` : reel(a, i)}<div class="name">${a.name}</div></div>
+          <div class="card-main"><span class="medal"><span class="medal-rays"></span>${slam ? `<div class="reel"><div class="strip">${icon(a)}</div></div>` : reel(a, i)}</span><div class="name">${a.name}</div></div>
           <div class="text">${level ? levelText(id, level) : a.text}</div>
           ${pips}
           ${sets ? `<div class="sets">${sets}</div>` : ''}
@@ -431,9 +436,9 @@ export class UI {
       })
       .join('');
     const more = game.pendingPicks > 1 ? `+${game.pendingPicks - 1} queued` : '';
-    el.innerHTML = `<div class="panel pick-panel">
+    el.innerHTML = `<div class="pick-rays"></div><div class="panel pick-panel">
         <div class="pick-head">
-          <h2>Level ${p.level}!</h2>
+          <h2><span class="lvl-word">Level up!</span><small>Level ${p.level}</small></h2>
           <p><span class="tier-chip tier-silver">Moves ${movesHeld(game.held)}/${MOVE_SLOTS}</span><span class="tier-chip tier-gold">Passives ${passivesHeld(game.held)}/${PASSIVE_SLOTS}</span>${more}</p>
         </div>
         <div class="cards">${cards}</div>
@@ -445,7 +450,16 @@ export class UI {
       </div>`;
     const cardEls = [...el.querySelectorAll('.card')];
     const spin = this.spinReels(el, cardEls);
-    cardEls.forEach((c) => c.addEventListener('click', () => spin.canPick(c) && onChoose(c.dataset.id)));
+    // Picking: the chosen card swells and flashes while the others drop away, then the run resumes.
+    let chosen = false;
+    cardEls.forEach((c) => c.addEventListener('click', () => {
+      if (chosen || !spin.canPick(c)) return;
+      chosen = true;
+      el.querySelector('.pick-panel').classList.add('choosing');
+      c.classList.add('chosen');
+      if (this.sfx) this.sfx.ding(RARITY_OF_TIER[AUGMENT_BY_ID[c.dataset.id].tier] ?? 1);
+      setTimeout(() => onChoose(c.dataset.id), 420);
+    }));
     el.querySelector('#rerollFree').addEventListener('click', () => onReroll(false));
     if (ads) el.querySelector('#rerollAd').addEventListener('click', () => onReroll(true));
     this.show('pick');

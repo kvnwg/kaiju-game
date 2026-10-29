@@ -94,6 +94,23 @@ test('districts: suburbs, forest, water, docks and every city style turn up', ()
   for (const st of ['suburb', 'forest', 'neon', 'brick', 'pastel', 'garden', 'water', 'park']) assert.ok(styles.has(st), st);
 });
 
+test('the countryside: farms, desert towns, snowy villages, lantern streets and fairgrounds', () => {
+  const w = new World(7);
+  const found = {};
+  for (let r = -60; r < 60; r++) for (let c = -60; c < 60; c++) {
+    const z = w.zoneFor(c, r);
+    if (['farm', 'desert', 'snow', 'lantern', 'fair'].includes(z.style) && z.density > 0.3) found[z.style] ||= [c, r];
+  }
+  const expect = { farm: ['farmhouse', 'barn'], desert: ['adobe', 'saloon', 'motel', 'adobe_big'], snow: ['chalet', 'ski_lodge'], lantern: ['tea_house', 'shophouse', 'paifang', 'lantern_pagoda', 'pagoda'], fair: ['ferris_wheel', 'circus_tent', 'carousel', 'coaster'] };
+  for (const [st, types] of Object.entries(expect)) {
+    assert.ok(found[st], `no ${st} district`);
+    w.load(...found[st]);
+    const chunk = w.chunks.get(w.key(...found[st]));
+    const built = new Set(chunk.objects.filter((o) => o.kind === 'building').map((o) => o.type));
+    assert.ok(types.some((t) => built.has(t)), `${st}: ${[...built]}`);
+  }
+});
+
 test('no buildings stand in the water (bridges and piers aside)', () => {
   const wet = city.objects.filter((o) => o.kind === 'building' && !o.walkable && !o.type.startsWith('bridge') && o.type !== 'lighthouse' && city.isWater(o.x, o.y));
   assert.equal(wet.length, 0);

@@ -839,8 +839,51 @@ export const GATE_BOSS_MODELS = {
   },
 };
 
+// Recolours a grid's voxels in place: fn(colour, flags) -> [colour, flags].
+function recolor(g, fn) {
+  for (let i = 0; i < g.data.length; i++) {
+    const v = g.data[i];
+    if (!v) continue;
+    const [c, f] = fn(v & 0xffffff, v >>> 24, i);
+    g.data[i] = ((c || 0x010101) | (f << 24)) >>> 0;
+  }
+}
+
 // Gate bosses past the city: out in space, then in the back garden.
 Object.assign(GATE_BOSS_MODELS, {
+  // Nebulor: the other kaiju. Rex's build, grown up somewhere else: a starry violet hide, glowing
+  // crystal spines down its back, three horns and white-hot eyes.
+  nebulor() {
+    const m = rex();
+    const hide = [0x3a2a6a, 0x34245e, 0x2c1e52];
+    for (const p of m.parts) {
+      recolor(p.grid, (c, f, i) => {
+        if (c === 0xffe14a) return [0xfff0ff, E]; // eyes
+        if (c === 0xe8c64a) return [0x6ff0ff, E]; // back plates
+        if (c === 0xf6f2e6 || c === 0x111111) return [c, f]; // teeth, pupils
+        if (c === 0xd2e08f) return [0x8a6ad8, 0]; // belly
+        if (c === 0x2f6b2a) return [0x1a1030, 0]; // dark stripes
+        const h = hash3(i, 7, 3);
+        return h < 0.035 ? [0xfff2c8, E] : [hide[Math.floor(h * 3)], 0];
+      });
+    }
+    const horns = new VoxelGrid(5, 4, 7);
+    for (const z of [1, 3, 5]) {
+      horns.box(1, 0, z, 2, 2, z + 1, 0xd8c8ff);
+      horns.set(z === 3 ? 0 : 1, 2, z, 0xff8ae8, E);
+    }
+    horns.set(0, 3, 3, 0xff8ae8, E);
+    const spines = new VoxelGrid(10, 4, 3);
+    for (let x = 0; x < 10; x += 2) {
+      const h = 2 + (x % 4 === 0 ? 2 : 1);
+      spines.box(x, 0, 1, x + 1, h, 2, 0x6ff0ff, E);
+      spines.set(x, 0, 0, 0xb8f8ff, E);
+      spines.set(x, 0, 2, 0xb8f8ff, E);
+    }
+    m.parts.push(part('horns', horns, { x: 2, y: 0, z: 3.5 }, { x: 0, y: 3.5, z: 0 }, 'head'));
+    m.parts.push(part('spines', spines, { x: 5, y: 0, z: 1.5 }, { x: -1, y: 4.5, z: 0 }, 'body'));
+    return m;
+  },
   // Admiral Zorblax: a big-headed green alien admiral in a white uniform and a purple cape.
   zorblax() {
     const suit = 0xf2f2f6;
@@ -898,41 +941,6 @@ Object.assign(GATE_BOSS_MODELS, {
       if (!dish && d > 9 && hash3(x, y, z) < 0.04) g.set(x, y, z, 0xffe9a8, E);
     }
     return { radius: 10, height: 20, parts: [part('body', g, { x: 10, y: 0, z: 10 }, { x: 0, y: 2, z: 0 })] };
-  },
-  // The Cosmic Custodian: a starry purple janitor's coat, a mop and a bucket.
-  custodian() {
-    const robe = 0x4a2a8a;
-    const body = new VoxelGrid(5, 10, 6);
-    body.box(0, 0, 0, 5, 10, 6, (x, y, z) => (hash3(x, y, z) < 0.12 ? 0xfff2a8 : robe));
-    body.box(4, 6, 2, 5, 8, 4, 0xf2f2f6);
-    const head = new VoxelGrid(4, 5, 4);
-    head.box(0, 0, 0, 4, 4, 4, 0x8ae8ff);
-    head.box(3, 1, 0, 4, 2, 4, 0xffffff, E);
-    head.box(0, 4, 0, 4, 5, 4, 0x2a2a5a);
-    const leg = () => {
-      const g = new VoxelGrid(2, 4, 2);
-      g.box(0, 0, 0, 3, 4, 2, 0x2a1a4a);
-      return g;
-    };
-    const mop = new VoxelGrid(12, 4, 4);
-    mop.box(0, 1, 1, 3, 3, 3, robe);
-    mop.box(3, 1, 1, 10, 2, 2, 0xc8a06a);
-    mop.box(10, 0, 0, 12, 4, 4, (x, y, z) => ((x + y + z) % 2 ? 0xe8e8e0 : 0xc8c8c0));
-    const bucketArm = new VoxelGrid(6, 6, 4);
-    bucketArm.box(0, 4, 1, 3, 6, 3, robe);
-    bucketArm.box(2, 0, 0, 6, 4, 4, 0xffd23f);
-    bucketArm.box(3, 3, 1, 5, 4, 3, 0x6fe8ff, E);
-    return {
-      radius: 3.5, height: 22,
-      parts: [
-        part('body', body, { x: 2.5, y: 0, z: 3 }, { x: 0, y: 4, z: 0 }),
-        part('head', head, { x: 2, y: 0, z: 2 }, { x: 0, y: 10, z: 0 }, 'body'),
-        part('legL', leg(), { x: 1, y: 4, z: 1 }, { x: 0, y: 0, z: -1.5 }, 'body', { swing: 1 }),
-        part('legR', leg(), { x: 1, y: 4, z: 1 }, { x: 0, y: 0, z: 1.5 }, 'body', { swing: -1 }),
-        part('armL', bucketArm, { x: 1, y: 5, z: 2 }, { x: 0, y: 7, z: -4 }, 'body', { arm: 1 }),
-        part('armR', mop, { x: 1, y: 2, z: 2 }, { x: 0, y: 7, z: 4 }, 'body', { arm: -1 }),
-      ],
-    };
   },
   // The Ant Queen: a long red-black ant with a golden crown and folded wings.
   queen() {

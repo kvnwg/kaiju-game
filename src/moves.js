@@ -731,7 +731,7 @@ export class MoveSystem {
     near.sort((a, b) => b.w * b.h * b.height - a.w * a.h * a.height);
     if (!near.length) return false;
     this.anim('heave', 0.6);
-    const colors = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96 };
+    const colors = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96, farm: 0xb83a2a, desert: 0xd8a878, snow: 0x8a5a3a, lantern: 0xc8302a, fair: 0xff5a8a };
     for (let i = 0; i < s.count; i++) {
       const b = near[i % near.length];
       const t = targets[i % targets.length];

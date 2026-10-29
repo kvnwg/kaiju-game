@@ -6,6 +6,7 @@ import {
 } from './voxel.js';
 import { createRng } from './rng.js';
 import { REALM_BUILDINGS } from './realmtypes.js';
+import { BIOME_BUILDINGS } from './biomes.js';
 
 const WARM = [0xffd38a, 0xffc36b, 0xffe2a8, 0xffb35c];
 const COOL = [0xbfe6ff, 0xa8d8ff, 0xd8f0ff];
@@ -1174,7 +1175,7 @@ export const BUILDING_TYPES = [
   def('cathedral', 'Cathedral', 5, 'civic', ['pastel', 'brick', 'garden'], T3, sz([26, 30], [40, 46], [44, 52]), (g, r, d, P) => cathedral(g, r, d, P), { weight: 0.2 }),
   def('clock_tower', 'Clock tower', 4, 'civic', ['pastel', 'garden', 'brick'], T3, sz([10, 12], [10, 12], [36, 44]), (g, r, d, P) => clockTower(g, r, d, P), { weight: 0.2, square: true }),
   def('train_station', 'Train station', 5, 'civic', ['garden', 'brick', 'commercial'], T3, sz([40, 46], [24, 28], [14, 16]), (g, r, d, P) => trainStation(g, r, d, P), { weight: 0.12, unique: true }),
-  def('pagoda', 'Pagoda temple', 4, 'neon', ['neon', 'brick'], T3, sz([12, 14], [12, 14], [25, 25]), (g, r, d, P) => pagoda(g, r, d, P), { weight: 0.3, square: true }),
+  def('pagoda', 'Pagoda temple', 4, 'neon', ['neon', 'brick', 'lantern'], T3, sz([12, 14], [12, 14], [25, 25]), (g, r, d, P) => pagoda(g, r, d, P), { weight: 0.3, square: true }),
   def('theater', 'Theater', 4, 'neon', ['neon', 'garden'], T3, sz([22, 28], [24, 30], [14, 18]), (g, r, d, P) => { const b = block(g, r, d, { wall: r.pick([0x7a2a3a, 0x3a2a4a, 0x8a6a3a]), floorH: 6, win: { w: 2, h: 3, gap: 3, sill: 2, glass: 0x2a1a2a, lit: [0xffd38a], litChance: 0.7, arch: true }, shop: { sign: true, signLen: 14, signColors: [0xffd23f], glow: WARM }, neon: { verticalSign: true, colors: [0xffd23f, 0xff4d6d] }, clutter: { sparse: true } }); for (let x = b.x0; x < b.x1; x++) { g.set(x, 6, b.z1 + 1, x % 2 ? 0xfff2a8 : 0xffd23f, E); g.set(x, 7, b.z1 + 1, 0x7a2a3a); } }, { weight: 0.5 }),
 
   // ---- everyday commercial & housing
@@ -1201,6 +1202,8 @@ export const BUILDING_TYPES = [
   def('metro_track', 'Elevated metro track', 4, 'bridge', [], 2.5, sz([16, 16], [7, 7], [15, 15]), (g, r, d) => metroTrack(g, r, d), { weight: 0, walkable: true }),
   def('metro_station', 'Metro station', 4, 'bridge', [], 2.5, sz([16, 16], [7, 7], [15, 15]), (g, r, d) => metroStation(g, r, d), { weight: 0, walkable: true }),
   def('road_bridge', 'Road bridge', 3, 'bridge', [], T2, sz([24, 24], [24, 24], [4, 4]), (g, r, d) => roadBridge(g, r, d), { weight: 0, walkable: true }),
+  // Farms, desert towns, snowy villages, the lantern district and the fair (see biomes.js).
+  ...BIOME_BUILDINGS,
   // Past the city: planets, stars, galaxies, universes and the back garden (see realmtypes.js).
   ...REALM_BUILDINGS,
 ];

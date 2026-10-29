@@ -58,11 +58,11 @@ Between runs, upgrade your gear, unlock new kaiju and mutate your way to bigger 
 | Lands new players in gameplay within one click | One tap on the title starts the first run; no menus before it |
 | Progress saving | Everything is one save in the SDK's Data module (a few KB; the limit is 1 MB), read after `SDK.init()` |
 | muteAudio setting | Obeyed at start and on change; the in-game sound toggle can't override it |
-| Midgame ads | After a match ends, before the results; never during play; the SDK paces them |
+| Midgame ads | After a match ends, before the results; never during play. On top of the SDK's 3-minute cap, `src/adpacing.js` waits for 3–5 minutes of play before the first one (longer in a player's first session), skips very short runs, keeps 90 s of real play between breaks, and skips the first break for players back after 3+ days |
 | Rewarded ads | Labelled with a ▶ icon; the reward only after `adFinished`; a "try again later" message on failure; game muted and paused while an ad plays |
 | Not too often / not pushed | Free gems: 10 a day, 3 minutes apart with a countdown on the button; no flashing promos |
 | Skip matches the ad button | Revive / Give up, Spin / Close, energy, patrol and results buttons are the same size and colour |
-| Out-of-lives ads | The ad revive is one offer per run, on a 10 s countdown; no ad break follows a knock-down that offered one |
+| Out-of-lives ads | The ad revive is at most one offer per run and at least 5 minutes apart (not every knock-down), on a 10 s countdown; no ad break follows a knock-down that offered one. New players, players back after a break and players on a losing streak get one free revive a session instead |
 | Ads off (Basic Launch) or ad blockers | Detected (`hasAdblock`, `adsDisabled`) and every rewarded button is hidden; the pass bonus and the wheel switch to small gem prices; the game plays normally |
 | No external ads, links, purchases or logins | None in the game |
 | No custom fullscreen button | None (CrazyGames provides fullscreen) |
@@ -80,8 +80,8 @@ Between runs, upgrade your gear, unlock new kaiju and mutate your way to bigger 
   run badly on Safari).
 - A 4 GB Chromebook or an older phone: if late runs stutter, the game steps graphics down on its own,
   and the pause menu has Low graphics.
-- In the Developer Portal preview: an ad break after a run, a rewarded ad for gems, and the game with
-  an ad blocker on.
+- In the Developer Portal preview: an ad break after a run (after the first few minutes of play), a
+  rewarded ad for gems, and the game with an ad blocker on.
 - Signing in and out of a CrazyGames account: progress should follow the account.
 
 ## 6. Decisions for you

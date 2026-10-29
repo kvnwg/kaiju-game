@@ -16,7 +16,7 @@ import {
   patrolRate, claimPatrol, quickPatrol, adsLeft, adWait, adEnergy, adGems, buyEnergy, spinWheel, buyDeal, buySkin, notifications, canAfford,
 } from './meta.js';
 
-import { MONEY_NAMES, moneyScale } from './prices.js';
+import { MONEY_NAMES, moneyScale, shortMoney } from './prices.js';
 
 const hq = (root, sel) => root.querySelector(sel);
 // How each upgrade looks and reads: its colour pair, which stat it raises, how to word a total,
@@ -33,6 +33,8 @@ const MUT_LOOK = {
   revive: { c: '#ff8ad0', c2: '#c83a8a', key: 'revive', fmt: (v) => `${v} free revive a run`, pop: 'EXTRA LIFE!' },
 };
 const REVIVE_OFFER = 10; // seconds to take the ad revive
+// Why a revive is free this time (see adpacing.js).
+const GIFT_WHY = { new: 'New here? This one’s on the house.', welcome: 'Welcome back! This one’s on the house.', rough: 'Rough patch? This one’s on the house.' };
 export function hfmt(n) {
   n = Math.floor(n);
   if (n >= 1e15) {
@@ -638,6 +640,7 @@ export class Hub {
   // A rewarded ad for `placement`; `then` runs only once it has played to the end.
   watchAd(placement, then) {
     this.platform.showAd('rewarded').then((ok) => {
+      if (ok && this.onRewarded) this.onRewarded();
       if (ok) then();
       else if (!this.ads) this.toast('Video rewards aren’t available right now.');
       else this.toast('No ad available right now. Try again in a moment.');
@@ -962,14 +965,20 @@ export class Hub {
   // Down: free revive, ad revive, gem revive, or give up. The ad revive is a one-off offer
   // against a countdown (and "Give up" is just as big); when the countdown runs out, the run ends.
   // Returns whether an ad was offered.
-  showRevive({ free, ad, gems, onRevive, onGiveUp }) {
+  showRevive({ free, ad, gems, gift = null, near = null, onRevive, onGiveUp }) {
     const s = this.save;
-    const adOffer = ad && !free && this.ads;
-    this.openModal('revive', `<div class="panel small revive2"><h2>Knocked down!</h2><p class="muted">Get back up at half health with a shockwave.</p>
+    const giftOffer = Boolean(gift) && !free;
+    const adOffer = ad && !free && !giftOffer && this.ads;
+    // How close this run is to the player's best, when it's close: information, not pressure.
+    let close = '';
+    if (near && near.near >= 1) close = `<p class="rev-near best">New best: ${shortMoney(near.damage)} and counting!</p>`;
+    else if (near && near.near > 0) close = `<p class="rev-near">${Math.floor(near.near * 100)}% of your best (${shortMoney(near.damage)} of ${shortMoney(near.bestDamage)})</p>`;
+    this.openModal('revive', `<div class="panel small revive2"><h2>Knocked down!</h2><p class="muted">Get back up at half health with a shockwave.</p>${close}
       <div class="col">
         ${free ? '<button class="btn gold big" data-act="rev" data-how="free">Revive (Nine Lives)</button>' : ''}
+        ${giftOffer ? `<button class="btn gold big" data-act="rev" data-how="gift">Revive: free!</button><p class="tiny muted rev-why">${GIFT_WHY[gift] || ''}</p>` : ''}
         ${adOffer ? `<button class="btn primary big ad" data-act="rev" data-how="ad">Revive <span class="rev-count">${REVIVE_OFFER}</span></button>` : ''}
-        ${!free && !adOffer && gems ? `<button class="btn primary big" data-act="rev" data-how="gems" ${s.cur.gems >= gems ? '' : 'disabled'}>Revive ${ico('gem')}${gems}</button>` : ''}
+        ${!free && !giftOffer && !adOffer && gems ? `<button class="btn primary big" data-act="rev" data-how="gems" ${s.cur.gems >= gems ? '' : 'disabled'}>Revive ${ico('gem')}${gems}</button>` : ''}
         <button class="btn primary big" data-act="rev" data-how="quit">Give up</button>
       </div></div>`);
     this.revive = { onRevive, onGiveUp, gems };
@@ -1319,7 +1328,7 @@ export class Hub {
           r.onRevive('gems');
         } else {
           this.closeModal();
-          r.onRevive('free');
+          r.onRevive(d.how === 'gift' ? 'gift' : 'free');
         }
         break;
       }

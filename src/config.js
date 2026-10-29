@@ -322,10 +322,10 @@ export const GATE_BOSSES = [
     furious: "That's No Moon has stopped pretending to be a moon.", defeat: "That's No Moon is now no moon.",
   },
   {
-    id: 'custodian', name: 'The Cosmic Custodian', title: 'Janitor of the multiverse. Here to sweep you up.',
-    r: 1.3, speed: 0.75, keep: 3, hits: 0.85, hpMul: 25, chargeSpeed: 3.4, chargeDmg: 0.18, patterns: ['swing', 'scoops', 'charge', 'beams', 'swing', 'scoops'],
-    quips: { swing: ['Clean-up on aisle infinity.', 'Sweep, sweep!'], scoops: ['Soap bubbles!', 'Mind the wet floor.'], charge: ['Out of my way, mess!', 'Mop charge!'], beams: ['Caution: wet floor!', 'Sign incoming!'] },
-    furious: 'The Cosmic Custodian has gone into deep-clean mode.', defeat: 'The Cosmic Custodian has kicked the bucket.',
+    id: 'nebulor', name: 'Nebulor', title: 'The other kaiju. It got big first, and it wants its multiverse back.',
+    r: 1.4, speed: 0.85, keep: 3, hits: 0.85, hpMul: 25, chargeSpeed: 3.4, chargeDmg: 0.18, patterns: ['charge', 'taxLaser', 'swing', 'blimps', 'charge', 'taxLaser'],
+    quips: { charge: ['RAAAWR!', 'MINE!', 'Get your own multiverse!'], taxLaser: ['Star breath!', 'Taste the cosmos!'], swing: ['Tail sweep!', 'Out of my way, lizard!'], blimps: ['Meteor storm!', 'Raining worlds!'] },
+    furious: 'Nebulor is really, really angry now.', defeat: 'Nebulor has been eaten. There can be only one.',
   },
   {
     id: 'queen', name: 'The Ant Queen', title: 'Mother of millions. All of them angry.',

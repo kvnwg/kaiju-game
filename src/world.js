@@ -112,13 +112,32 @@ const mod = (a, n) => ((a % n) + n) % n;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // ---------------------------------------------------------------- world parameters
-const STYLE_ODDS = { neon: 0.2, brick: 0.2, garden: 0.18, pastel: 0.14, suburb: 0.2, none: 0.08 };
+// 'rural' becomes farmland, desert or a snowy village depending on the local climate.
+const STYLE_ODDS = { neon: 0.16, brick: 0.15, garden: 0.13, pastel: 0.11, suburb: 0.14, rural: 0.19, lantern: 0.07, fair: 0.03, none: 0.02 };
 const SITE = {
   neon: { r: [5, 6.5], peak: 1.15 },
   brick: { r: [4.2, 5.4], peak: 0.95 },
   garden: { r: [4.2, 5.6], peak: 0.85 },
   pastel: { r: [3.8, 5], peak: 0.72 },
   suburb: { r: [3.8, 5.2], peak: 0.5 },
+  farm: { r: [4.5, 6], peak: 0.55 },
+  desert: { r: [4, 5.5], peak: 0.55 },
+  snow: { r: [4, 5.5], peak: 0.5 },
+  lantern: { r: [3.5, 4.6], peak: 0.8 },
+  fair: { r: [1.2, 1.8], peak: 0.7 },
+};
+// Open country: no docks on its shore and no city parks in it.
+const OPEN_COUNTRY = new Set(['forest', 'suburb', 'docks', 'farm', 'desert', 'snow', 'fair']);
+// Parked vehicles along country roads, and what grows in the yards behind desert and lantern
+// street fronts.
+const TRAFFIC = {
+  farm: { pickup: 3, tractor: 2, car: 1, van: 0.5 },
+  desert: { pickup: 3, car: 2, truck: 0.6, van: 1 },
+  snow: { car: 2, pickup: 2, van: 1, hatchback: 1 },
+};
+const COURTYARD = {
+  desert: { cactus: 4, desert_rock: 2, tumbleweed: 1 },
+  lantern: { tree_blossom: 3, stone_lion: 1, lantern_post: 2, bench: 1, planter: 2 },
 };
 
 function makeParams(seed) {
@@ -188,6 +207,10 @@ function siteFor(I, J, p) {
     }
   }
   site = null;
+  if (style === 'rural') {
+    const heat = vnoise(I / 4, J / 4, p.s + 131);
+    style = heat > 0.64 ? 'desert' : heat < 0.34 ? 'snow' : 'farm';
+  }
   if (style !== 'none') {
     const def = SITE[style];
     site = { style, cx: (I + 0.15 + 0.7 * h(1)) * SR, cy: (J + 0.15 + 0.7 * h(2)) * SR, r: def.r[0] + (def.r[1] - def.r[0]) * h(3), peak: def.peak, nk: Math.floor(h(4) * 1000) };
@@ -229,12 +252,12 @@ function zoneFor(c, r, p = CUR) {
     for (const d of p.extra) consider(d);
     if (Math.abs(c) <= 1 && Math.abs(r) <= 1) best = { style: 'suburb', density: 0.5, district: p.extra[0] };
     // Waterfront blocks become docks.
-    if (urbanStyle(best.style) && best.style !== 'suburb' && ihash(c, r, s + 31) < 0.6) {
+    if (urbanStyle(best.style) && !OPEN_COUNTRY.has(best.style) && ihash(c, r, s + 31) < 0.6) {
       const wet = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => waterField(x + dc * cell, y + dr * cell, p) > 0);
       if (wet) best = { style: 'docks', density: 0.4, district: best.district };
     }
     // Parks: occasional green blocks inside the city.
-    if (best.style !== 'forest' && best.style !== 'suburb' && best.style !== 'docks' && ihash(c, r, s + 77) < 0.07) best = { style: 'park', density: 0.2, district: best.district };
+    if (!OPEN_COUNTRY.has(best.style) && ihash(c, r, s + 77) < 0.07) best = { style: 'park', density: 0.2, district: best.district };
   }
   z = { c, r, x: c * cell + road / 2, y: r * cell + road / 2, w: inner, h: inner, style: best.style, density: best.density, district: best.district };
   p.zones.set(key, z);
@@ -399,10 +422,11 @@ function generateChunk(world, c, r) {
       { has: Boolean(left), horiz: false, at: x - 8, out: -1 },
       { has: Boolean(right), horiz: false, at: x + w + 8, out: 1 },
     ];
-    const lampType = style === 'neon' ? 'neon_lamp' : 'lamppost';
+    const country = style === 'farm' || style === 'desert' || style === 'snow';
+    const lampType = style === 'neon' ? 'neon_lamp' : style === 'lantern' ? 'lantern_post' : 'lamppost';
     for (const e of edges) {
       if (!e.has) continue;
-      for (let t = 30; t < w; t += isUrban ? 70 : 140) {
+      for (let t = 30; t < w; t += isUrban && !country ? 70 : 140) {
         const px = e.horiz ? x + t : e.at;
         const py = e.horiz ? e.at : y + t;
         if (!water(px, py)) addProp(lampType, px, py, e.horiz ? (e.out > 0 ? 2 : 0) : e.out > 0 ? 1 : 3);
@@ -410,8 +434,8 @@ function generateChunk(world, c, r) {
       if (!isUrban) continue;
       const lane = e.at + e.out * 14;
       for (let t = 20; t < w - 20; t += rng.int(18, 40)) {
-        if (!rng.chance(style === 'brick' ? 0.45 : 0.35)) continue;
-        const id = rng.weighted({ car: 5, hatchback: 3, taxi: style === 'neon' ? 3 : 0.5, van: 2, pickup: style === 'suburb' ? 2 : 0.5, scooter: style === 'pastel' || style === 'neon' ? 2 : 0.3, bus: 0.2, truck: style === 'brick' ? 0.6 : 0.1 });
+        if (!rng.chance(style === 'brick' ? 0.45 : country ? 0.15 : 0.35)) continue;
+        const id = rng.weighted(TRAFFIC[style] || { car: 5, hatchback: 3, taxi: style === 'neon' ? 3 : 0.5, van: 2, pickup: style === 'suburb' ? 2 : 0.5, scooter: style === 'pastel' || style === 'neon' || style === 'lantern' ? 2 : 0.3, bus: 0.2, truck: style === 'brick' ? 0.6 : 0.1 });
         const px = e.horiz ? x + t : lane;
         const py = e.horiz ? lane : y + t;
         if (!water(px, py)) addProp(id, px, py, e.horiz ? (rng.chance(0.5) ? 0 : 2) : rng.chance(0.5) ? 1 : 3);
@@ -422,8 +446,13 @@ function generateChunk(world, c, r) {
         pastel: { bench: 2, planter: 3, food_cart: 1, tree_blossom: 2, palm: 2, flower_bed: 2, mailbox: 1, cafe_table: 3, bike_rack: 1, ice_cream_cart: 0.8, bollard: 1 },
         garden: { tree_round: 3, bench: 2, planter: 2, bus_stop: 1, hydrant: 1, trash_can: 1, newspaper_box: 1, cafe_table: 2, bike_rack: 1.5, planter_tree: 1.5, parking_meter: 1, newsstand: 0.5 },
         docks: { container: 3, crates: 2, drums: 2, barrier: 1 },
+        farm: { hay: 3, mailbox: 1, tree_round: 2, bush: 2, scarecrow: 0.6 },
+        desert: { cactus: 4, desert_rock: 2, tumbleweed: 2, mailbox: 0.5 },
+        snow: { tree_snow: 4, snowman: 2, mailbox: 1, bench: 0.5 },
+        lantern: { lantern_post: 3, stone_lion: 1, food_cart: 2, vending: 1, planter: 1, bike_rack: 1, tree_blossom: 1 },
+        fair: { balloon_cart: 3, food_cart: 2, ice_cream_cart: 2, bench: 2, trash_can: 1 },
       }[style] || { hydrant: 1, trash_can: 1, tree_round: 2, mailbox: 1, bench: 1 };
-      for (let t = 50; t < w - 20; t += rng.int(25, 55)) {
+      for (let t = 50; t < w - 20; t += country ? rng.int(45, 90) : rng.int(25, 55)) {
         const px = e.horiz ? x + t : e.at + rng.range(-3, 3);
         const py = e.horiz ? e.at + rng.range(-3, 3) : y + t;
         if (!water(px, py)) addProp(rng.weighted(furniture), px, py, e.horiz ? 0 : 1);
@@ -431,7 +460,7 @@ function generateChunk(world, c, r) {
     }
     if (isUrban && (style === 'neon' || style === 'garden' || style === 'brick') && top && left) addProp('traffic_light', x - 14, y - 14);
     if (isUrban && top && right) addProp('street_sign', x + w + 12, y - 12);
-    if (style === 'brick' || style === 'suburb') {
+    if (style === 'brick' || style === 'suburb' || style === 'farm' || style === 'desert') {
       for (const e of edges) {
         if (!e.has || !rng.chance(0.7)) continue;
         const chain = [];
@@ -446,7 +475,7 @@ function generateChunk(world, c, r) {
         if (chain.length > 1) powerLines.push(chain);
       }
     }
-    if (isUrban && top) for (let t = 70; t < w; t += 140) decals.push({ kind: 'manhole', x: x + t, y: y - 30 - 8 * (t % 2 ? 1 : -1), w: 6, h: 6 });
+    if (isUrban && !country && top) for (let t = 70; t < w; t += 140) decals.push({ kind: 'manhole', x: x + t, y: y - 30 - 8 * (t % 2 ? 1 : -1), w: 6, h: 6 });
   }
 
   function fillUrban() {
@@ -463,6 +492,10 @@ function generateChunk(world, c, r) {
       tier = density > 0.45 ? 4 : 3;
     } else if (style === 'docks') {
       zoneKeys = ['docks'];
+    } else if (style === 'lantern') {
+      tier = density > 0.62 ? 5 : density > 0.4 ? 4 : 3;
+    } else if (style === 'desert') {
+      tier = density > 0.5 ? 4 : 3;
     }
     packRect(x, y, w, w, style, zoneKeys, tier, 0);
   }
@@ -520,7 +553,7 @@ function generateChunk(world, c, r) {
       addBuilding(small.id, cx, cy, rng.chance(0.5) ? 0 : 2, small.variant);
       return;
     }
-    if (style === 'brick' || style === 'docks' || style === 'neon' || rng.chance(0.4)) {
+    if (style === 'brick' || style === 'docks' || style === 'neon' || (style !== 'desert' && rng.chance(0.4))) {
       if (style !== 'docks') decals.push({ kind: 'parking', x: cx, y: cy, w: cw, h: ch });
       for (let px = x0 + 8; px < x1 - 6; px += 9) {
         for (let py = y0 + 8; py < y1 - 6; py += 16) {
@@ -529,8 +562,9 @@ function generateChunk(world, c, r) {
       }
       return;
     }
+    const yard = COURTYARD[style] || { tree_round: 3, tree_blossom: style === 'pastel' ? 3 : 1, palm: style === 'pastel' ? 2 : 0, bench: 2, flower_bed: 2, planter: 2, picnic_table: 1 };
     for (let i = 0; i < Math.min(14, Math.floor((cw * ch) / 500)); i++) {
-      addProp(rng.weighted({ tree_round: 3, tree_blossom: style === 'pastel' ? 3 : 1, palm: style === 'pastel' ? 2 : 0, bench: 2, flower_bed: 2, planter: 2, picnic_table: 1 }), rng.range(x0 + 6, x1 - 6), rng.range(y0 + 6, y1 - 6), rng.int(0, 3));
+      addProp(rng.weighted(yard), rng.range(x0 + 6, x1 - 6), rng.range(y0 + 6, y1 - 6), rng.int(0, 3));
     }
   }
 
@@ -680,6 +714,152 @@ function generateChunk(world, c, r) {
     if (style === 'neon') for (let i = 0; i < 6; i++) addProp('neon_pole', cx + rng.range(-150, 150), cy + rng.range(-150, 150));
   }
 
+  // Farmland: a farmstead in one corner (house, barn, silos, a windmill or water tower), crop
+  // fields over the rest, sometimes a fenced pasture of cows.
+  function fillFarm() {
+    const { x, y, w } = zc;
+    const qx = rng.int(0, 1);
+    const qy = rng.int(0, 1);
+    const half = w / 2;
+    // The farmstead takes quadrant (qx, qy). The other half (top or bottom) is one big field; the
+    // quadrant beside the farmstead is a field or a pasture.
+    const far = { x: x + half, y: qy ? y + half * 0.5 : y + half * 1.5, w: w - 16, h: half - 16 };
+    const side = { x: qx ? x + half * 0.5 : x + half * 1.5, y: qy ? y + half * 1.5 : y + half * 0.5, w: half - 16, h: half - 16 };
+    const crop = () => ({ kind: 'crops', crop: rng.int(0, 3), along: rng.chance(0.5) });
+    decals.push({ ...crop(), x: far.x, y: far.y, w: far.w, h: far.h });
+    if (rng.chance(0.65)) addProp('scarecrow', far.x + rng.range(-60, 60), far.y + rng.range(-30, 30), rng.int(0, 3));
+    if (rng.chance(0.5)) addProp('tractor', far.x + rng.range(-120, 120), far.y + rng.range(-40, 40), rng.int(0, 3));
+    if (rng.chance(0.35)) {
+      // Pasture: fence all round, cows inside.
+      const fenceLen = propDims('fence').w;
+      const px0 = side.x - side.w / 2;
+      const py0 = side.y - side.h / 2;
+      for (let t = fenceLen / 2; t < side.w; t += fenceLen) {
+        addProp('fence', px0 + t, py0, 0);
+        addProp('fence', px0 + t, py0 + side.h, 0);
+      }
+      for (let t = fenceLen / 2; t < side.h; t += fenceLen) {
+        addProp('fence', px0, py0 + t, 1);
+        addProp('fence', px0 + side.w, py0 + t, 1);
+      }
+      for (let i = rng.int(3, 7); i > 0; i--) addProp('cow', side.x + rng.range(-side.w / 2 + 12, side.w / 2 - 12), side.y + rng.range(-side.h / 2 + 12, side.h / 2 - 12), rng.int(0, 3));
+      addProp('tree_round', side.x + rng.range(-40, 40), side.y + rng.range(-40, 40), rng.int(0, 3));
+    } else {
+      decals.push({ ...crop(), x: side.x, y: side.y, w: side.w, h: side.h });
+      for (let i = rng.int(2, 5); i > 0; i--) addProp('hay', side.x + rng.range(-side.w / 2 + 10, side.w / 2 - 10), side.y + rng.range(-side.h / 2 + 10, side.h / 2 - 10), rng.int(0, 3));
+    }
+    // The farmstead: buildings on a 3x3 grid of yard slots, the house nearest the corner road.
+    const yard = [qx ? 0 : 2, qy ? 0 : 2];
+    const slots = [];
+    for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) slots.push({ i, j, d: Math.abs(i - yard[0]) + Math.abs(j - yard[1]) });
+    slots.sort((a, b) => a.d - b.d || rng.next() - 0.5);
+    const list = ['farmhouse', 'barn', 'silo', rng.chance(0.5) ? 'windmill' : 'water_tower', rng.chance(0.6) ? 'silo' : 'greenhouse', rng.chance(0.4) ? 'greenhouse' : null];
+    const sx0 = qx ? x + half + 6 : x + 6;
+    const sy0 = qy ? y + half + 6 : y + 6;
+    const gap = (half - 12) / 3;
+    let k = 0;
+    for (const id of list) {
+      const slot = slots[k++];
+      if (!id || !slot) continue;
+      const cx = sx0 + gap * (slot.i + 0.5);
+      const cy = sy0 + gap * (slot.j + 0.5);
+      const variant = rng.int(0, VARIANTS - 1);
+      const d = dimsOf(id, variant);
+      const rot = id === 'farmhouse' ? (qy ? 0 : 2) : rng.chance(0.5) ? 0 : 2;
+      if (d.w > gap * 1.15 || d.h > gap * 1.15 || !footprintDry(cx, cy, d.w, d.h)) continue;
+      addBuilding(id, cx, cy, rot, variant);
+    }
+    for (const slot of slots.slice(k)) {
+      const cx = sx0 + gap * (slot.i + 0.5);
+      const cy = sy0 + gap * (slot.j + 0.5);
+      addProp(rng.weighted({ hay: 3, tractor: 1, tree_round: 2, pickup: 1, cow: 1 }), cx + rng.range(-12, 12), cy + rng.range(-12, 12), rng.int(0, 3));
+    }
+    // A windbreak of trees along the far edge.
+    for (let t = 16; t < w; t += rng.int(22, 40)) addProp(rng.chance(0.7) ? 'tree_round' : 'tree_pine', x + t, qy ? y + 6 : y + w - 6, rng.int(0, 3));
+  }
+
+  // A snowy alpine village: chalets on big lots under snow-laden pines, sometimes a frozen pond
+  // to skate on in the middle.
+  function fillSnow() {
+    const { x, y, w, density } = zc;
+    const lots = 3;
+    const lot = w / lots;
+    const rink = rng.chance(0.3);
+    for (let i = 0; i < lots; i++) {
+      for (let j = 0; j < lots; j++) {
+        const lx = x + i * lot;
+        const ly = y + j * lot;
+        if (rink && i === 1 && j === 1) {
+          decals.push({ kind: 'rink', x: lx + lot / 2, y: ly + lot / 2, w: lot - 24, h: lot - 40 });
+          for (let s = 0; s < 4; s++) addProp('snowman', lx + 14 + s * ((lot - 28) / 3), ly + 10, 0);
+          continue;
+        }
+        const rot = j === lots - 1 ? 0 : j === 0 ? 2 : i === 0 ? 3 : i === lots - 1 ? 1 : 0;
+        const pick = pickBuilding(['snow'], density > 0.4 && rng.chance(0.4) ? 4 : 3, lot * 0.6, lot * 0.5, rot);
+        if (pick) {
+          const d = dimsOf(pick.id, pick.variant);
+          const bw = rot % 2 ? d.h : d.w;
+          const bh = rot % 2 ? d.w : d.h;
+          const fx = rot === 1 ? 1 : rot === 3 ? -1 : 0;
+          const fy = rot === 0 ? 1 : rot === 2 ? -1 : 0;
+          const hx = lx + lot / 2 + fx * (lot / 2 - bw / 2 - 12);
+          const hy = ly + lot / 2 + fy * (lot / 2 - bh / 2 - 12);
+          if (footprintDry(hx, hy, bw, bh)) {
+            addBuilding(pick.id, hx, hy, rot, pick.variant);
+            if (rng.chance(0.5)) addProp(rng.pick(['car', 'pickup', 'van']), hx + (fx ? 0 : bw / 2 + 9), hy + (fy ? 0 : bh / 2 + 9), fx ? 0 : 1);
+            if (rng.chance(0.5)) addProp('snowman', hx - fx * (bw / 2 + 14) + rng.range(-10, 10), hy - fy * (bh / 2 + 14) + rng.range(-10, 10), rng.int(0, 3));
+          }
+        }
+        for (let t = rng.int(2, 4); t > 0; t--) {
+          const px = lx + rng.range(10, lot - 10);
+          const py = ly + rng.range(10, lot - 10);
+          if (Math.abs(px - lx - lot / 2) < 30 && Math.abs(py - ly - lot / 2) < 30) continue;
+          addProp('tree_snow', px, py, rng.int(0, 3));
+        }
+      }
+    }
+  }
+
+  // The fairground: paths crossing at a ticket plaza, a big ride in one corner (Ferris wheel,
+  // roller coaster or big top), a carousel, booths, carts and food trucks.
+  function fillFair() {
+    const { x, y, w } = zc;
+    const cx = x + w / 2;
+    const cy = y + w / 2;
+    decals.push({ kind: 'path', x: cx, y: cy, w, h: 16 });
+    decals.push({ kind: 'path', x: cx, y: cy, w: 16, h: w });
+    decals.push({ kind: 'plaza', x: cx, y: cy, w: 44, h: 44 });
+    addProp('ticket_booth', cx - 30, cy - 30, 0);
+    addProp('ticket_booth', cx + 30, cy + 30, 2);
+    const quads = rng.shuffle([[-1, -1], [1, -1], [-1, 1], [1, 1]]);
+    const q = (i) => ({ x: cx + quads[i][0] * w * 0.26, y: cy + quads[i][1] * w * 0.26 });
+    const big = rng.pick(['ferris_wheel', 'ferris_wheel', 'coaster', 'circus_tent']);
+    const second = big === 'circus_tent' ? rng.pick(['ferris_wheel', 'coaster']) : 'circus_tent';
+    for (const [i, id] of [[0, big], [1, second], [2, 'carousel']]) {
+      const at = q(i);
+      const d = dimsOf(id, 0);
+      if (footprintDry(at.x, at.y, d.w, d.h)) addBuilding(id, at.x, at.y, rng.chance(0.5) ? 0 : 2, 0);
+    }
+    const food = q(3);
+    for (let i = 0; i < 3; i++) addProp('food_truck', food.x - 44 + i * 44, food.y - 30, 0);
+    for (let i = 0; i < 6; i++) addProp('cafe_table', food.x - 36 + (i % 3) * 30, food.y + 6 + Math.floor(i / 3) * 18, 0);
+    addProp('ice_cream_cart', food.x + 50, food.y + 34, 0);
+    for (let t = 24; t < w - 20; t += 40) {
+      if (Math.abs(x + t - cx) > 30) {
+        addProp('lamppost', x + t, cy - 14, 0);
+        if (rng.chance(0.5)) addProp(rng.pick(['balloon_cart', 'food_cart', 'bench']), x + t + 14, cy + 14, 0);
+      }
+      if (Math.abs(y + t - cy) > 30) addProp('lamppost', cx + 14, y + t, 1);
+    }
+    for (let i = 0; i < 10; i++) {
+      const px = x + rng.range(10, w - 10);
+      const py = y + rng.range(10, w - 10);
+      if (Math.abs(px - cx) < 20 || Math.abs(py - cy) < 20) continue;
+      if ([0, 1, 2, 3].some((k) => Math.hypot(px - q(k).x, py - q(k).y) < 70)) continue;
+      addProp(rng.weighted({ balloon_cart: 2, tree_round: 2, bench: 1, trash_can: 1 }), px, py, rng.int(0, 3));
+    }
+  }
+
   function fillForest() {
     const { x, y, w } = zc;
     const clearing = rng.chance(0.18);
@@ -803,7 +983,10 @@ function generateChunk(world, c, r) {
     if (zc.style === 'forest') fillForest();
     else if (zc.style === 'park') fillPark();
     else if (zc.style === 'suburb') fillSuburb();
-    else if (zc.style !== 'docks' && zc.density > 0.45 && ihash(c, r, p.s + 91) < 0.07) fillPlaza();
+    else if (zc.style === 'farm') fillFarm();
+    else if (zc.style === 'snow') fillSnow();
+    else if (zc.style === 'fair') fillFair();
+    else if (zc.style !== 'docks' && zc.style !== 'desert' && zc.density > 0.45 && ihash(c, r, p.s + 91) < 0.07) fillPlaza();
     else fillUrban();
     beach();
     lighthouse();

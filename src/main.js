@@ -11,6 +11,7 @@ import { setupTitle, TITLE } from './title.js';
 import { frontPage } from './news.js';
 import { WarpOverlay } from './warp.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
+import { paceState, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded, paceReport } from './adpacing.js';
 
 const canvas = document.getElementById('game');
 const input = new Input(canvas, document.getElementById('stick'));
@@ -27,6 +28,7 @@ platform.loadingStart();
 // The save holds the whole meta game (currencies, gear, quests...); see meta.js. It is loaded in
 // boot(), once the platform is ready, from wherever the platform keeps it.
 let save = null;
+let pace = null; // ad pacing for this player (see adpacing.js)
 let settings = null;
 let store = null;
 let hub = null;
@@ -275,11 +277,22 @@ function handleEvents(events) {
       case 'dead': {
         const paid = game.revives - (game.reviveAvailable ? 0 : 1) - (game.meta.revives - game.freeRevives) || 0;
         const price = ECONOMY.reviveGems[Math.max(0, paid)] || null;
+        // A free revive instead of the ad one for players who look likely to drift away, and an
+        // honest word on how close the run is to their best (see adpacing.js).
+        const offer = reviveOffer(pace, { damage: game.stats.damage, bestDamage: save.stats.bestDamage, now: now() });
         reviveAdOffered = hub.showRevive({
-          free: game.freeRevives > 0, ad: game.reviveAvailable, gems: price,
-          onRevive: (how) => game.revive(how === 'gems'),
-          onGiveUp: () => game.giveUp(),
+          free: game.freeRevives > 0, ad: game.reviveAvailable && offer.ad, gems: price, gift: game.reviveAvailable ? offer.gift : null, near: offer,
+          onRevive: (how) => {
+            reviveTaken(pace, how);
+            game.revive(how === 'gems');
+          },
+          onGiveUp: () => {
+            reviveTaken(pace, 'quit');
+            game.giveUp();
+          },
         });
+        if (reviveAdOffered) markReviveAd(pace, now());
+        persist();
         break;
       }
       case 'revived':
@@ -323,10 +336,19 @@ function onRunEnd(results) {
     },
     onAgain: () => startRun(lastSettings),
   });
-  // An ad break after every match, then the results; but never straight after an ad revive was
-  // offered (one ad offer per break).
-  if (reviveAdOffered) show();
-  else platform.showAd('midgame').then(show);
+  // An ad break when one fits (see adpacing.js: enough play since the last one, not after a very
+  // short run, never straight after an ad revive was offered), then the results.
+  runEnded(pace, { won: results.won, runSec: results.time });
+  const brk = breakDecision(pace, { now: now(), runSec: results.time, reviveOffered: reviveAdOffered });
+  persist();
+  if (!brk.show) show();
+  else {
+    platform.showAd('midgame').then((ok) => {
+      if (ok) adShown(pace, 'midgame', now());
+      persist();
+      show();
+    });
+  }
 }
 
 // The augment pick, with the extra reroll behind a rewarded ad.
@@ -442,7 +464,9 @@ function frame(now) {
   }
   if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
-    platform.setPlaying(inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying);
+    const playing = inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying;
+    platform.setPlaying(playing);
+    if (playing && pace) tickPlay(pace, dt);
     if (inRun && !paused && !newsUp && !platform.adPlaying) {
       const v = input.get();
       const w = renderer.worldDir(v.x, v.y);
@@ -484,17 +508,22 @@ function frame(now) {
 }
 
 const preyArrow = document.getElementById('preyArrow');
+const preyArrowTip = preyArrow.querySelector('span');
+const preyArrowLabel = preyArrow.querySelector('b');
 function updatePreyArrow() {
-  // A golden vault outranks food: the arrow turns gold and points at it while it is off screen.
-  const vault = game.vault && game.vault.state === 'intact' ? game.vault : null;
-  const p = vault || game.prey;
+  // The boss outranks everything: run from it and a red arrow (with its distance) shows where it
+  // is. Then a golden vault, then the nearest thing worth eating.
   const k = game.kaiju;
+  const b = game.boss && !game.boss.dead ? game.boss : null;
+  const vault = !b && game.vault && game.vault.state === 'intact' ? game.vault : null;
+  const p = b || vault || (game.boss ? null : game.prey);
   const far = p && Math.hypot(p.x - k.x, p.y - k.y) > game.viewSpan() * 0.55;
-  if (!far || game.state !== 'playing' || game.boss) {
+  if (!far || game.state !== 'playing') {
     preyArrow.classList.add('hidden');
     return;
   }
   preyArrow.classList.toggle('gold', Boolean(vault));
+  preyArrow.classList.toggle('boss', Boolean(b));
   const s = renderer.project(p.x, p.y, 0);
   // Ride an ellipse between the HUD at the top and the augment bar at the bottom.
   const top = 140;
@@ -507,7 +536,12 @@ function updatePreyArrow() {
   const t = Math.min(rx / Math.abs(Math.cos(a) || 1e-6), ry / Math.abs(Math.sin(a) || 1e-6));
   preyArrow.classList.remove('hidden');
   // In the HUD's scaled space (see fitUi).
-  preyArrow.style.transform = `translate(${(cx + Math.cos(a) * t) / uiScale}px, ${(cy + Math.sin(a) * t) / uiScale}px) rotate(${a}rad)`;
+  preyArrow.style.transform = `translate(${(cx + Math.cos(a) * t) / uiScale}px, ${(cy + Math.sin(a) * t) / uiScale}px)`;
+  preyArrowTip.style.transform = `rotate(${a}rad)`;
+  if (b) {
+    const label = b.name.length > 16 ? 'BOSS' : b.name;
+    if (preyArrowLabel.textContent !== label) preyArrowLabel.textContent = label;
+  } else if (preyArrowLabel.textContent) preyArrowLabel.textContent = '';
 }
 
 async function boot() {
@@ -517,6 +551,8 @@ async function boot() {
   store = platform.storage;
   save = loadSave(store, now());
   rollover(save, now());
+  pace = paceState(save, now(), params.get('adarm'));
+  startSession(pace, now());
   settings = save.settings;
   sfx.setMuted(settings.sound === false);
   sfx.hold('platform', platform.muteAudio);
@@ -537,6 +573,7 @@ async function boot() {
   // The very first session drops straight into the suburbs as Rex: no login, no menus.
   hub = new Hub({ app: document.getElementById('app'), getSave: () => save, persist, onPlay: (opts) => startRun(opts), sfx, platform, getNow: now });
   hub.debug = debug;
+  hub.onRewarded = () => adShown(pace, 'rewarded', now());
   hub.onReset = () => {
     clearSave(store);
     location.reload();
@@ -566,4 +603,4 @@ window.addEventListener('resize', () => {
 setTimeout(boot, 30);
 
 // Exposed for automated smoke tests and balancing sessions.
-window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, get title() { return title; }, sfx, music, platform, startRun, showHub, save: () => save, persist };
+window.kaijuRampage = { get game() { return game; }, get renderer() { return renderer; }, get hub() { return hub; }, get title() { return title; }, sfx, music, platform, startRun, showHub, save: () => save, persist, adPace: () => pace && paceReport(pace) };

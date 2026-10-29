@@ -21,8 +21,13 @@ const LOD = [null,
   { upx: 6.5, ts: 4, grain: 10 },
 ];
 const GLOW_UPX = 6.5;
-const STYLE_COLOR = { forest: '#3a6232', park: '#5f9a44', suburb: '#6c9c4c', neon: '#34373f', brick: '#6e665e', garden: '#99968c', pastel: '#cdb79a', docks: '#7d7870', water: '#6c9a4c' };
-const SOFT = new Set(['forest', 'park', 'suburb', 'water']);
+const STYLE_COLOR = {
+  forest: '#3a6232', park: '#5f9a44', suburb: '#6c9c4c', neon: '#34373f', brick: '#6e665e', garden: '#99968c', pastel: '#cdb79a', docks: '#7d7870', water: '#6c9a4c',
+  farm: '#86a246', desert: '#dcc28c', snow: '#e8eef4', lantern: '#7a5e58', fair: '#8fb04a',
+};
+const SOFT = new Set(['forest', 'park', 'suburb', 'water', 'farm', 'desert', 'snow', 'fair']);
+// Crop fields: ground colour and row colour (wheat, cabbages, ploughed soil, sunflowers).
+const CROPS = [['#d8b84a', '#b8962e'], ['#4f8a3a', '#7cbc52'], ['#7a5a3a', '#5e4228'], ['#5f9a3a', '#ffd23f']];
 const POOL_NEON = [0xff2bd6, 0x22e6ff, 0x7b5cff, 0xffd23f];
 
 const pow2 = (v) => 2 ** Math.round(Math.log2(v));
@@ -226,7 +231,7 @@ export class Terrain {
           ctx.arc(X + cheap(z.c, z.r, q) * CELL, Y + cheap(z.r, q, z.c) * CELL, rr, 0, Math.PI * 2);
           ctx.fill();
         }
-        if (fine(0.8) && z.style !== 'forest') {
+        if (fine(0.8) && z.style !== 'forest' && z.style !== 'snow') {
           // Grass tufts: tiny darker and lighter specks.
           for (let q = 0; q < 900; q++) {
             ctx.fillStyle = q % 2 ? shadeHex(col, 0.82) : shadeHex(col, 1.16);
@@ -473,6 +478,22 @@ export class Terrain {
           ctx.beginPath();
           ctx.arc(d.x, d.y, 3, 0, Math.PI * 2);
           ctx.fill();
+          break;
+        case 'crops': {
+          const [ground, row] = CROPS[d.crop % CROPS.length];
+          R(d.x, d.y, d.w + 6, d.h + 6, '#6a5236');
+          R(d.x, d.y, d.w, d.h, ground);
+          ctx.fillStyle = row;
+          const gap = 6;
+          if (d.along) for (let yy = d.y - d.h / 2 + 2; yy < d.y + d.h / 2 - 1; yy += gap) ctx.fillRect(d.x - d.w / 2 + 2, yy, d.w - 4, 2);
+          else for (let xx = d.x - d.w / 2 + 2; xx < d.x + d.w / 2 - 1; xx += gap) ctx.fillRect(xx, d.y - d.h / 2 + 2, 2, d.h - 4);
+          break;
+        }
+        case 'rink':
+          R(d.x, d.y, d.w + 6, d.h + 6, '#f6fafe');
+          R(d.x, d.y, d.w, d.h, '#a8d4ec');
+          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          for (let q = 0; q < 14; q++) ctx.fillRect(d.x - d.w / 2 + cheap(q, d.x, 5) * d.w, d.y - d.h / 2 + cheap(q, d.y, 6) * d.h, 8 + cheap(q, 1, 2) * 14, 0.8);
           break;
         case 'towel':
           R(d.x, d.y, d.w, d.h, ['#d94f4f', '#3b6fd1', '#f2c12e', '#2f9e8f', '#d94f8a'][Math.abs(Math.floor(d.y)) % 5]);

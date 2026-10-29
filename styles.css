@@ -43,7 +43,7 @@
   --frame-btn: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%232a1736'/><rect x='1' y='1' width='1' height='1' fill='%232a1736'/><rect x='2' y='1' width='6' height='1' fill='rgba(255,255,255,0.42)'/><rect x='8' y='1' width='1' height='1' fill='%232a1736'/><rect x='0' y='2' width='1' height='1' fill='%232a1736'/><rect x='1' y='2' width='1' height='1' fill='rgba(255,255,255,0.42)'/><rect x='8' y='2' width='1' height='1' fill='rgba(255,255,255,0.42)'/><rect x='9' y='2' width='1' height='1' fill='%232a1736'/><rect x='0' y='3' width='1' height='1' fill='%232a1736'/><rect x='9' y='3' width='1' height='1' fill='%232a1736'/><rect x='0' y='4' width='1' height='1' fill='%232a1736'/><rect x='9' y='4' width='1' height='1' fill='%232a1736'/><rect x='0' y='5' width='1' height='1' fill='%232a1736'/><rect x='9' y='5' width='1' height='1' fill='%232a1736'/><rect x='0' y='6' width='1' height='1' fill='%232a1736'/><rect x='1' y='6' width='1' height='1' fill='rgba(42,23,54,0.22)'/><rect x='8' y='6' width='1' height='1' fill='rgba(42,23,54,0.22)'/><rect x='9' y='6' width='1' height='1' fill='%232a1736'/><rect x='0' y='7' width='1' height='1' fill='%232a1736'/><rect x='1' y='7' width='8' height='1' fill='rgba(42,23,54,0.22)'/><rect x='9' y='7' width='1' height='1' fill='%232a1736'/><rect x='1' y='8' width='8' height='1' fill='%232a1736'/><rect x='2' y='9' width='6' height='1' fill='%232a1736'/></svg>");
   /* frames:end */
   --display: 'Press Start 2P', 'Courier New', monospace;
-  --body: 'Pixelify Sans', 'Silkscreen', 'Courier New', monospace;
+  --body: 'Kaiju Digits', 'Pixelify Sans', 'Silkscreen', 'Courier New', monospace;
   --notch: polygon(0 var(--p), var(--p) var(--p), var(--p) 0, calc(100% - var(--p)) 0, calc(100% - var(--p)) var(--p), 100% var(--p), 100% calc(100% - var(--p)), calc(100% - var(--p)) calc(100% - var(--p)), calc(100% - var(--p)) 100%, var(--p) 100%, var(--p) calc(100% - var(--p)), 0 calc(100% - var(--p)));
   --outline: 1px 0 0 var(--ink), -1px 0 0 var(--ink), 0 1px 0 var(--ink), 0 -1px 0 var(--ink), 1px 1px 0 var(--ink), -1px 1px 0 var(--ink), 1px -1px 0 var(--ink), -1px -1px 0 var(--ink), 1px 2px 0 var(--ink);
   --outline-big: 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 2px 0 var(--ink), 0 -2px 0 var(--ink), 2px 2px 0 var(--ink), -2px 2px 0 var(--ink), 2px -2px 0 var(--ink), -2px -2px 0 var(--ink);
@@ -629,6 +629,10 @@ html, body {
   animation: pulse 0.8s steps(1) infinite;
 }
 #preyArrow.gold span { filter: sepia(1) saturate(5) hue-rotate(-12deg) brightness(1.15) drop-shadow(0 0 4px #ffd23f); }
+/* The boss arrow: red, bigger, and labelled with who it is. */
+#preyArrow.boss span { width: 44px; height: 44px; left: -22px; top: -22px; filter: hue-rotate(-95deg) saturate(3) brightness(1.1) drop-shadow(0 0 6px #ff3b3b); animation: pulse 0.5s steps(1) infinite; }
+#preyArrow b { position: absolute; left: 50%; top: 26px; transform: translateX(-50%); white-space: nowrap; font-family: var(--display); font-weight: 400; font-size: 8px; color: #ffd8d8; text-shadow: var(--outline); }
+#preyArrow b:empty { display: none; }
 
 /* ---------- augment icons (pixel art) ---------- */
 .ico-clawStrike { background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 9' shape-rendering='crispEdges'><rect x='2' y='0' width='1' height='1' fill='%232a1736'/><rect x='3' y='0' width='1' height='1' fill='%232a1736'/><rect x='4' y='0' width='1' height='1' fill='%232a1736'/><rect x='5' y='0' width='1' height='1' fill='%232a1736'/><rect x='6' y='0' width='1' height='1' fill='%232a1736'/><rect x='7' y='0' width='1' height='1' fill='%232a1736'/><rect x='8' y='0' width='1' height='1' fill='%232a1736'/><rect x='9' y='0' width='1' height='1' fill='%232a1736'/><rect x='10' y='0' width='1' height='1' fill='%232a1736'/><rect x='2' y='1' width='1' height='1' fill='%232a1736'/><rect x='3' y='1' width='1' height='1' fill='%23fff3c4'/><rect x='4' y='1' width='1' height='1' fill='%232a1736'/><rect x='5' y='1' width='1' height='1' fill='%232a1736'/><rect x='6' y='1' width='1' height='1' fill='%23fff3c4'/><rect x='7' y='1' width='1' height='1' fill='%232a1736'/><rect x='8' y='1' width='1' height='1' fill='%232a1736'/><rect x='9' y='1' width='1' height='1' fill='%23fff3c4'/><rect x='10' y='1' width='1' height='1' fill='%232a1736'/><rect x='1' y='2' width='1' height='1' fill='%232a1736'/><rect x='2' y='2' width='1' height='1' fill='%232a1736'/><rect x='3' y='2' width='1' height='1' fill='%23fff3c4'/><rect x='4' y='2' width='1' height='1' fill='%232a1736'/><rect x='5' y='2' width='1' height='1' fill='%232a1736'/><rect x='6' y='2' width='1' height='1' fill='%23fff3c4'/><rect x='7' y='2' width='1' height='1' fill='%232a1736'/><rect x='8' y='2' width='1' height='1' fill='%232a1736'/><rect x='9' y='2' width='1' height='1' fill='%23fff3c4'/><rect x='10' y='2' width='1' height='1' fill='%232a1736'/><rect x='1' y='3' width='1' height='1' fill='%232a1736'/><rect x='2' y='3' width='1' height='1' fill='%23fff3c4'/><rect x='3' y='3' width='1' height='1' fill='%232a1736'/><rect x='4' y='3' width='1' height='1' fill='%232a1736'/><rect x='5' y='3' width='1' height='1' fill='%23fff3c4'/><rect x='6' y='3' width='1' height='1' fill='%232a1736'/><rect x='7' y='3' width='1' height='1' fill='%232a1736'/><rect x='8' y='3' width='1' height='1' fill='%23fff3c4'/><rect x='9' y='3' width='1' height='1' fill='%232a1736'/><rect x='10' y='3' width='1' height='1' fill='%232a1736'/><rect x='1' y='4' width='1' height='1' fill='%232a1736'/><rect x='2' y='4' width='1' height='1' fill='%23fff3c4'/><rect x='3' y='4' width='1' height='1' fill='%232a1736'/><rect x='4' y='4' width='1' height='1' fill='%232a1736'/><rect x='5' y='4' width='1' height='1' fill='%23fff3c4'/><rect x='6' y='4' width='1' height='1' fill='%232a1736'/><rect x='7' y='4' width='1' height='1' fill='%232a1736'/><rect x='8' y='4' width='1' height='1' fill='%23fff3c4'/><rect x='9' y='4' width='1' height='1' fill='%232a1736'/><rect x='0' y='5' width='1' height='1' fill='%232a1736'/><rect x='1' y='5' width='1' height='1' fill='%232a1736'/><rect x='2' y='5' width='1' height='1' fill='%23fff3c4'/><rect x='3' y='5' width='1' height='1' fill='%232a1736'/><rect x='4' y='5' width='1' height='1' fill='%232a1736'/><rect x='5' y='5' width='1' height='1' fill='%23fff3c4'/><rect x='6' y='5' width='1' height='1' fill='%232a1736'/><rect x='7' y='5' width='1' height='1' fill='%232a1736'/><rect x='8' y='5' width='1' height='1' fill='%23fff3c4'/><rect x='9' y='5' width='1' height='1' fill='%232a1736'/><rect x='0' y='6' width='1' height='1' fill='%232a1736'/><rect x='1' y='6' width='1' height='1' fill='%23fff3c4'/><rect x='2' y='6' width='1' height='1' fill='%232a1736'/><rect x='3' y='6' width='1' height='1' fill='%232a1736'/><rect x='4' y='6' width='1' height='1' fill='%23fff3c4'/><rect x='5' y='6' width='1' height='1' fill='%232a1736'/><rect x='6' y='6' width='1' height='1' fill='%232a1736'/><rect x='7' y='6' width='1' height='1' fill='%23fff3c4'/><rect x='8' y='6' width='1' height='1' fill='%232a1736'/><rect x='9' y='6' width='1' height='1' fill='%232a1736'/><rect x='0' y='7' width='1' height='1' fill='%232a1736'/><rect x='1' y='7' width='1' height='1' fill='%23fff3c4'/><rect x='2' y='7' width='1' height='1' fill='%232a1736'/><rect x='3' y='7' width='1' height='1' fill='%232a1736'/><rect x='4' y='7' width='1' height='1' fill='%23fff3c4'/><rect x='5' y='7' width='1' height='1' fill='%232a1736'/><rect x='6' y='7' width='1' height='1' fill='%232a1736'/><rect x='7' y='7' width='1' height='1' fill='%23fff3c4'/><rect x='8' y='7' width='1' height='1' fill='%232a1736'/><rect x='0' y='8' width='1' height='1' fill='%232a1736'/><rect x='1' y='8' width='1' height='1' fill='%232a1736'/><rect x='2' y='8' width='1' height='1' fill='%232a1736'/><rect x='3' y='8' width='1' height='1' fill='%232a1736'/><rect x='4' y='8' width='1' height='1' fill='%232a1736'/><rect x='5' y='8' width='1' height='1' fill='%232a1736'/><rect x='6' y='8' width='1' height='1' fill='%232a1736'/><rect x='7' y='8' width='1' height='1' fill='%232a1736'/><rect x='8' y='8' width='1' height='1' fill='%232a1736'/></svg>"); --ic: #fff3c4; }
@@ -1624,3 +1628,106 @@ html, body {
   color: var(--text);
   text-shadow: none;
 }
+
+/* ---------- the augment pick: colourful cards, lots of motion ---------- */
+#pick { overflow: hidden; }
+.pick-rays {
+  position: absolute; left: 50%; top: 50%; width: 170vmax; height: 170vmax; margin: -85vmax 0 0 -85vmax; pointer-events: none; opacity: 0.55;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 216, 236, 0.16) 0deg 9deg, rgba(255, 216, 236, 0) 9deg 22deg);
+  animation: pickRays 18s linear infinite, pickRaysIn 0.5s steps(5) both;
+}
+@keyframes pickRays { to { transform: rotate(360deg); } }
+@keyframes pickRaysIn { from { opacity: 0; } }
+.pick-panel { position: relative; animation: pickPanelIn 0.42s steps(6) both; }
+@keyframes pickPanelIn { 0% { transform: scale(0.6) translateY(30px); opacity: 0; } 70% { transform: scale(1.04); opacity: 1; } 100% { transform: none; } }
+.pick-head h2 { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.pick-head h2 .lvl-word {
+  font-size: 24px; color: #fff4fb; text-transform: uppercase;
+  text-shadow: 0 3px 0 var(--pink), 0 6px 0 var(--pink-dark), var(--outline-big);
+  animation: lvlWord 0.6s steps(6) both, lvlGlow 1.6s steps(8) 0.6s infinite;
+}
+.pick-head h2 small { font-family: var(--display); font-size: 9px; letter-spacing: 0.1em; color: var(--lav); text-shadow: var(--outline); }
+@keyframes lvlWord { 0% { transform: scale(2.4) rotate(-8deg); opacity: 0; } 55% { transform: scale(0.9) rotate(2deg); opacity: 1; } 75% { transform: scale(1.08); } 100% { transform: none; } }
+@keyframes lvlGlow { 0%, 100% { filter: none; } 50% { filter: brightness(1.25) drop-shadow(0 0 6px #ffd8ec); } }
+
+.card {
+  --text: var(--ink-text); --muted: var(--ink-muted); --gold: #9a5a08; --growth: #2f8a3a; --outline: none;
+  color: var(--text); text-shadow: none; text-align: center; align-items: center;
+  background: var(--lav);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 85%, #fff4fb) 0%, color-mix(in srgb, var(--kc) 35%, var(--lav)) 42%, var(--lav) 100%);
+  transition: transform 0.15s steps(3), filter 0.15s steps(3);
+  animation: cardDeal 0.5s steps(7) both; animation-delay: calc(0.12s + var(--i, 0) * 0.1s);
+}
+@keyframes cardDeal {
+  0% { transform: translateY(120px) rotate(calc(-10deg + var(--i, 0) * 10deg)) scale(0.7); opacity: 0; }
+  60% { transform: translateY(-10px) rotate(calc(-2deg + var(--i, 0) * 2deg)) scale(1.04); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+.card.kind-move, .card.kind-passive, .card.kind-evolution, .card.kind-filler { background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 85%, #fff4fb) 0%, color-mix(in srgb, var(--kc) 35%, var(--lav)) 42%, var(--lav) 100%); }
+.card.kind-move .cat { color: var(--kc2); }
+.card:hover, .card:focus-visible, .card[class*='kind-']:hover { background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 95%, #fff4fb) 0%, color-mix(in srgb, var(--kc) 45%, var(--lav)) 42%, var(--lav) 100%); transform: translateY(-6px) rotate(calc(-1.5deg + var(--i, 0) * 1.5deg)); filter: drop-shadow(0 6px 0 rgba(42, 23, 54, 0.35)); }
+.card.landed:hover .medal { animation: medalSpin 0.5s steps(6); }
+.card-top { width: 100%; }
+.card .tier { padding: 3px 6px 2px; color: #fff4fb; background: var(--kc2); border: 2px solid var(--ink); }
+.card.tier-gold .tier { background: linear-gradient(90deg, #c8901a, #ffd23f, #c8901a); color: #3b2149; }
+.card.tier-prismatic .tier { background: linear-gradient(90deg, #ff6b9a, #ffd23f, #7dff5a, #5ff0ff, #c58bff); color: #2a1736; }
+.card .cat { padding: 3px 6px 2px; color: var(--kc2); background: rgba(255, 255, 255, 0.6); border: 2px solid var(--ink); }
+.card.upgrade .cat { color: #2f8a3a; }
+.card-main { flex-direction: column; gap: 6px; }
+.card .medal {
+  position: relative; display: grid; place-items: center; width: 70px; height: 70px;
+  background: radial-gradient(circle at 50% 38%, #fff4fb 0%, var(--kc) 55%, var(--kc2) 100%);
+  border: 3px solid var(--ink); border-radius: 50%; box-shadow: inset 0 -5px 0 rgba(42, 23, 54, 0.25), 0 4px 0 rgba(42, 23, 54, 0.35);
+}
+.card.landed .medal { animation: medalFloat 1.8s ease-in-out infinite; animation-delay: calc(var(--i, 0) * -0.4s); }
+@keyframes medalFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes medalSpin { 0% { transform: rotateY(0) scale(1); } 50% { transform: rotateY(180deg) scale(1.12); } 100% { transform: rotateY(360deg) scale(1); } }
+.card .medal-rays {
+  position: absolute; inset: -14px; border-radius: 50%; pointer-events: none; opacity: 0;
+  background: repeating-conic-gradient(var(--kc) 0deg 12deg, transparent 12deg 30deg);
+  -webkit-mask: radial-gradient(circle, transparent 52%, #000 54%, #000 68%, transparent 70%);
+  mask: radial-gradient(circle, transparent 52%, #000 54%, #000 68%, transparent 70%);
+}
+.card.landed .medal-rays { opacity: 0.9; animation: pickRays 6s linear infinite; }
+.card.tier-silver.landed .medal-rays { opacity: 0.45; }
+.card .reel { position: relative; z-index: 1; }
+.card .name { font-size: 12px; line-height: 1.35; }
+.card .text { font-size: 15px; }
+.card .sets { justify-content: center; }
+.card .recipe-wrap { width: 100%; background: rgba(255, 255, 255, 0.45); border-color: rgba(106, 58, 184, 0.45); }
+.card .recipe-name { color: #6a3ab8; }
+.card .recipe-wrap.ready .recipe-name { color: #3b2149; }
+.card .recipe .ing em { color: var(--ink-muted); }
+.card .recipe .ing.have em { color: #2f8a3a; }
+.card .recipe .aug-ico { filter: grayscale(1) brightness(0.8); }
+/* A shine sweeps across every card now and then, faster on the rare ones. */
+.card-shine { position: absolute; top: 0; bottom: 0; left: -60px; z-index: 2; width: 26px; pointer-events: none; background: rgba(255, 255, 255, 0.45); transform: skewX(-20deg); animation: shine 3.2s steps(14) infinite; animation-delay: calc(1s + var(--i, 0) * 0.35s); }
+.card.tier-gold .card-shine, .card.tier-prismatic .card-shine { animation-duration: 2s; }
+.card.tier-gold::after, .card.tier-prismatic::after { display: none; }
+.card.tier-gold.landed { box-shadow: 0 0 0 3px #ffd23f, 0 0 16px rgba(255, 210, 63, 0.55); }
+.card.tier-prismatic.landed { animation: prismGlow 1.2s steps(6) infinite; }
+@keyframes prismGlow {
+  0% { box-shadow: 0 0 0 3px #ff6b9a, 0 0 18px rgba(255, 107, 154, 0.6); } 25% { box-shadow: 0 0 0 3px #ffd23f, 0 0 18px rgba(255, 210, 63, 0.6); }
+  50% { box-shadow: 0 0 0 3px #7dff5a, 0 0 18px rgba(125, 255, 90, 0.6); } 75% { box-shadow: 0 0 0 3px #5ff0ff, 0 0 18px rgba(95, 240, 255, 0.6); }
+  100% { box-shadow: 0 0 0 3px #ff6b9a, 0 0 18px rgba(255, 107, 154, 0.6); }
+}
+.card.tier-prismatic { animation: cardDeal 0.5s steps(7) both; animation-delay: calc(0.12s + var(--i, 0) * 0.1s); }
+.card:not(.landed) { cursor: default; }
+/* Choosing: the pick swells and flashes, the rest fall away. */
+.pick-panel.choosing .card:not(.chosen) { animation: cardDrop 0.4s steps(6) forwards; pointer-events: none; }
+.pick-panel.choosing .card.chosen { animation: cardChosen 0.42s steps(6) forwards; z-index: 4; }
+@keyframes cardDrop { to { transform: translateY(80px) rotate(calc(-12deg + var(--i, 0) * 12deg)); opacity: 0; } }
+@keyframes cardChosen { 0% { transform: none; } 40% { transform: scale(1.14); filter: brightness(1.6); } 100% { transform: scale(1.08) translateY(-10px); filter: brightness(1.15); opacity: 0.9; } }
+@media (max-width: 640px) {
+  .card { flex-direction: row; flex-wrap: wrap; text-align: left; align-items: center; }
+  .card-main { flex-direction: row; gap: 10px; }
+  .card .medal { width: 52px; height: 52px; }
+  .card .sets { justify-content: flex-start; }
+  .card :is(.text, .pips, .sets, .recipe-wrap) { flex-basis: 100%; }
+  .pick-head h2 .lvl-word { font-size: 18px; }
+}
+
+/* the revive offer: how close the run is to the player's best */
+.rev-near { margin: 2px 0 8px; font-weight: 700; color: #ffd36b; }
+.rev-near.best { color: #7dff9a; }
+.rev-why { margin: -4px 0 4px; text-align: center; }

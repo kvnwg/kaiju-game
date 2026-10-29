@@ -11,6 +11,7 @@ const FLOOR_M = 3.5;
 // Building cost per square metre of floor, by district.
 const STYLE_RATE = {
   suburb: 2500, pastel: 3000, garden: 3200, brick: 2200, neon: 4500, civic: 4000, docks: 1500, forest: 1800, bridge: 9000,
+  farm: 1200, desert: 1600, snow: 3500, lantern: 3200, fair: 2000,
 };
 // Buildings that are worth more (or less) than their district.
 const TYPE_RATE = {
@@ -23,6 +24,9 @@ const TYPE_RATE = {
 const TYPE_PRICE = {
   road_bridge: 6e6, bridge_deck: 40e6, bridge_tower: 350e6, metro_track: 3e6, metro_station: 60e6, crane: 15e6,
   construction_site: 30e6,
+  // Farms and the fair.
+  silo: 400000, windmill: 1.2e6, water_tower: 900000, ferris_wheel: 30e6, coaster: 25e6, carousel: 1.5e6, circus_tent: 3e6,
+  paifang: 2e6,
   // Space.
   asteroid: 2e15, moon: 4e17, space_station: 1.5e11, comet: 1e14, planet_red: 1e18, planet_earth: 3e18, earth: 5e18, gas_giant: 8e18,
   planet_ice: 2e18, sun: 2e21, star_yellow: 1e21, star_red: 3e21, star_blue: 6e20, solar_system: 5e21, black_hole: 1e24,
@@ -45,6 +49,9 @@ const PROP_PRICE = {
   newsstand: 10000, palm: 5000, phone_booth: 6000, planter_tree: 3000, pool: 40000, power_pole: 8000, statue: 250000,
   swing_set: 2500, tent: 300, traffic_light: 25000, trampoline: 400, tree_autumn: 3000, tree_birch: 2500,
   tree_blossom: 3500, tree_pine: 2500, tree_pine_tall: 5000, tree_round: 3000, big_screen: 1.5e6, fountain: 300000,
+  // Desert, farm, snow, lantern and fair props.
+  cactus: 50, tumbleweed: 0, desert_rock: 100, snowman: 20, tree_snow: 2500, cow: 1800, scarecrow: 60, tractor: 120000,
+  lantern_post: 3000, stone_lion: 40000, ticket_booth: 12000, balloon_cart: 1500,
   // Vehicles, parked or driving.
   car: 28000, hatchback: 22000, taxi: 35000, van: 45000, pickup: 42000, bus: 450000, truck: 150000,
   // Space clutter.
@@ -66,8 +73,8 @@ const UNIT_PRICE = {
 // Size bosses: a cyborg, a suit of power armour, an armoured truck, a crane, and City Hall.
 const BOSS_PRICE = {
   kilowatt: 2e6, karen: 5e6, whippy: 3e6, bill: 25e6, mayor: 900e6,
-  // A flagship, a battle station, the multiverse's janitor; an ant colony and a lawnmower.
-  zorblax: 5e12, nomoon: 1e18, custodian: 1e20, queen: 250, mower: 350,
+  // A flagship, a battle station, a rival kaiju; an ant colony and a lawnmower.
+  zorblax: 5e12, nomoon: 1e18, nebulor: 1e22, queen: 250, mower: 350,
 };
 const FINAL_BOSS_PRICE = 5e9;
 

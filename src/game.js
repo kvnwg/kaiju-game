@@ -29,6 +29,8 @@ const CITY_EVENTS = {
   meteors: { name: 'Meteor shower!', sub: 'Dodge them: they wreck everything they hit', minStage: 3, maxStage: 6 },
 };
 
+// What a boss says when it leaps back after the kaiju ran off.
+const CHASE_LINES = ['You can\'t run!', 'Not so fast!', 'Found you!', 'Get back here!', 'Where do you think you\'re going?'];
 // Each loop back round to the start makes the military this much tougher (health, damage).
 const LOOP = { hp: 1.6, dmg: 1.4 };
 // How long the zoom-out from one realm to the next takes (seconds); the world swaps halfway.
@@ -3044,6 +3046,32 @@ export class Game {
         b.shield = false;
         b.next = 1;
       }
+      return;
+    }
+    // Run far enough away and a boss doesn't lose you: it leaps back into view (and the HUD's
+    // red arrow points at it in the meantime).
+    const span = this.viewSpan();
+    b.farT = dist > span * 1.05 ? (b.farT || 0) + dt : 0;
+    if (b.farT > 1.6) {
+      b.farT = 0;
+      this.fx.rings.push({ x: b.x, y: b.y, r0: b.r * 0.3, r1: b.r * 2.2, life: 0.4, max: 0.4, color: 0xff5a5a, width: b.r * 0.3 });
+      let land = null;
+      for (let i = 0; i < 8 && !land; i++) {
+        const a = Math.atan2(b.y - k.y, b.x - k.x) + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.6;
+        const x = k.x + Math.cos(a) * span * 0.55;
+        const y = k.y + Math.sin(a) * span * 0.55;
+        if (!isWater(x, y)) land = { x, y };
+      }
+      if (land) {
+        b.x = land.x;
+        b.y = land.y;
+      }
+      this.fx.rings.push({ x: b.x, y: b.y, r0: b.r * 2.2, r1: b.r * 0.4, life: 0.4, max: 0.4, color: 0xff5a5a, width: b.r * 0.3 });
+      this.fxEvent({ t: 'dustRing', x: b.x, y: b.y, r: b.r * 1.6 });
+      this.bossTrample(b);
+      this.shake = Math.max(this.shake, 0.5);
+      this.bossQuip(b, this.rng.pick(CHASE_LINES));
+      b.next = Math.max(b.next, 1.2);
       return;
     }
     const want = g ? b.r + k.r + g.keep * b.unit : b.r + k.r + 160;

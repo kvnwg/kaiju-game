@@ -58,7 +58,7 @@ const HEADLINES = {
   ],
   10: [
     ['GIANT MONSTER LANDS IN GARDEN. IS VERY SMALL', 'Tiny lizard claims to have "eaten the multiverse". Ant colony unconvinced'],
-    ['WHOLE MULTIVERSE "JUST A DEWDROP"', 'Cosmic janitor swept up. Creature falls out of a dewdrop onto a lawn, ant-sized and furious'],
+    ['WHOLE MULTIVERSE "JUST A DEWDROP"', 'Rival kaiju Nebulor eaten. Winner falls out of a dewdrop onto a lawn, ant-sized and furious'],
   ],
   11: [
     ['QUEEN DEPOSED', 'The colony mourns. Creature now the size of a mini shrub, and the shrubs know it'],
