@@ -152,6 +152,7 @@ let CUR = makeParams(1);
 // Signed distance-ish water field in world units: > 0 is water. Lakes, the occasional sea and
 // winding rivers; the land around the spawn point is always dry.
 export function waterField(x, y, p = CUR) {
+  if (p.dry) return -1; // the worlds past the city have no water (see realm.js)
   const s = p.s;
   const dx = x - p.spawn.x;
   const dy = y - p.spawn.y;
@@ -817,6 +818,8 @@ const roadKey = (x, y) => `${Math.round(x)},${Math.round(y)}`;
 export class World {
   constructor(seed = 1) {
     this.seed = seed;
+    this.realm = 'city';
+    this.cell = cell;
     this.p = makeParams(seed);
     CUR = this.p;
     this.spawn = { ...this.p.spawn };

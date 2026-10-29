@@ -7,6 +7,14 @@ import { MOVES, moveStats } from './augments.js';
 import { norm, distToRect, closestPoint, angleDiff, distToSegment } from './geom.js';
 
 const GHOST = 0xc58bff; // tint for Echo repeats
+// What Car Toss throws in each realm: cars in the city, junk and rocks in space, acorns in the garden.
+const THROWABLES = {
+  city: ['car', 'hatchback', 'taxi', 'van', 'pickup', 'bus'],
+  solar: ['rocklet', 'satellite', 'rocket', 'space_junk'],
+  galaxy: ['planetoid', 'ice_comet'],
+  cosmos: ['dwarf_galaxy', 'starlet', 'nebula_puff'],
+  garden: ['acorn', 'berry', 'bottle_cap', 'stone'],
+};
 
 export class MoveSystem {
   constructor(game) {
@@ -311,14 +319,14 @@ export class MoveSystem {
         const sx = k.x + Math.cos(a) * k.r * 2.4;
         const sy = k.y + Math.sin(a) * k.r * 2.4;
         g.fx.rings.push({ x: sx, y: sy, r0: k.r * 0.2, r1: k.r * 0.8, life: 0.4, max: 0.4, color: 0xff9a3c, width: k.r * 0.12 });
-        const model = g.rng.pick(['car', 'hatchback', 'taxi', 'van', 'pickup', 'bus']);
+        const model = g.rng.pick(THROWABLES[g.realm] || THROWABLES.city);
         g.schedule(0.35 + i * 0.07, () => this.throwCar(sx, sy, targets[i % targets.length], model, g.rng.int(0, 2), s.bounce, echo));
       }
       return true;
     }
     for (let i = 0; i < count; i++) {
       // Use a real car off the street when one is close, otherwise one appears from the rubble.
-      let model = g.rng.pick(['car', 'hatchback', 'taxi', 'van', 'pickup', 'bus']);
+      let model = g.rng.pick(THROWABLES[g.realm] || THROWABLES.city);
       let variant = g.rng.int(0, 2);
       const grab = g.traffic.find((c) => !c.dead && Math.hypot(c.x - k.x, c.y - k.y) < k.r * 5);
       if (grab) {

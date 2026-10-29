@@ -396,6 +396,7 @@ export class Sfx {
     else if (e.type === 'dash') this.dash();
     else if (e.type === 'perfect') this.perfect();
     else if (e.type === 'multikill') this.comboTier(Math.min(3, e.tier));
+    else if (e.type === 'warp') this.warp();
   }
 
   // A bell ding that climbs with rarity (0 common .. 5 mythic): crate reveals, augment reels.
@@ -425,6 +426,14 @@ export class Sfx {
   dash() {
     if (!this.ok('dash', 0.1)) return;
     this.noise({ dur: 0.22, vol: 0.28, f0: 3000, f1: 600, q: 1.2, type: 'bandpass' });
+  }
+
+  // Zooming out to the next realm: a long rising whoosh and a falling chime.
+  warp() {
+    if (!this.ok('warp', 1)) return;
+    this.noise({ dur: 2.4, vol: 0.22, f0: 300, f1: 5000, q: 1.5, type: 'bandpass', attack: 1.6 });
+    this.tone({ type: 'triangle', f0: 220, f1: 1760, dur: 2.4, vol: 0.12, attack: 1.2 });
+    [1760, 1320, 880, 660, 440].forEach((f, i) => this.tone({ type: 'square', f0: f, f1: f, dur: 0.18, vol: 0.05, delay: 2.5 + i * 0.12 }));
   }
 
   perfect() {
@@ -480,6 +489,34 @@ const SONGS = {
       'A5 . F5 . C6 . F5 . A5 . C6 . F6 . E6 .',
       'D6 . B5 . G5 . D6 . B5 . G5 . D5 . G5 .',
       'F#5 . A5 . B5 . D#6 . F#6 . . . - - - -',
+    ],
+  },
+  // Out in space: slow and floaty, half-time drums.
+  space: {
+    chords: [['D2', 'm'], ['A#1', ''], ['F2', ''], ['C2', ''], ['D2', 'm'], ['G2', 'm'], ['A#1', ''], ['A1', '']],
+    lead: [
+      'A5 . . . D6 . . . F6 . E6 . D6 . . .',
+      'D6 . . . C6 . A#5 . A5 . . . F5 . . .',
+      'A5 . . . C6 . . . F6 . . . E6 . C6 .',
+      'G5 . . . . . . . E5 . G5 . C6 . . .',
+      'D6 . F6 . A6 . F6 . D6 . A5 . F5 . A5 .',
+      'G5 . . . A#5 . D6 . G6 . F6 . D6 . . .',
+      'F6 . E6 . D6 . A#5 . F5 . A#5 . D6 . . .',
+      'C#6 . . . E6 . . . A5 . . . - - - -',
+    ],
+  },
+  // The back garden: a bouncy, sunny tune.
+  garden: {
+    chords: [['G2', ''], ['C3', ''], ['D3', ''], ['G2', ''], ['E2', 'm'], ['C3', ''], ['A2', 'm'], ['D3', '']],
+    lead: [
+      'D5 . G5 . B5 . G5 . D6 . B5 . G5 . . .',
+      'E5 . G5 . C6 . . . E6 . C6 . G5 . . .',
+      'F#5 . A5 . D6 . . . A5 . F#5 . D5 . . .',
+      'G5 . B5 . D6 . G6 . - . D6 . B5 . . .',
+      'E5 . . . G5 . B5 . E6 . . . B5 . G5 .',
+      'C6 . . . E6 . C6 . G5 . E5 . G5 . C6 .',
+      'A5 . C6 . E6 . C6 . A5 . E5 . A5 . C6 .',
+      'D6 . . . F#6 . . . A5 . . . - - - -',
     ],
   },
 };
@@ -586,39 +623,42 @@ export class Music {
     const sd = this.stepDur();
     const menu = theme === 'menu';
     const boss = theme === 'boss';
-    // Layers: the menu always has its tune (drums from level 1); a run builds from bass and
-    // drums, adds the arpeggios, then the melody; the boss theme has everything.
-    const drums = menu ? level >= 1 : level >= 1;
-    const arps = menu || boss || level >= 2;
-    const melody = menu || boss || level >= 3;
-    // Noise-channel drums.
+    const space = theme === 'space';
+    const garden = theme === 'garden';
+    // Layers: the menu, space and the garden always have their tunes; a city run builds from bass
+    // and drums, adds the arpeggios, then the melody; the boss theme has everything.
+    const tuneful = menu || boss || space || garden;
+    const drums = space ? level >= 2 : level >= 1;
+    const arps = tuneful || level >= 2;
+    const melody = tuneful || level >= 3;
+    // Noise-channel drums (half time out in space).
     if (drums) {
-      const heavy = boss || level >= 4;
-      const kicks = heavy ? [0, 3, 6, 8, 10, 11, 14] : menu ? [0, 8] : level >= 3 ? [0, 6, 8, 10] : [0, 8];
+      const heavy = boss || (!space && level >= 4);
+      const kicks = heavy ? [0, 3, 6, 8, 10, 11, 14] : space ? [0, 10] : menu || garden ? [0, 8] : level >= 3 ? [0, 6, 8, 10] : [0, 8];
       if (kicks.includes(s)) this.kick(t);
-      if (s === 4 || s === 12) this.snare(t, 0.22);
-      if (!menu && this.bar % 4 === 3 && level >= 2 && s >= 12) this.snare(t, 0.09 + (s - 12) * 0.04); // fill
-      if (menu ? s % 4 === 2 : level >= 2 || s % 2 === 0) this.hat(t, s % 4 === 2 ? 0.08 : 0.045);
-    } else if (menu && s % 4 === 2) this.hat(t, 0.04);
-    // Triangle bass: bouncing octaves, a gallop for the boss.
-    const pattern = boss ? [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15] : menu ? [0, 3, 6, 8, 11, 14] : [0, 2, 4, 6, 8, 10, 12, 14];
+      if (space ? s === 8 : s === 4 || s === 12) this.snare(t, space ? 0.16 : 0.22);
+      if (!menu && !space && this.bar % 4 === 3 && level >= 2 && s >= 12) this.snare(t, 0.09 + (s - 12) * 0.04); // fill
+      if (space ? s % 4 === 2 : menu || garden ? s % 4 === 2 : level >= 2 || s % 2 === 0) this.hat(t, s % 4 === 2 ? 0.08 : 0.045);
+    } else if ((menu || space) && s % 4 === 2) this.hat(t, 0.035);
+    // Triangle bass: bouncing octaves, a gallop for the boss, long low notes in space.
+    const pattern = boss ? [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15] : space ? [0, 6, 8, 14] : menu ? [0, 3, 6, 8, 11, 14] : garden ? [0, 4, 6, 8, 12, 14] : [0, 2, 4, 6, 8, 10, 12, 14];
     if (pattern.includes(s)) {
-      const up = boss ? s % 4 === 3 : s % 4 === 2 || (menu && s % 8 === 3);
-      this.bass(root + 12 + (up ? 12 : 0), t, sd * (boss ? 0.9 : 1.6));
+      const up = boss ? s % 4 === 3 : space ? s === 14 : garden ? s % 8 === 6 : s % 4 === 2 || (menu && s % 8 === 3);
+      this.bass(root + 12 + (up ? 12 : 0), t, sd * (boss ? 0.9 : space ? 3 : 1.6));
     }
     // Pulse 2: the chord as a fast arpeggio, the classic chip-tune "chord".
     if (arps && (boss || s % 2 === 0)) {
       const chord = [0, minor ? 3 : 4, 7].map((n) => root + 24 + n);
-      this.arp(chord, t, sd * (boss ? 1 : 2), boss ? 0.15 : 0.17);
+      this.arp(chord, t, sd * (boss ? 1 : 2), boss ? 0.15 : space ? 0.13 : 0.17);
     }
-    // Pulse 1: the melody.
+    // Pulse 1: the melody (rounder, on the 50% wave, out in space).
     if (melody) {
       const steps = song.steps[this.bar];
       const n = steps[s];
       if (n !== null && n > 0) {
         let len = 1;
         while (s + len < 16 && steps[s + len] === null) len++;
-        this.lead(n, t, sd * len, boss ? 0.125 : 0.25, menu ? 0.34 : 0.38);
+        this.lead(n, t, sd * len, boss || garden ? 0.125 : space ? 0.5 : 0.25, menu ? 0.34 : space ? 0.3 : 0.38);
       }
     }
   }

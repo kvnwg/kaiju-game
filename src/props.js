@@ -2,6 +2,7 @@
 // Each prop has a footprint in world units for collisions and a builder for its voxels.
 import { VoxelGrid, E, W, shade, hash3 } from './voxel.js';
 import { createRng } from './rng.js';
+import { REALM_PROPS } from './realmtypes.js';
 
 const CAR_COLORS = [0xd64545, 0x3f7fd1, 0xf0c33c, 0xe8e8e8, 0x3b3b3b, 0x5cb85c, 0xf08a3c, 0x7fb8c8, 0xb05a9a, 0xd8c8a8];
 
@@ -147,6 +148,9 @@ export const PROP_TYPES = [
   P('ice_cream_cart', { tier: 1, v: 0.8, size: [4, 5, 2], value: 0.2, build: (g) => { g.box(0, 1, 0, 4, 3, 2, 0xf2f2f2); g.box(0, 2, 0, 4, 3, 2, 0xf6c1d8); g.box(0, 4, 0, 4, 5, 2, (x) => (x % 2 ? 0xd94f8a : 0xffffff)); g.box(0, 3, 0, 1, 4, 1, 0xaaaaaa); g.set(1, 0, 0, 0x111111); g.set(3, 0, 1, 0x111111); }, weight: 0 }),
   P('metro_entrance', { tier: 2, v: 1, size: [6, 6, 8], value: 0.6, light: { color: 0x9fd8ff, h: 5 }, build: (g) => { g.box(0, 0, 0, 1, 3, 8, 0x55585e); g.box(5, 0, 0, 6, 3, 8, 0x55585e); for (let k = 0; k < 6; k++) g.box(1, 0, k, 5, 1, k + 1, 0x3a3d44); g.box(0, 3, 0, 6, 4, 8, 0x6a7a8a); g.box(1, 4, 6, 5, 6, 7, 0x2a5bd9); g.box(2, 4, 6, 4, 6, 7, 0xffffff, E); }, weight: 0 }),
 ];
+
+// Space clutter and the garden floor, past the city (see realmtypes.js).
+PROP_TYPES.push(...REALM_PROPS);
 
 export const PROP_BY_ID = Object.fromEntries(PROP_TYPES.map((p) => [p.id, p]));
 

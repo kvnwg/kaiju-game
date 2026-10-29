@@ -632,7 +632,8 @@ export function canStartRun(s, now = Date.now()) {
 // What a finished run pays. Lost runs still pay, and first-time milestones pay extra, so every
 // run moves the account forward.
 export function runRewards(s, results, { chapter = 1, mode = 'normal' } = {}, rng = createRng(Date.now())) {
-  const stage = results.stage || 1;
+  // Sizes past the city (and loops round) pay more, up to a point.
+  const stage = Math.min(16, results.peak || results.stage || 1);
   const won = Boolean(results.won);
   const loot = mode === 'nightmare' ? 2.2 : mode === 'hard' ? 1.5 : 1;
   const r = { scrap: 0, gems: 0, dna: {}, xp: 0, passXp: 0, items: [], geneCores: 0, keys: {}, notes: [] };
@@ -707,7 +708,7 @@ export function applyRun(s, results, ctx, rewards, { doubled = false } = {}, now
   if ((results.score || 0) > (s.best[key] || 0)) s.best[key] = results.score;
   trackQuests(s, {
     runs: 1, people: results.people || 0, buildings: results.buildings || 0, gateBosses: (results.gateKills || []).length,
-    clears: results.won ? 1 : 0, bosses: (results.gateKills || []).length + (results.won ? 1 : 0), apex: (results.stage || 1) >= 6 ? 1 : 0,
+    clears: results.won ? 1 : 0, bosses: (results.gateKills || []).length + (results.won ? 1 : 0), apex: (results.peak || results.stage || 1) >= 6 ? 1 : 0,
     damage: results.damage || 0,
   }, now);
   return out;

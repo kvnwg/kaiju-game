@@ -1,5 +1,6 @@
 import { STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, xpToNext } from './config.js';
 import { AUGMENTS, AUGMENT_BY_ID, EVOLUTIONS, evolutionFor, recipeState, setsFor, SYNERGY_SETS, levelText, maxLevel, movesHeld, passivesHeld, MOVE_SLOTS, PASSIVE_SLOTS } from './augments.js';
+import { MONEY_NAMES, moneyScale } from './prices.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -149,7 +150,7 @@ export class UI {
     el.innerHTML = `<div class="news-shake"><div class="news-fit"><div class="news-paper">
         <div class="np-stamp">Extra!</div>
         <div class="np-top"><span>${page.edition}</span><span>${page.city}</span><span>${page.price}</span></div>
-        <div class="np-mast">The Daily Stomp</div>
+        <div class="np-mast">${page.mast || 'The Daily Stomp'}</div>
         <div class="np-note">“${page.note}”</div>
         <div class="np-kicker">${page.size}</div>
         <h1 class="np-head">${page.headline}</h1>
@@ -212,12 +213,15 @@ export class UI {
     this.hpText.textContent = `${num(k.hp)}/${num(k.maxHp)}${k.shield > 1 ? ` +${num(k.shield)}` : ''}`;
     this.hpBar.classList.toggle('low', k.hp < k.maxHp * 0.3);
     const s = STAGES[k.stage];
-    const growth = k.stage >= MAX_STAGE ? 1 : Math.min(1, k.biomass / s.biomassToNext);
+    // The city's top size waits on the final boss, not on biomass: its bar just stays full.
+    const top = k.stage === MAX_STAGE;
+    const growth = top ? 1 : Math.min(1, k.biomass / s.biomassToNext);
     this.growthFill.style.width = `${growth * 100}%`;
-    this.growthText.textContent = `Size ${k.stage} · ${s.name}`;
-    const gated = k.stage < MAX_STAGE && growth >= 1 && !game.gateCleared[k.stage];
+    const sizeText = `${game.loop > 1 && !this.tiny.matches ? `Loop ${game.loop} · ` : ''}Size ${k.stage} · ${s.name}`;
+    if (this.growthText.textContent !== sizeText) this.growthText.textContent = sizeText;
+    const gated = !top && growth >= 1 && !game.gateCleared[k.stage];
     // At full size the full bar says it all (and "MAX" would crowd the size name on a phone).
-    this.growthPct.textContent = k.stage >= MAX_STAGE ? '' : gated ? 'BOSS' : `${Math.floor(growth * 100)}%`;
+    this.growthPct.textContent = top ? '' : gated ? 'BOSS' : `${Math.floor(growth * 100)}%`;
     this.stageNum.textContent = k.level;
     this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
     this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';
@@ -237,7 +241,10 @@ export class UI {
     if (mag >= 6 && mag > (this.lastMag || 0)) this.retrigger(this.scrapPill, 'billion');
     this.lastMag = mag;
     const shown = Math.floor(this.dmgShown);
-    this.scrapEl.textContent = shown >= 1e9 ? `$${(shown / 1e9).toFixed(3)}B` : `$${shown.toLocaleString('en-US')}`;
+    if (shown >= 1e9) {
+      const [v, i] = moneyScale(shown);
+      this.scrapEl.textContent = `$${v.toFixed(3)}${MONEY_NAMES[i][0]}`;
+    } else this.scrapEl.textContent = `$${shown.toLocaleString('en-US')}`;
     // Little pops when things go up: the growth bar glows, the coin pill bumps.
     if (k.biomass > this.lastBio + 1e-6) this.retrigger(this.growthEl, 'gain');
     this.lastBio = k.biomass;
@@ -283,6 +290,10 @@ export class UI {
 
     const sig = [...game.held.entries()].map(([id, l]) => `${id}${l}`).join(',');
     if (sig !== this.augSig) {
+      // A freshly earned evolution slams into the grid (not on the first draw of a run).
+      if (!this.augSig) this.knownAug = new Set(game.held.keys());
+      const fresh = [...game.held.keys()].filter((id) => !this.knownAug.has(id) && AUGMENT_BY_ID[id] && AUGMENT_BY_ID[id].kind === 'evolution');
+      for (const id of game.held.keys()) this.knownAug.add(id);
       this.augSig = sig;
       // Moves on top (with a cooldown meter), passives in a smaller row below.
       const tile = ([id, level]) => {
@@ -292,12 +303,21 @@ export class UI {
           const st = evo && !game.held.has(evo.id) ? recipeState(game.held, evo) : null;
           const hint = st ? `<i class="evo-hint aug-ico ico-${evo.passive}${st.passive ? ' have' : ''}"></i>` : '';
           const title = st ? `${a.name}: ${a.text}. Max it and hold ${AUGMENT_BY_ID[evo.passive].name} to evolve into ${evo.name}` : `${a.name}: ${a.text}`;
-          return `<div class="tile tier-${a.tier} kind-${a.kind}${st && st.ready ? ' evo-ready' : ''}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${title}">
+          return `<div class="tile tier-${a.tier} kind-${a.kind}${st && st.ready ? ' evo-ready' : ''}${fresh.includes(id) ? ' slam-in' : ''}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${title}">
             ${icon(a)}${hint}${a.kind === 'move' ? '<span class="cd"></span>' : ''}<b class="lvl${level >= maxLevel(a) ? ' max' : ''}">${level}</b></div>`;
       };
       const held = [...game.held.entries()].filter(([id]) => AUGMENT_BY_ID[id]);
       const row = (kind) => held.filter(([id]) => AUGMENT_BY_ID[id].kind === kind).map(tile).join('');
       this.augbar.innerHTML = `<div class="aug-row">${row('move')}${row('evolution')}</div><div class="aug-row">${row('passive')}</div>`;
+      if (fresh.length) {
+        this.augbar.classList.remove('slam-shake');
+        void this.augbar.offsetWidth;
+        this.augbar.classList.add('slam-shake');
+        setTimeout(() => {
+          if (this.sfx && this.sfx.ctx) this.sfx.slam();
+          this.flash(0.5);
+        }, 380);
+      }
       this.moveTiles = [...this.augbar.querySelectorAll('[data-move]')].map((el) => ({ el, id: el.dataset.move, cd: el.querySelector('.cd'), last: 1 }));
     }
     for (const t of this.moveTiles || []) {
@@ -397,9 +417,12 @@ export class UI {
         const evo = evolutionFor(id);
         const st = evo && recipeState(game.held, evo, id);
         const evoLine = !evo ? '' : a.kind === 'evolution' ? 'Evolution!' : st.ready ? `Unlocks ${evo.name}!` : st.done ? `Evolved: ${evo.name}` : `Evolves into ${evo.name}`;
-        return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}" data-id="${id}" style="--i:${i}">
+        // An evolution doesn't roll like the others: it slams down into its slot (see spinReels).
+        const slam = a.kind === 'evolution';
+        return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}${slam ? ' evo-slam' : ''}" data-id="${id}" style="--i:${i}">
+          ${slam ? '<span class="slam-ring"></span><span class="slam-sparks"></span><span class="slam-stamp">Evolution!</span>' : ''}
           <div class="card-top"><span class="tier">${a.kind === 'filler' ? 'Bonus' : a.kind}</span><span class="cat">${tag}</span></div>
-          <div class="card-main">${reel(a, i)}<div class="name">${a.name}</div></div>
+          <div class="card-main">${slam ? `<div class="reel"><div class="strip">${icon(a)}</div></div>` : reel(a, i)}<div class="name">${a.name}</div></div>
           <div class="text">${level ? levelText(id, level) : a.text}</div>
           ${pips}
           ${sets ? `<div class="sets">${sets}</div>` : ''}
@@ -450,6 +473,50 @@ export class UI {
         s.land(true);
         return s;
       }
+      if (card.classList.contains('evo-slam')) {
+        // The evolution card hangs high and huge for a beat, then slams into its slot: the panel
+        // shakes, a golden shockwave rings out and EVOLUTION! is stamped across it.
+        card.classList.add('spinning');
+        const panel = el.querySelector('.pick-panel');
+        const hit = () => {
+          if (s.slammed) return;
+          s.slammed = true;
+          card.classList.add('slammed');
+          if (panel) {
+            panel.classList.remove('slam-shake');
+            void panel.offsetWidth;
+            panel.classList.add('slam-shake');
+          }
+          if (sfx && sfx.ctx) {
+            sfx.slam();
+            sfx.ding(5);
+          }
+          this.flash(0.6);
+        };
+        const land = s.land;
+        s.land = (quiet) => {
+          hit();
+          land(true);
+        };
+        // The fall, then (on the animation's own clock, so the thump always matches the impact)
+        // the squash and bounce as it settles.
+        s.anim = card.animate([
+          { transform: 'translateY(-150%) scale(2.3) rotate(-12deg)', opacity: 0 },
+          { transform: 'translateY(-130%) scale(2.1) rotate(-9deg)', opacity: 1, offset: 0.38 },
+          { transform: 'translateY(-120%) scale(2) rotate(-8deg)', opacity: 1, offset: 0.7, easing: 'cubic-bezier(.7,0,1,.6)' },
+          { transform: 'translateY(4%) scale(1.06, 0.9) rotate(1deg)', opacity: 1 },
+        ], { duration: 900, delay: 250 + i * 120, fill: 'both' });
+        s.anim.onfinish = () => {
+          hit();
+          s.anim = card.animate([
+            { transform: 'translateY(4%) scale(1.06, 0.9) rotate(1deg)' },
+            { transform: 'translateY(-3%) scale(0.97, 1.04) rotate(0deg)', offset: 0.5 },
+            { transform: 'none' },
+          ], { duration: 260, fill: 'both' });
+          s.anim.onfinish = () => s.land(false);
+        };
+        return s;
+      }
       card.classList.add('spinning');
       s.anim = strip.animate([
         { transform: `translateY(${(-100 * s.n) / (s.n + 1)}%)`, easing: 'cubic-bezier(.2,.62,.35,1)' },
@@ -495,13 +562,14 @@ export class UI {
     return { canPick: (card) => card.classList.contains('landed') && performance.now() > guardUntil };
   }
 
-  showPause({ held = new Map(), quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit }) {
+  showPause({ held = new Map(), quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit, onCashOut = null }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
     el.innerHTML = `<div class="panel small">
         <h2>Paused</h2>
         <div class="col">
           <button class="btn primary" id="resume">Resume</button>
+          ${onCashOut ? '<button class="btn" id="cashout">Cash out (counts as a win)</button>' : ''}
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
         <details class="recipes-help"><summary>Evolution recipes</summary>${codex(held)}</details>
@@ -519,6 +587,7 @@ export class UI {
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);
+    if (onCashOut) el.querySelector('#cashout').addEventListener('click', onCashOut);
     el.querySelectorAll('#qualSegs .seg').forEach((b) => b.addEventListener('click', () => {
       onQuality(b.dataset.q);
       el.querySelectorAll('#qualSegs .seg').forEach((x) => x.classList.toggle('on', x === b));

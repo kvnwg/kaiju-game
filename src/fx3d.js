@@ -398,8 +398,15 @@ export class FX {
       d.life -= dt;
       if (d.life <= 0) continue;
       if (!d.settled) {
-        const g = 40 + d.size * 18;
+        // Out in space (zeroG) debris just drifts apart, slowing a little, and never lands.
+        const g = this.zeroG ? 0 : 40 + d.size * 18;
         d.vy -= g * dt;
+        if (this.zeroG) {
+          const drag = 1 - Math.min(0.5, dt * 0.5);
+          d.vx *= drag;
+          d.vy *= drag;
+          d.vz *= drag;
+        }
         d.x += d.vx * dt;
         d.y += d.vy * dt;
         d.z += d.vz * dt;
@@ -410,7 +417,7 @@ export class FX {
           d.q.multiply(q);
         }
         const floor = d.floor ?? 0;
-        if (d.y - d.sy * 0.4 < floor) {
+        if (!this.zeroG && d.y - d.sy * 0.4 < floor) {
           if (d.water) {
             d.life = Math.min(d.life, 0.6);
             d.vy *= 0.2;

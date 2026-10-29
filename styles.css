@@ -1478,6 +1478,122 @@ html, body {
   .np-stamp { top: 36px; }
 }
 
+/* ---------- an evolution slams in ---------- */
+.card.evo-slam { z-index: 3; }
+.card.evo-slam .slam-ring { position: absolute; left: 50%; top: 42%; z-index: 3; width: 18px; height: 18px; margin: -9px; border: 4px solid #ffd23f; border-radius: 50%; opacity: 0; pointer-events: none; }
+.card.slammed .slam-ring { animation: slamRing 0.6s steps(6) forwards; }
+@keyframes slamRing { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(14); } }
+.card.evo-slam .slam-sparks { position: absolute; left: 50%; top: 42%; z-index: 3; width: 5px; height: 5px; opacity: 0; pointer-events: none; color: #ffd23f;
+  box-shadow: 0 -34px 0 currentColor, 24px -24px 0 #fff4fb, 34px 0 0 currentColor, 24px 24px 0 #ff8ad0, 0 34px 0 currentColor, -24px 24px 0 #fff4fb, -34px 0 0 currentColor, -24px -24px 0 #ff8ad0, 12px -40px 0 #fff4fb, -40px 12px 0 currentColor, 40px -12px 0 #fff4fb, -12px 40px 0 currentColor; }
+.card.slammed .slam-sparks { animation: slamSparks 0.75s steps(7) forwards; }
+@keyframes slamSparks { from { opacity: 1; transform: scale(0.3); } to { opacity: 0; transform: scale(2.4); } }
+.slam-stamp { position: absolute; left: 50%; top: 40%; z-index: 4; padding: 5px 10px 3px; font-family: var(--display); font-size: 13px; color: #fff4fb; text-transform: uppercase; background: #d9362a; border: 3px solid var(--ink); box-shadow: 0 4px 0 rgba(42, 23, 54, 0.4); opacity: 0; pointer-events: none; transform: translate(-50%, -50%) rotate(-10deg); }
+.card.slammed .slam-stamp { animation: slamStamp 1.8s steps(9) forwards; }
+@keyframes slamStamp { 0% { opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(2.6); } 14% { opacity: 1; transform: translate(-50%, -50%) rotate(-10deg) scale(0.92); } 22% { transform: translate(-50%, -50%) rotate(-10deg) scale(1.05); } 78% { opacity: 1; transform: translate(-50%, -50%) rotate(-10deg) scale(1); } 100% { opacity: 0; transform: translate(-50%, -90%) rotate(-10deg) scale(1); } }
+.card.evo-slam.landed { box-shadow: 0 0 0 3px #ffd23f, 0 0 24px rgba(255, 210, 63, 0.7); }
+.card.evo-slam.landed .aug-ico { animation: evoBob 0.9s steps(3) infinite alternate; }
+@keyframes evoBob { from { transform: translateY(0) scale(1); } to { transform: translateY(-3px) scale(1.12); } }
+.pick-panel.slam-shake, #augbar.slam-shake { animation: slamShake 0.48s steps(9); }
+@keyframes slamShake { 10% { transform: translate(-9px, 6px); } 22% { transform: translate(8px, -7px); } 34% { transform: translate(-6px, 4px); } 46% { transform: translate(5px, -3px); } 60% { transform: translate(-3px, 2px); } 76% { transform: translate(2px, -1px); } 100% { transform: none; } }
+/* ...and lands in the move grid the same way. */
+.tile.slam-in { z-index: 5; animation: tileSlam 0.75s steps(8) both; }
+@keyframes tileSlam {
+  0% { opacity: 0; transform: translateY(-160px) scale(3.6) rotate(-18deg); }
+  35% { opacity: 1; transform: translateY(-130px) scale(3.2) rotate(-14deg); }
+  52% { transform: translateY(6px) scale(1.25, 0.8); filter: brightness(2.2); }
+  68% { transform: translateY(-4px) scale(0.92, 1.1); }
+  84% { transform: translateY(0) scale(1.08); }
+  100% { transform: none; }
+}
+
+/* ---------- upgrades (the Mutations tab) ---------- */
+.ic-lock { background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='12' viewBox='0 0 10 12' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%232a1736'/><rect x='1' y='1' width='1' height='4' fill='%232a1736'/><rect x='8' y='1' width='1' height='4' fill='%232a1736'/><rect x='0' y='5' width='10' height='7' fill='%232a1736'/><rect x='1' y='6' width='8' height='5' fill='%23ffd977'/><rect x='4' y='7' width='2' height='3' fill='%232a1736'/></svg>"); }
+.mut-wallet { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.mut-wallet > span { flex: 1 1 120px; display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: var(--lav); }
+.mut-wallet .ic { width: 20px; height: 20px; }
+.mut-wallet b { font-family: var(--display); font-weight: 400; font-size: 11px; }
+.mut-wallet small { font-size: 12px; color: var(--muted); }
+.mut-wallet .mut-next { flex-direction: column; align-items: flex-start; gap: 2px; background: #e4d6ec; }
+.mut-wallet .mut-next b { display: flex; align-items: center; gap: 4px; }
+.mut-wallet .mut-next.ok { background: var(--mint); }
+.mut-list { display: flex; flex-direction: column; gap: 8px; }
+.mut2 {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 10px 10px 8px;
+  background: var(--lav); background: linear-gradient(100deg, color-mix(in srgb, var(--mc) 55%, #fff4fb) 0%, color-mix(in srgb, var(--mc) 18%, var(--lav)) 46%, var(--lav) 100%);
+}
+.mut-icon { position: relative; display: grid; place-items: center; width: 50px; height: 50px; background: var(--mc); border: var(--fp) solid var(--ink); clip-path: var(--round); box-shadow: inset 0 -5px 0 var(--mc2), inset 0 4px 0 rgba(255, 255, 255, 0.45); }
+.mut-icon .ic { width: 32px; height: 32px; filter: drop-shadow(0 2px 0 rgba(42, 23, 54, 0.35)); }
+.mut2:not(.locked) .mut-icon .ic { animation: mutIdle 2.6s ease-in-out infinite; animation-delay: calc(var(--i) * -0.33s); }
+@keyframes mutIdle { 0%, 100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-2px) rotate(-6deg); } 50% { transform: translateY(0) rotate(0); } 75% { transform: translateY(-1px) rotate(5deg); } }
+.mut-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mut-info > b { font-family: var(--display); font-weight: 400; font-size: 11px; }
+.mut-effect { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 14px; line-height: 1.15; }
+.mut-effect .now { color: var(--ink-muted); }
+.mut-effect .arrow { font-style: normal; color: var(--mc2); font-weight: 700; animation: mutArrow 1.2s steps(3) infinite; }
+.mut-effect em { font-style: normal; font-weight: 700; color: var(--mc2); }
+@keyframes mutArrow { 50% { transform: translateX(3px); } }
+.mut-bar { position: relative; display: block; height: 14px; background: rgba(42, 23, 54, 0.18); border: var(--fp) solid var(--ink); overflow: hidden; }
+.mut-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(var(--mc), var(--mc2)); box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.4); transition: width 0.5s steps(6); }
+.mut-bar i::after { content: ''; position: absolute; top: 0; bottom: 0; width: 10px; background: rgba(255, 255, 255, 0.55); animation: mutShine 2.8s linear infinite; animation-delay: calc(var(--i) * 0.2s); }
+@keyframes mutShine { from { left: -12px; } 40%, to { left: 105%; } }
+.mut-bar small { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-family: var(--display); font-size: 7px; color: var(--ink-text); text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6); }
+.mut-buy { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 96px; padding: 7px 8px 6px; }
+.mut-buy b { font-family: var(--display); font-weight: 400; font-size: 10px; }
+.mut-buy span { display: flex; align-items: center; gap: 3px; font-family: var(--display); font-size: 9px; }
+.mut-buy span .ic { width: 15px; height: 15px; }
+.mut-buy.ready { background: var(--mint); animation: mutBuyBob 1.8s steps(6) infinite; animation-delay: calc(var(--i) * -0.2s); }
+.mut-buy.ready:hover { filter: brightness(1.08); }
+.mut-buy.short { background: #d8cbe0; color: var(--ink-muted); }
+@keyframes mutBuyBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.mut-max { min-width: 96px; padding: 10px 8px; text-align: center; font-family: var(--display); font-size: 12px; color: #6a3a08; background: linear-gradient(90deg, #ffd977, #fff2b8, #ffd977); background-size: 200% 100%; border: var(--fp) solid var(--ink); clip-path: var(--round); animation: mutGold 2s linear infinite; }
+@keyframes mutGold { to { background-position: -200% 0; } }
+.mut-lock { display: flex; align-items: center; gap: 6px; min-width: 96px; padding: 6px 8px; font-size: 11px; line-height: 1.15; color: var(--ink-muted); }
+.mut-lock .ic { width: 16px; height: 19px; }
+.mut2.locked { background: #cfc3d8; }
+.mut2.locked .mut-icon { filter: grayscale(0.85) brightness(0.9); }
+.mut2.max { background: linear-gradient(100deg, color-mix(in srgb, var(--mc) 55%, #fff4fb), #fff2c8 60%, #ffe9a8); }
+/* Arriving on the tab: the rows slide in one after another. */
+.mut2.enter { animation: mutIn 0.42s steps(6) both; animation-delay: calc(var(--i) * 55ms); }
+@keyframes mutIn { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
+/* Just bought: the row pops, the icon jumps, the bar flashes, the new bonus floats up in a burst of sparks. */
+.mut2.bought { animation: mutPop 0.5s steps(6); z-index: 2; }
+@keyframes mutPop { 30% { transform: scale(1.05); } 60% { transform: scale(0.98); } }
+.mut2.bought .mut-icon .ic { animation: mutJump 0.7s steps(7); }
+@keyframes mutJump { 30% { transform: translateY(-12px) scale(1.25) rotate(-12deg); } 60% { transform: translateY(0) scale(0.9); } }
+.mut2.bought .mut-bar i { animation: mutFlash 0.7s steps(4); }
+@keyframes mutFlash { 0%, 50% { filter: brightness(2.2); } }
+.mut-pop { position: absolute; left: 64px; top: 26px; pointer-events: none; font-family: var(--display); font-size: 13px; color: #fff4fb; text-shadow: 0 2px 0 var(--mc2), var(--outline-big); animation: mutRise 1.2s steps(10) forwards; }
+@keyframes mutRise { 0% { opacity: 0; transform: translateY(10px) scale(0.6); } 20% { opacity: 1; transform: translateY(0) scale(1.15); } 80% { opacity: 1; transform: translateY(-16px); } 100% { opacity: 0; transform: translateY(-24px); } }
+.mut-burst { position: absolute; right: 48px; top: 50%; width: 4px; height: 4px; pointer-events: none; color: var(--mc);
+  box-shadow: 0 -26px 0 currentColor, 18px -18px 0 #fff4fb, 26px 0 0 currentColor, 18px 18px 0 #ffd977, 0 26px 0 currentColor, -18px 18px 0 #fff4fb, -26px 0 0 currentColor, -18px -18px 0 #ffd977, 9px -30px 0 #fff4fb, -30px 9px 0 currentColor;
+  animation: mutBurst 0.7s steps(6) forwards; }
+@keyframes mutBurst { from { opacity: 1; transform: scale(0.3); } to { opacity: 0; transform: scale(1.9); } }
+.mut2.nope { animation: mutNope 0.36s steps(6); }
+@keyframes mutNope { 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+@media (max-width: 420px) {
+  .mut2 { gap: 8px; }
+  .mut-icon { width: 42px; height: 42px; }
+  .mut-icon .ic { width: 26px; height: 26px; }
+  .mut-buy, .mut-max, .mut-lock { min-width: 82px; }
+  .mut-effect { font-size: 13px; }
+}
+
+/* ---------- the zoom-out between realms ---------- */
+#hud, #dashBtn { transition: opacity 0.3s; }
+#app.warping #hud, #app.warping #dashBtn, #app.warping #preyArrow { opacity: 0; pointer-events: none; }
+.warp { position: absolute; inset: 0; z-index: 45; pointer-events: none; transition: opacity 0.6s; }
+.warp.out { opacity: 0; }
+.warp canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.warp-text { position: absolute; left: 16px; right: 16px; top: 44%; text-align: center; font-family: var(--display); font-size: clamp(16px, 4.2vw, 36px); line-height: 1.3; color: #fff4fb; text-shadow: 0 3px 0 var(--pink-dark), var(--outline-big); }
+.warp-card {
+  position: absolute; left: 50%; top: 16%; width: min(92vw, 640px); padding: 14px 18px 16px; text-align: center;
+  transform: translate(-50%, -14px) scale(0.94); opacity: 0; transition: opacity 0.35s, transform 0.35s steps(4);
+}
+.warp-card.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.warp-card small { display: block; font-family: var(--display); font-size: clamp(9px, 2vw, 12px); letter-spacing: 0.14em; text-transform: uppercase; color: var(--lav); text-shadow: var(--outline); }
+.warp-card b { display: block; margin-top: 8px; font-family: var(--display); font-weight: 400; font-size: clamp(20px, 5vw, 44px); line-height: 1.15; color: #fff4fb; text-shadow: 0 3px 0 var(--pink), 0 6px 0 var(--pink-dark), var(--outline-big); }
+.warp-card span { display: block; max-width: 36ch; margin: 12px auto 0; font-size: clamp(14px, 2.6vw, 18px); line-height: 1.35; color: #fff4fb; text-shadow: var(--outline); }
+
 /* ---------- pixel frames ---------- */
 /* The pastel pieces and the panels wear the pixel frame (tools/frames.mjs) over their own
    background, with their corners clipped to its rounded steps; buttons get the deeper frame.
@@ -1485,6 +1601,7 @@ html, body {
 .btn, .pill, .icon-btn, .panel, .card, .seg, .toast,
 .hub-top .lv, .hub-top .cur, .side-btn, .nav-btn, .chapter-card, .ch-row .arrow, .play-btn, .kaiju-pill,
 .mat, .crate-card, .deal, .free-gems, .skin-card, .kcard2, .mut, .quest, .day, .prew, .stats-row span, .codex-row, .offer-card,
+.mut2, .mut-wallet > span, .mut-lock,
 #hud .badge, #app .dash-btn, .combo {
   border: var(--fp) solid transparent;
   border-image: var(--frame) 4 / calc(4 * var(--fp));
@@ -1495,6 +1612,7 @@ html, body {
    text needs. */
 .btn, .pill, .icon-btn, .seg, .toast, .hub-top .cur, .side-btn, .nav-btn, .ch-row .arrow, .play-btn, .kaiju-pill,
 .mat, .crate-card, .deal, .free-gems, .skin-card, .kcard2, .mut, .quest, .day, .prew, .stats-row span, .codex-row, .offer-card,
+.mut2, .mut-wallet > span,
 #app .dash-btn {
   --text: var(--ink-text);
   --muted: var(--ink-muted);

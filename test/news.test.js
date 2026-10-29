@@ -32,3 +32,21 @@ test('damage reads like a newspaper would print it', () => {
   assert.equal(money(4234567), '$4.2 million');
   assert.equal(money(2.75e9), '$2.8 billion');
 });
+
+test('past the city, each realm has its own paper, and the next loop gets a second printing', () => {
+  const game = new Game({ seed: 3, kaijuId: 'rex' });
+  for (const [stage, mast] of [[7, 'The Galactic Gazette'], [9, 'The Galactic Gazette'], [10, 'The Anthill Herald'], [11, 'The Anthill Herald']]) {
+    game.debugJump(stage);
+    const page = frontPage(game, stage, () => 0.5);
+    assert.equal(page.mast, mast, `size ${stage}`);
+    assert.equal(page.menu, `${STAGE_INFO[stage].destroys}.`);
+    assert.ok(page.headline && page.subhead && page.size.includes(`Size ${stage}`));
+  }
+  game.loop = 2;
+  game.debugJump(1);
+  const again = frontPage(game, 1, () => 0);
+  assert.equal(again.mast, 'The Daily Stomp');
+  assert.match(again.edition, /Second Printing/);
+  assert.equal(again.incoming, 'Cops on foot. Again.');
+  assert.equal(money(4.2e21), '$4.2 sextillion');
+});

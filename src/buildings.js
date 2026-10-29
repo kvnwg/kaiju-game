@@ -5,6 +5,7 @@ import {
   neonStrip, brick, shade, hash3, eachWall, fins, portico, pediment, dome, scaffold,
 } from './voxel.js';
 import { createRng } from './rng.js';
+import { REALM_BUILDINGS } from './realmtypes.js';
 
 const WARM = [0xffd38a, 0xffc36b, 0xffe2a8, 0xffb35c];
 const COOL = [0xbfe6ff, 0xa8d8ff, 0xd8f0ff];
@@ -1200,6 +1201,8 @@ export const BUILDING_TYPES = [
   def('metro_track', 'Elevated metro track', 4, 'bridge', [], 2.5, sz([16, 16], [7, 7], [15, 15]), (g, r, d) => metroTrack(g, r, d), { weight: 0, walkable: true }),
   def('metro_station', 'Metro station', 4, 'bridge', [], 2.5, sz([16, 16], [7, 7], [15, 15]), (g, r, d) => metroStation(g, r, d), { weight: 0, walkable: true }),
   def('road_bridge', 'Road bridge', 3, 'bridge', [], T2, sz([24, 24], [24, 24], [4, 4]), (g, r, d) => roadBridge(g, r, d), { weight: 0, walkable: true }),
+  // Past the city: planets, stars, galaxies, universes and the back garden (see realmtypes.js).
+  ...REALM_BUILDINGS,
 ];
 
 export const TYPE_BY_ID = Object.fromEntries(BUILDING_TYPES.map((t) => [t.id, t]));
@@ -1219,7 +1222,7 @@ export function buildBuilding(typeId, variant, override = null) {
   const t = TYPE_BY_ID[typeId];
   const d = buildingDims(typeId, variant, override);
   const rng = createRng(hashStr(typeId) * 3 + variant * 104729);
-  const extra = t.tier >= 5 ? 30 : t.tier <= 2 ? 6 : 16;
+  const extra = t.extra ?? (t.tier >= 5 ? 30 : t.tier <= 2 ? 6 : 16);
   const g = new VoxelGrid(d.bx + MARGIN * 2, d.by + extra, d.bz + MARGIN * 2);
   t.build(g, rng, { ...d }, PALETTES[t.style] || PALETTES.neon);
   return { grid: g, dims: d, origin: { x: MARGIN + d.bx / 2, z: MARGIN + d.bz / 2 } };

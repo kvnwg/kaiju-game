@@ -1,29 +1,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STAGES, MAX_STAGE, canDamage, isSnack, lootFor, TIER_HP, WORLD } from '../src/config.js';
+import { STAGES, MAX_STAGE, LAST_STAGE, REALMS, canDamage, isSnack, lootFor, TIER_HP, WORLD } from '../src/config.js';
 import { World } from '../src/world.js';
 
-test('six growth stages from human to skyline, each roughly doubling', () => {
+test('six city sizes from human to skyline, each roughly doubling, then five more past the city', () => {
   assert.equal(MAX_STAGE, 6);
-  assert.equal(STAGES.length - 1, 6);
+  assert.equal(LAST_STAGE, 11);
+  assert.equal(STAGES.length - 1, LAST_STAGE);
   assert.equal(STAGES[1].size, 'Human');
-  for (let s = 2; s <= 6; s++) {
+  for (let s = 2; s <= LAST_STAGE; s++) {
+    // Each realm counts sizes in its own units: within one, size roughly doubles each step.
+    if (STAGES[s].realm !== STAGES[s - 1].realm) continue;
     const ratio = STAGES[s].radius / STAGES[s - 1].radius;
     assert.ok(ratio >= 2 && ratio <= 2.5, `stage ${s} ratio ${ratio}`);
+  }
+  assert.deepEqual([...new Set(STAGES.slice(1).map((st) => st.realm))], ['city', 'solar', 'galaxy', 'cosmos', 'garden']);
+  for (let s = 2; s <= LAST_STAGE; s++) {
+    assert.ok(STAGES[s].maxHp > STAGES[s - 1].maxHp && STAGES[s].damage > STAGES[s - 1].damage, `size ${s} is stronger`);
+    assert.ok(REALMS[STAGES[s].realm], `size ${s} has a realm`);
   }
 });
 
 test('size rules: snacks break in one hit, one size up takes several, two up is out of reach', () => {
-  for (let stage = 1; stage <= MAX_STAGE; stage++) {
+  for (let stage = 1; stage <= LAST_STAGE; stage++) {
     const dmg = STAGES[stage].damage;
     if (stage > 1) assert.ok(isSnack(stage - 1, stage));
     assert.ok(!isSnack(stage, stage));
     assert.ok(TIER_HP[stage] / dmg >= 2, 'own size takes a couple of hits');
-    if (stage < MAX_STAGE) {
-      assert.ok(canDamage(stage + 1, stage));
-      assert.ok(TIER_HP[stage + 1] / dmg >= 6, 'one size up takes several hits');
-    }
-    if (stage < MAX_STAGE - 1) assert.ok(!canDamage(stage + 2, stage));
+    assert.ok(canDamage(stage + 1, stage));
+    assert.ok(TIER_HP[stage + 1] / dmg >= 6, 'one size up takes several hits');
+    assert.ok(!canDamage(stage + 2, stage));
   }
 });
 

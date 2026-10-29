@@ -9,6 +9,7 @@ import { Hub } from './hub.js';
 import { Platform } from './platform.js';
 import { setupTitle, TITLE } from './title.js';
 import { frontPage } from './news.js';
+import { WarpOverlay } from './warp.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 
 const canvas = document.getElementById('game');
@@ -34,6 +35,8 @@ const persist = () => writeSave(store, save);
 const sfx = new Sfx();
 ui.sfx = sfx;
 const music = new Music(sfx);
+// The zoom-out between realms (city, space, the multiverse, the garden, and round again).
+const warpFx = new WarpOverlay(document.getElementById('warp'));
 
 // The game goes quiet while an ad plays, and whenever CrazyGames' own sound setting is off
 // (that wins over the player's in-game sound setting).
@@ -52,14 +55,18 @@ function musicState() {
   if (titleActive) return { theme: 'menu', level: 1, bpm: 132 };
   if (!inRun) return { theme: 'menu', level: 0, bpm: 126 };
   if (game.state === 'won' || game.state === 'lost') return { theme: 'menu', level: -1, bpm: 126 };
-  if (game.state === 'dead') return { theme: 'rampage', level: 0, bpm: 120 };
+  // Each realm has its own tune: a floaty one out in space, a bouncy one in the garden.
+  const home = game.inSpace ? 'space' : game.realm === 'garden' ? 'garden' : 'rampage';
+  if (game.state === 'dead') return { theme: home, level: 0, bpm: 120 };
   const k = game.kaiju;
+  const look = game.look;
   const boss = Boolean(game.boss && !game.boss.dead) || game.gateTimer !== null || game.bossTimer !== null;
-  let level = k.stage <= 1 ? 1 : k.stage <= 3 ? 2 : 3;
+  let level = look <= 1 ? 1 : look <= 3 ? 2 : 3;
   if (game.threat > 60) level++;
   if (boss) level = 4;
   if (game.frenzy > 0) level = Math.max(level, 3);
-  return { theme: boss ? 'boss' : 'rampage', level: Math.min(4, level), bpm: boss ? 160 : 136 + k.stage * 3, paused: paused || game.state === 'picking' || game.state === 'altar' };
+  const bpm = boss ? 160 : home === 'space' ? 112 + (k.stage - 7) * 4 : home === 'garden' ? 148 + (k.stage - 10) * 6 : 136 + k.stage * 3;
+  return { theme: boss ? 'boss' : home, level: Math.min(4, level), bpm, paused: paused || game.state === 'picking' || game.state === 'altar' };
 }
 // Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
 for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', 'touchstart', 'touchend']) window.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
@@ -74,6 +81,7 @@ let hintUntil = 0;
 let movedFor = 0;
 let newsAt = 0; // when the size-up newspaper slams in (0: none on its way)
 let newsStage = 0;
+let newsAfterWarp = false; // a size-up arrived mid-warp: its newspaper waits for the warp to end
 let newsUp = false; // the newspaper is on screen, and the run waits for it
 let reviveAdOffered = false; // this run's last knockdown offered an ad revive (so no ad break follows)
 
@@ -106,6 +114,8 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   movedFor = 0;
   newsAt = 0;
   newsUp = false;
+  newsAfterWarp = false;
+  warpFx.cancel();
   reviveAdOffered = false;
   ui.warmNewsFonts();
   hintUntil = firstRun || save.runs < 2 ? performance.now() + 7000 : 0;
@@ -116,6 +126,7 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
 function showHub(tab) {
   renderer.cinematic = null;
   titleActive = false;
+  warpFx.cancel();
   if (!game || game.state === 'playing' || game.state === 'dead' || game.state === 'picking') {
     game = new Game({ seed: 1, kaijuId: save.lastKaiju, meta: { skin: save.skins.equipped } });
     renderer.startRun(game);
@@ -164,13 +175,30 @@ function handleEvents(events) {
         ui.callout(CALLOUTS[Math.min(CALLOUTS.length, e.tier) - 1], e.tier);
         break;
       case 'grow':
-        flashClass('cine', 1700);
-        ui.flash(1);
         hintUntil = 0;
         ui.hint('');
+        newsStage = e.stage;
+        // Arriving in a new realm: the newspaper waits until the zoom-out has finished.
+        if (game.warp) {
+          newsAfterWarp = true;
+          break;
+        }
+        flashClass('cine', 1700);
+        ui.flash(1);
         // A beat to watch the shockwave, then the newspaper slams in with the story so far.
         newsAt = performance.now() + 1000;
-        newsStage = e.stage;
+        break;
+      case 'warp':
+        hintUntil = 0;
+        ui.hint('');
+        warpFx.start(e);
+        break;
+      case 'warpDone':
+        flashClass('cine', 1700);
+        if (newsAfterWarp) {
+          newsAfterWarp = false;
+          newsAt = performance.now() + 2600;
+        }
         break;
       case 'levelUp':
         ui.levelUp(e.level);
@@ -215,7 +243,7 @@ function handleEvents(events) {
         if (e.tier >= 2) ui.callout(`Multi-kill x${e.n}!`, Math.min(5, e.tier + 1));
         break;
       case 'wave':
-        ui.banner('Strike incoming!', 'The military is closing in from all sides', 'warning');
+        ui.banner(...(game.inSpace ? ['Fleet incoming!', 'Warships are closing in from all sides'] : game.realm === 'garden' ? ['Swarm incoming!', 'The bugs are closing in from all sides'] : ['Strike incoming!', 'The military is closing in from all sides']), 'warning');
         break;
       case 'elite':
         ui.banner(`Elite: ${e.name}`, 'Take it down for a free level-up', 'warning');
@@ -242,7 +270,7 @@ function handleEvents(events) {
         ui.banner(`${e.name} destroyed`, '+1 rare material', 'synergy');
         break;
       case 'bossDefeated':
-        ui.banner('City claimed!', `${e.name} defeated`, 'grow');
+        ui.banner('City claimed!', e.ascend ? `${e.name} defeated. And you're still hungry...` : `${e.name} defeated`, 'grow');
         break;
       case 'dead': {
         const paid = game.revives - (game.reviveAvailable ? 0 : 1) - (game.meta.revives - game.freeRevives) || 0;
@@ -357,6 +385,11 @@ function togglePause(force) {
         paused = false;
         showHub('battle');
       },
+      // Once the city is beaten the run counts as won, so it can be cashed out at any time.
+      onCashOut: game.stats.bossDefeated ? () => {
+        togglePause(false);
+        game.cashOut();
+      } : null,
     });
   } else ui.show('pause', false);
 }
@@ -439,6 +472,9 @@ function frame(now) {
       sfx.paper();
     }
     music.update(musicState());
+    warpFx.update(game.warp);
+    // The HUD steps aside while the zoom-out and its title card play.
+    appEl.classList.toggle('warping', Boolean(warpFx.active));
     if (inRun) {
       ui.updateHud(game);
       updatePreyArrow();

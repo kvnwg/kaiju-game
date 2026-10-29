@@ -16,10 +16,29 @@ import {
   patrolRate, claimPatrol, quickPatrol, adsLeft, adWait, adEnergy, adGems, buyEnergy, spinWheel, buyDeal, buySkin, notifications, canAfford,
 } from './meta.js';
 
+import { MONEY_NAMES, moneyScale } from './prices.js';
+
 const hq = (root, sel) => root.querySelector(sel);
+// How each upgrade looks and reads: its colour pair, which stat it raises, how to word a total,
+// and the pop-up when one is bought.
+const pct = (word) => (v) => `+${v}% ${word}`;
+const MUT_LOOK = {
+  atk: { c: '#ff6b7a', c2: '#c8344a', key: 'atk', fmt: pct('attack'), pop: '+5% ATTACK!' },
+  hp: { c: '#7ee06a', c2: '#3a9a3a', key: 'hp', fmt: pct('health'), pop: '+6% HEALTH!' },
+  speed: { c: '#6ac8ff', c2: '#2a74c8', key: 'speed', fmt: pct('speed'), pop: '+2% SPEED!' },
+  pickup: { c: '#c88aff', c2: '#7a3ac8', key: 'pickup', fmt: pct('pickup range'), pop: '+10% REACH!' },
+  xp: { c: '#ffd84a', c2: '#c8901a', key: 'xp', fmt: pct('XP'), pop: '+3% XP!' },
+  dash: { c: '#5ae8d8', c2: '#1a9a8a', key: 'dashCd', fmt: (v) => `${v}% faster Charge`, pop: 'FASTER CHARGE!' },
+  reroll: { c: '#ffa05a', c2: '#c8601a', key: 'reroll', fmt: (v) => `+${v} reroll${v === 1 ? '' : 's'} a run`, pop: '+1 REROLL!' },
+  revive: { c: '#ff8ad0', c2: '#c83a8a', key: 'revive', fmt: (v) => `${v} free revive a run`, pop: 'EXTRA LIFE!' },
+};
 const REVIVE_OFFER = 10; // seconds to take the ad revive
 export function hfmt(n) {
   n = Math.floor(n);
+  if (n >= 1e15) {
+    const [v, i] = moneyScale(n);
+    return `${v.toFixed(v >= 10 ? 0 : 1)}${MONEY_NAMES[i][0]}`;
+  }
   if (n >= 1e12) return `${(n / 1e12).toFixed(1)}T`;
   if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
@@ -206,6 +225,7 @@ export class Hub {
       battle: () => this.battleTab(), gear: () => this.gearTab(), shop: () => this.shopTab(), kaiju: () => this.kaijuTab(), mutations: () => this.mutationsTab(),
     }[this.tab];
     this.body.innerHTML = body ? body() : '';
+    this.lastTab = this.tab;
     this.body.dataset.tab = this.tab;
     this.el.dataset.tab = this.tab;
   }
@@ -525,23 +545,50 @@ export class Hub {
   }
 
   // ------------------------------------------------------------------ Mutations
+  // Upgrades: permanent boosts for every kaiju, one colourful row each, saying what it does now,
+  // what the next level gives, and a big button with the price on it.
   mutationsTab() {
     const s = this.save;
     const cost = mutationCost(s);
-    const rows = [1, 2, 3, 4, 5].map((row) => {
-      const ms = MUTATIONS.filter((m) => m.row === row);
-      const open = mutationOpen(s, ms[0]);
-      return `<div class="mut-row ${open ? '' : 'locked'}">${open ? '' : `<span class="lock">Account level ${MUTATION_ROW_LEVEL[row]}</span>`}${ms.map((m) => {
-        const lv = mutationLevel(s, m.id);
-        const max = lv >= m.max;
-        return `<button class="mut ${max ? 'max' : ''}" data-act="mutate" data-id="${m.id}" ${open && !max ? '' : 'disabled'}>
-          ${ico(`mut-${m.id}`)}<b>${m.name}</b><small>${m.text}</small><span class="mlv">${lv}/${m.max}</span></button>`;
-      }).join('')}</div>`;
+    const enter = this.lastTab !== 'mutations';
+    const coreShort = cost.geneCores > s.cur.geneCores;
+    const canPay = s.cur.scrap >= cost.scrap && !coreShort;
+    const cards = MUTATIONS.map((m, i) => {
+      const lv = mutationLevel(s, m.id);
+      const open = mutationOpen(s, m);
+      const max = lv >= m.max;
+      const look = MUT_LOOK[m.id];
+      const bought = this.mutFlash === m.id;
+      let action;
+      if (!open) action = `<span class="mut-lock">${ico('lock')}<small>Account<br>level ${MUTATION_ROW_LEVEL[m.row]}</small></span>`;
+      else if (max) action = '<span class="mut-max">MAX</span>';
+      else {
+        action = `<button class="btn mut-buy ${canPay ? 'ready' : 'short'}" data-act="mutate" data-id="${m.id}">
+          <b>Upgrade</b><span>${ico('scrap')}${hfmt(cost.scrap)}${cost.geneCores ? ` + ${ico('gene')}1` : ''}</span></button>`;
+      }
+      const now = lv ? look.fmt(lv * m.per[look.key]) : 'Nothing yet';
+      const next = max ? '' : `<i class="arrow">→</i><em>${look.fmt((lv + 1) * m.per[look.key])}</em>`;
+      return `<div class="mut2 ${open ? '' : 'locked'} ${max ? 'max' : ''} ${bought ? 'bought' : ''} ${enter ? 'enter' : ''}" style="--mc:${look.c};--mc2:${look.c2};--i:${i}" data-id="${m.id}">
+        <span class="mut-icon">${ico(`mut-${m.id}`)}</span>
+        <span class="mut-info">
+          <b>${m.name}</b>
+          <span class="mut-effect"><span class="now">${now}</span>${next}</span>
+          <span class="mut-bar"><i style="width:${(100 * lv) / m.max}%"></i><small>Lv ${lv}/${m.max}</small></span>
+        </span>
+        ${action}
+        ${bought ? `<span class="mut-pop">${look.pop}</span><span class="mut-burst"></span>` : ''}
+      </div>`;
     }).join('');
+    this.mutFlash = null;
     return `<div class="mutations">
-      <div class="mut-head"><span>Next node: ${ico('scrap')}${hfmt(cost.scrap)}${cost.geneCores ? ` + ${ico('gene')}1 Gene Core` : ''}</span><span>${ico('gene')}${s.cur.geneCores} Gene Cores</span></div>
-      ${rows}
-      <p class="tiny muted">Gene Cores come from first clears. Every 10th node needs one.</p></div>`;
+      <h3>Upgrades<small>Permanent boosts for every kaiju, in every run</small></h3>
+      <div class="mut-wallet">
+        <span>${ico('scrap')}<b>${hfmt(s.cur.scrap)}</b><small>scrap</small></span>
+        <span>${ico('gene')}<b>${s.cur.geneCores}</b><small>Gene Cores</small></span>
+        <span class="mut-next ${canPay ? 'ok' : ''}"><small>Next upgrade</small><b>${ico('scrap')}${hfmt(cost.scrap)}${cost.geneCores ? ` + ${ico('gene')}1` : ''}</b></span>
+      </div>
+      <div class="mut-list">${cards}</div>
+      <p class="tiny muted">Every upgrade you buy makes the next one cost a little more. Every 10th also needs a Gene Core (from first clears). Scrap comes from every run.</p></div>`;
   }
 
   // ------------------------------------------------------------------ modals
@@ -893,8 +940,11 @@ export class Hub {
     if (rewards.firstClear) notes.push(`First clear of ${ch.name}! Chapter ${Math.min(CHAPTERS.length, ctx.chapter + 1)} unlocked.`);
     if (rewards.milestones) notes.push(`Milestones: ${rewards.milestones.map((m) => (m === 6 ? 'Apex' : `size ${m}`)).join(', ')}`);
     if (rewards.firstBosses) notes.push(`${rewards.firstBosses} new boss kill${rewards.firstBosses > 1 ? 's' : ''}`);
+    // How far past the city it got: the furthest realm, and how many times round.
+    const far = (results.peak || results.stage || 1) > 6;
+    if (far) notes.push(results.loop > 1 ? `Went round ${results.loop - 1} full loop${results.loop > 2 ? 's' : ''}: city, space, the multiverse, the garden and back` : `Got as far as ${results.realmName}`);
     this.openModal('results', `<div class="panel results2 ${won ? 'won' : 'lost'}">
-      <h1>${won ? 'City claimed!' : 'Rampage over'}</h1>
+      <h1>${won ? (far ? 'Universe claimed!' : 'City claimed!') : 'Rampage over'}</h1>
       <p class="muted">Chapter ${ctx.chapter} · ${ch.name} · ${MODES[ctx.mode].name}</p>
       <div class="damage">${ico('cash')}<b>${hmoney(results.damage || 0)}</b><small>in damages</small></div>
       <div class="stats-row"><span><b>${results.stage}</b><small>size</small></span><span><b>${hfmt(results.buildings)}</b><small>toppled</small></span><span><b>${hfmt(results.people)}</b><small>eaten</small></span><span><b>${(results.gateKills || []).length}</b><small>bosses</small></span></div>
@@ -1227,9 +1277,20 @@ export class Hub {
         break;
       case 'mutate':
         if (buyMutation(s, d.id)) {
-          this.sfx.ding(1);
+          this.sfx.ding(2);
+          this.sfx.cash();
+          this.mutFlash = d.id;
           this.commit();
-        } else this.toast('Not enough scrap or Gene Cores');
+        } else {
+          const c = mutationCost(s);
+          this.toast(c.geneCores > s.cur.geneCores ? 'This one needs a Gene Core: clear a new chapter to get one' : `Not enough scrap: you need ${hfmt(c.scrap)}`);
+          const card = this.body.querySelector(`.mut2[data-id="${d.id}"]`);
+          if (card) {
+            card.classList.remove('nope');
+            void card.offsetWidth;
+            card.classList.add('nope');
+          }
+        }
         break;
       case 'resdouble':
         this.watchAd('double', () => this.results && this.results.onDouble());

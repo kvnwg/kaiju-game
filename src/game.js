@@ -1,13 +1,14 @@
 import {
-  WORLD, STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
+  WORLD, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
   UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
+import { RealmWorld } from './realm.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
-import { PERSON_VARIANTS, DOCTOR } from './models.js';
+import { PERSON_VARIANTS, DOCTOR, ANT, ANT_LOOKS } from './models.js';
 import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
 import { propDims } from './props.js';
 import { objectPrice, vehiclePrice, unitPrice, bossPrice, shortMoney, TRAIN_PRICE, VAULT_PRICE } from './prices.js';
@@ -27,6 +28,11 @@ const CITY_EVENTS = {
   blackout: { name: 'Blackout!', sub: 'The power is out and the military can barely see you', minStage: 2, maxStage: 6 },
   meteors: { name: 'Meteor shower!', sub: 'Dodge them: they wreck everything they hit', minStage: 3, maxStage: 6 },
 };
+
+// Each loop back round to the start makes the military this much tougher (health, damage).
+const LOOP = { hp: 1.6, dmg: 1.4 };
+// How long the zoom-out from one realm to the next takes (seconds); the world swaps halfway.
+const WARP_TIME = 5.2;
 
 // What a run gets from the meta game (gear, Mutations, kaiju stars). A plain run uses this.
 const SHIELD_CAP = 0.25; // most shield you can hold, as a share of max health
@@ -91,7 +97,9 @@ function routesMeet(p, q, clear) {
 export { distToRect, distToSegment };
 
 export class Game {
-  constructor({ kaijuId = 'rex', cityId = 'harbor', difficulty = 'normal', seed = Date.now(), citySeed = seed, firstRun = false, chapter = 1, meta = null } = {}) {
+  // `ascend`: beating the city's final boss sends the kaiju on into space instead of ending the
+  // run (off for tests and tools that only want the city).
+  constructor({ kaijuId = 'rex', cityId = 'harbor', difficulty = 'normal', seed = Date.now(), citySeed = seed, firstRun = false, chapter = 1, meta = null, ascend = true } = {}) {
     this.def = KAIJU[kaijuId];
     this.cityDef = CITIES[cityId];
     // Each chapter multiplies enemy health and damage; gear and Mutations are what keep up.
@@ -102,24 +110,15 @@ export class Game {
     this.diff = { ...base, enemyHp: base.enemyHp * cm, enemyDmg: base.enemyDmg * cm };
     this.rng = createRng(seed);
     this.firstRun = firstRun;
+    this.ascend = ascend;
+    this.realm = 'city';
+    this.loop = 1; // how many times round: city, space, the multiverse, the garden, and home again
+    this.warp = null; // the zoom-out between realms, while it plays (see beginWarp)
+    this.active = new Set();
+    this.collapsing = 0;
     // Every run gets its own endless world, generated cell by cell around the kaiju; the
     // hatchling always starts in the home neighbourhood.
-    this.city = new World(citySeed);
-    useCity(this.city);
-    this.grid = this.city.grid;
-    // Cells dropped behind the kaiju take their in-flight collapses with them.
-    this.city.listeners.add({
-      unload: (chunk) => {
-        for (const o of chunk.objects) {
-          if (!this.active.has(o)) continue;
-          if (o.state === 'collapsing') {
-            o.state = 'rubble';
-            this.collapsing--;
-          }
-          this.active.delete(o);
-        }
-      },
-    });
+    this.attachWorld(new World(citySeed));
 
     const s1 = STAGES[1];
     this.kaiju = {
@@ -154,8 +153,6 @@ export class Game {
     this.spare = null; // (object) => true keeps it standing whatever hits it (the title shot's foreground)
     this.gateTimer = null; // countdown to the size-gate boss walking in
     this.gateCleared = []; // gateCleared[stage]: that size's boss is down, so the kaiju may grow
-    this.collapsing = 0;
-    this.active = new Set();
     this.shake = 0;
     this.hitstop = 0; // brief freeze on heavy impacts
     this.punch = 0; // camera zoom kick, read by the renderer
@@ -180,6 +177,7 @@ export class Game {
       scrap: 0, biomass: 0, buildings: 0, destroyed: 0, units: 0, people: 0, cars: 0,
       damage: 0, // property destroyed, in real dollars (see prices.js)
       landmark: false, rareMaterials: 0, firstSkyscraperAt: null, stageTimes: { 1: 0 }, gateKills: [],
+      peak: 1, // the furthest size reached, counting every loop (size 1 of the second loop is 12)
     };
     this.kaiju.maxHp = this.kaiju.hp = this.maxHpFor(1);
     // Titan Heart: start one level up, with a pick waiting.
@@ -208,15 +206,58 @@ export class Game {
     return this.city.objects;
   }
 
+  // Make `world` the one the kaiju is in: the city, or one of the realms past it.
+  attachWorld(world) {
+    this.city = world;
+    useCity(world);
+    this.grid = world.grid;
+    // Cells dropped behind the kaiju take their in-flight collapses with them.
+    world.listeners.add({
+      unload: (chunk) => {
+        for (const o of chunk.objects) {
+          if (!this.active.has(o)) continue;
+          if (o.state === 'collapsing') {
+            o.state = 'rubble';
+            this.collapsing--;
+          }
+          this.active.delete(o);
+        }
+      },
+    });
+  }
+
+  get inCity() {
+    return this.realm === 'city';
+  }
+
+  get inSpace() {
+    return Boolean(REALMS[this.realm].space);
+  }
+
+  // The city size this one looks and plays like (people, footsteps, crowd rules): realms past the
+  // city start their sizes over in their own units, so size 7 out in space plays like a Titan and
+  // the ant-sized kaiju in the garden like a Prowler.
+  get look() {
+    const k = this.kaiju;
+    if (this.inCity) return k.stage;
+    if (this.realm === 'garden') return k.stage - 8;
+    return 4;
+  }
+
   // Generate the world around the kaiju: everything near it now, the rest of the view a few
   // cells per frame, and forget what is far behind.
   streamWorld(initial = false) {
     const k = this.kaiju;
     const span = this.viewSpan();
-    this.city.detail = k.stage >= 5 ? 1 : 0;
+    const big = this.inCity && k.stage >= 5;
+    this.city.detail = big ? 1 : 0;
     // New blocks per frame: a big kaiju needs about half a block a frame, so two keeps up
     // without a frame doing four blocks of generation at once.
-    this.city.update(k.x, k.y, span * 1.3 + 520, initial ? Infinity : k.stage >= 5 ? 2 : 4, span * 0.6 + 150);
+    const margin = this.inCity ? 520 : this.city.cell * 1.24;
+    // What has to be there right now follows the kaiju's size as it swells (k.r eases toward the
+    // new size), so a size-up streams the bigger view in over a second instead of all at once.
+    const must = initial ? span : Math.min(span, this.viewSpan(Math.max(k.r, 1)));
+    this.city.update(k.x, k.y, span * 1.3 + margin, initial ? Infinity : big ? 2 : 4, must * 0.6 + (this.inCity ? 150 : margin * 0.29));
   }
 
   // ---------------------------------------------------------------- elevated metro
@@ -231,6 +272,7 @@ export class Game {
   }
 
   updateTrains(dt) {
+    if (!this.inCity) return;
     const k = this.kaiju;
     const world = this.city;
     const span = this.viewSpan();
@@ -656,7 +698,7 @@ export class Game {
     // full size).
     if (k.stage >= 3) {
       // Nearest chunks first (each is one city block), stopping once no farther block can win.
-      const cell = WORLD.cell;
+      const cell = this.city.cell;
       const chunks = [];
       for (const ch of this.city.chunks.values()) chunks.push([Math.hypot((ch.c + 0.5) * cell - k.x, (ch.r + 0.5) * cell - k.y), ch]);
       chunks.sort((a, b) => a[0] - b[0]);
@@ -693,6 +735,10 @@ export class Game {
 
   // ---------------------------------------------------------------- main loop
   update(realDt) {
+    if (this.state === 'warp') {
+      this.updateWarp(realDt);
+      return;
+    }
     if (this.state !== 'playing') return;
     this.clock += realDt;
     const dt = realDt * (this.hitstop > 0 ? 0.04 : this.slowmo > 0 ? 0.35 : 1);
@@ -702,6 +748,12 @@ export class Game {
     this.updateCombo(realDt);
     this.time += dt;
 
+    // The city's final boss is down: off into space (at the top of a frame, never mid-pick).
+    if (this.ascendReady) {
+      this.ascendReady = false;
+      this.ascendFromCity();
+      return;
+    }
     this.checkGrowth();
     this.streamWorld();
     if (this.pendingPicks > 0) this.openPick();
@@ -731,11 +783,11 @@ export class Game {
       this.prey = this.findPrey();
       // Nothing your size left anywhere: you have outgrown the city, so grow anyway.
       const k = this.kaiju;
-      this.starve = !this.prey && k.stage < MAX_STAGE ? (this.starve || 0) + 1 : 0;
+      this.starve = !this.prey && k.stage !== MAX_STAGE ? (this.starve || 0) + 1 : 0;
       if (this.starve >= 15) {
         this.starve = 0;
         k.biomass = Math.max(k.biomass, this.stage.biomassToNext);
-        this.emit('banner', { text: 'Outgrew the city!' });
+        this.emit('banner', { text: `Outgrew ${this.inCity ? 'the city' : REALMS[this.realm].name.toLowerCase()}!` });
       }
     }
     this.shake = Math.max(0, this.shake - realDt * 2.5);
@@ -830,10 +882,12 @@ export class Game {
       const before = Math.floor(k.walkPhase / Math.PI);
       k.walkPhase += (dt * speed) / Math.max(1, k.r) * 1.6;
       // A footfall every half stride: dust and, once big, a rumble.
-      if (Math.floor(k.walkPhase / Math.PI) !== before && k.hopT <= 0 && !k.inWater) {
+      // (Out in space there is nothing to stomp on: the kaiju swims through it.)
+      if (Math.floor(k.walkPhase / Math.PI) !== before && k.hopT <= 0 && !k.inWater && !this.inSpace) {
         const side = Math.floor(k.walkPhase / Math.PI) % 2 ? 1 : -1;
-        this.fxEvent({ t: 'step', x: k.x - k.facing.y * k.r * 0.4 * side, y: k.y + k.facing.x * k.r * 0.4 * side, r: k.r, stage: k.stage });
-        if (k.stage >= 4) this.shake = Math.max(this.shake, 0.06 + (k.stage - 4) * 0.04);
+        const look = this.look;
+        this.fxEvent({ t: 'step', x: k.x - k.facing.y * k.r * 0.4 * side, y: k.y + k.facing.x * k.r * 0.4 * side, r: k.r, stage: look });
+        if (look >= 4) this.shake = Math.max(this.shake, 0.06 + (look - 4) * 0.04);
       }
     } else {
       k.stillTime += dt;
@@ -888,9 +942,10 @@ export class Game {
       if (u.flying || u.dead) continue;
       if (u.tier < k.stage && Math.hypot(u.x - k.x, u.y - k.y) < k.r + u.r) this.killUnit(u);
     }
+    const look = this.look;
     for (const p of this.people) {
-      if (!p.taken && k.stage > 1 && Math.hypot(p.x - k.x, p.y - k.y) < k.r + 1) {
-        if (k.stage <= 2) this.eatPerson(p);
+      if (!p.taken && look > 1 && Math.hypot(p.x - k.x, p.y - k.y) < k.r + 1) {
+        if (look <= 2) this.eatPerson(p);
         else this.flingPerson(p, true);
       }
     }
@@ -964,7 +1019,8 @@ export class Game {
     };
     for (const u of this.units) if (!u.dead && u.type !== 'jet') consider(u, Math.hypot(u.x - k.x, u.y - k.y) - u.r);
     if (best) return best;
-    if (k.stage === 1) for (const p of this.people) if (!p.taken) consider(p, Math.hypot(p.x - k.x, p.y - k.y) - 0.8);
+    // A hatchling hunts people; the ant-sized kaiju in the garden hunts ants.
+    if (k.stage === 1 || (this.realm === 'garden' && this.look <= 2)) for (const p of this.people) if (!p.taken) consider(p, Math.hypot(p.x - k.x, p.y - k.y) - 0.8);
     if (best) return best;
     if (k.stage <= 2) for (const c of this.traffic) if (!c.dead) consider(c, Math.hypot(c.x - k.x, c.y - k.y) - 4);
     if (best) return best;
@@ -980,7 +1036,7 @@ export class Game {
     // Cops go down in one bite, whatever their toughness.
     if (t.isUnit && t.type === 'cop' && cause === 'bite') return this.eatCop(t);
     if (t.isUnit) return this.damageUnit(t, amount);
-    if (t.isPerson) return this.kaiju.stage <= 2 && cause === 'bite' ? this.eatPerson(t) : this.flingPerson(t, false);
+    if (t.isPerson) return this.look <= 2 && cause === 'bite' ? this.eatPerson(t) : this.flingPerson(t, false);
     if (t.isCar) return this.damageCar(t, amount);
     const k = this.kaiju;
     return this.damageObject(t, amount, dir, cause, closestPoint(k.x, k.y, t));
@@ -1261,7 +1317,7 @@ export class Game {
   // Mutation Altar, after each size boss: an angel (heal and a free reroll) or a devil's pact (a big
   // augment boost for 15% of your max health this run).
   openAltar() {
-    if (this.state !== 'playing' || this.kaiju.stage >= MAX_STAGE) return;
+    if (this.state !== 'playing' || this.kaiju.stage === MAX_STAGE) return;
     const held = this.held;
     const pool = offerAugments({ held, rng: this.rng }).filter((id) => AUGMENT_BY_ID[id] && AUGMENT_BY_ID[id].kind !== 'filler' && AUGMENT_BY_ID[id].kind !== 'evolution');
     const devil = pool.find((id) => AUGMENT_BY_ID[id].kind === 'move') || pool[0] || null;
@@ -1495,7 +1551,8 @@ export class Game {
   // ---------------------------------------------------------------- growth & picks
   checkGrowth() {
     const k = this.kaiju;
-    if (k.stage >= MAX_STAGE || k.biomass < this.stage.biomassToNext) return;
+    // The city's top size grows by beating its final boss (see damageBoss), never by biomass.
+    if (k.stage === MAX_STAGE || k.biomass < this.stage.biomassToNext) return;
     // A full growth bar summons this size's boss; growing waits until it is beaten.
     if (!this.gateCleared[k.stage]) {
       k.biomass = this.stage.biomassToNext;
@@ -1511,28 +1568,164 @@ export class Game {
     this.grow();
   }
 
+  // The next size. Past the city's top size the kaiju leaves for space; each size there is a new
+  // realm, so growing zooms out to it (see beginWarp); and after the garden, round to the start.
   grow() {
     const k = this.kaiju;
-    const frac = k.hp / k.maxHp;
-    k.stage++;
+    const next = k.stage >= LAST_STAGE ? 1 : k.stage + 1;
+    if (next === 1 || STAGES[next].realm !== this.realm) return this.beginWarp(next);
+    this.sizeUp(next);
+  }
+
+  sizeUp(next, arriving = false) {
+    const k = this.kaiju;
+    const frac = arriving && next === 1 ? 1 : k.hp / k.maxHp;
+    k.stage = next;
     const s = this.stage;
     k.maxHp = this.maxHpFor();
     k.hp = Math.min(k.maxHp, k.maxHp * frac + k.maxHp * 0.15);
     k.shield = Math.min(k.shield * 2, k.maxHp * SHIELD_CAP);
     this.stats.stageTimes[k.stage] = this.time;
-    this.director.spawnT = 2;
+    this.stats.peak = Math.max(this.stats.peak, (this.loop - 1) * LAST_STAGE + k.stage);
+    this.director.spawnT = arriving ? 4 : 2;
     if (THREAT.waveEvery[k.stage]) this.director.waveT = THREAT.firstWave;
     if (ELITES[k.stage]) this.director.eliteT = ELITE.first;
     this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: s.radius * 2.5, life: 0.8, max: 0.8, color: 0x9cff7a, width: s.radius * 0.25 });
     this.fx.rings.push({ x: k.x, y: k.y, r0: s.radius, r1: s.radius * 4.5, life: 1.1, max: 1.1, color: 0xffffff, width: s.radius * 0.4 });
-    this.shake = Math.max(this.shake, 0.9);
+    this.shake = Math.max(this.shake, arriving ? 0.5 : 0.9);
     // Size-up: a beat of slow motion and a shockwave that flattens everything far smaller.
-    this.slowmo = Math.max(this.slowmo, 1.1);
+    if (!arriving) this.slowmo = Math.max(this.slowmo, 1.1);
     for (const o of this.objectsNear(k.x, k.y, s.radius * 4)) if (o.tier <= k.stage - 2 && !o.landmark) this.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'crush');
     for (const u of this.units) if (!u.dead && u.tier < k.stage && Math.hypot(u.x - k.x, u.y - k.y) < s.radius * 4) this.killUnit(u);
-    this.emit('grow', { stage: k.stage, name: s.name, size: s.size });
-    if (k.stage >= 2 && k.stage <= 5) this.schedule(18, () => this.placeVault());
+    this.emit('grow', { stage: k.stage, name: s.name, size: s.size, realm: this.realm, loop: this.loop });
+    if (this.inCity && k.stage >= 2 && k.stage <= 5) this.schedule(18, () => this.placeVault());
     if (k.stage === MAX_STAGE) this.bossTimer = BOSS.arriveDelay;
+  }
+
+  // ---------------------------------------------------------------- realms
+  // The zoom-out to the next realm: the game holds still while the camera pulls back and back;
+  // halfway through, the new world takes the old one's place and the camera falls into it.
+  beginWarp(next) {
+    const from = this.realm;
+    const to = STAGES[next].realm;
+    this.warp = { t: 0, dur: WARP_TIME, from, to, stage: next, loop: next === 1, swapped: false };
+    this.state = 'warp';
+    this.hazards = [];
+    this.projectiles = [];
+    this.emit('warp', { from, to, stage: next, loop: next === 1 ? this.loop + 1 : this.loop });
+  }
+
+  updateWarp(dt) {
+    const w = this.warp;
+    w.t += dt;
+    this.shake = Math.max(0, this.shake - dt * 2.5);
+    if (!w.swapped && w.t >= w.dur * 0.5) {
+      w.swapped = true;
+      if (w.loop) this.newLoop();
+      this.enterRealm(w.to, w.stage);
+      this.sizeUp(w.stage, true);
+      this.streamWorld(true);
+      this.populate(true);
+    }
+    if (w.t >= w.dur) {
+      this.warp = null;
+      this.state = 'playing';
+      // A new realm is worth a level: a fresh augment pick to start it with (once the title card
+      // and the newspaper are out of the way).
+      const k = this.kaiju;
+      this.schedule(3.4, () => {
+        k.level++;
+        this.pendingPicks++;
+        this.emit('levelUp', { level: k.level });
+      });
+      this.emit('warpDone', { realm: this.realm, stage: k.stage, loop: this.loop });
+    }
+  }
+
+  // Back to the start: everything was a speck in something bigger, and it goes round again, a
+  // little harder each time.
+  newLoop() {
+    this.loop++;
+    this.diff = { ...this.diff, enemyHp: this.diff.enemyHp * LOOP.hp, enemyDmg: this.diff.enemyDmg * LOOP.dmg };
+    this.gateCleared = [];
+    this.bossTimer = null;
+    this._warned = false;
+    this.eventsUsed = [];
+    this.eventT = 75;
+    this.stats.loops = this.loop;
+  }
+
+  // Swap the world for the one size `stage` lives in. Everything tied to the old one goes with it.
+  enterRealm(realm, stage) {
+    const seed = Math.floor(this.rng.next() * 1e9) + 1;
+    this.realm = realm;
+    this.attachWorld(realm === 'city' ? new World(seed) : new RealmWorld(realm, seed));
+    const k = this.kaiju;
+    k.x = this.city.spawn.x;
+    k.y = this.city.spawn.y;
+    k.vx = 0;
+    k.vy = 0;
+    k.z = 0;
+    k.hopT = 0;
+    k.dashT = 0;
+    k.netted = 0;
+    k.inWater = false;
+    k.biomass = 0;
+    k.r = STAGES[stage].radius;
+    k.facing = { x: -1, y: 0 };
+    k.anim = null;
+    k.lastAttack = null;
+    this.units = [];
+    this.people = [];
+    this.traffic = [];
+    this.trains = [];
+    this.allies = [];
+    this.projectiles = [];
+    this.hazards = [];
+    this.fires = [];
+    this.scheduled = [];
+    this.roadVehicles = [];
+    this.junctions.clear();
+    this.active.clear();
+    this.collapsing = 0;
+    this.moves.active = [];
+    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [], slashes: [], swirls: [], cracks: [] };
+    this.boss = null;
+    this.bossTimer = null;
+    this.gateTimer = null;
+    this.vault = null;
+    this.cityEvent = null;
+    this.blackoutT = 0;
+    this.prey = null;
+    this.preyT = 0;
+    this.starve = 0;
+    this.threat = 0;
+    this.director.jetT = 6;
+    this.director.crowdT = 0;
+  }
+
+  // Straight to a size, skipping the zoom-out (tests and debug keys).
+  debugJump(stage) {
+    if (STAGES[stage].realm !== this.realm || stage < this.kaiju.stage) this.enterRealm(STAGES[stage].realm, stage);
+    this.sizeUp(stage, true);
+    this.streamWorld(true);
+    this.populate(true);
+    this.state = 'playing';
+  }
+
+  // Beating the city's final boss: the kaiju outgrows the planet.
+  ascendFromCity() {
+    if (this.state !== 'playing') return;
+    this.boss = null;
+    this.gateCleared[MAX_STAGE] = true;
+    this.beginWarp(MAX_STAGE + 1);
+  }
+
+  // Leave with what you have (offered once the city is beaten, from the pause menu): counts as a win.
+  cashOut() {
+    if (!this.stats.bossDefeated || this.state === 'won' || this.state === 'lost') return false;
+    this.end(true);
+    return true;
   }
 
   openPick() {
@@ -1562,7 +1755,7 @@ export class Game {
     const k = this.kaiju;
     const before = completedSets(this.held).map((s) => s.id);
     const level = applyPick(this.held, id);
-    if (id === 'growthSpurt' && k.stage < MAX_STAGE) k.biomass = Math.min(this.stage.biomassToNext, k.biomass + this.stage.biomassToNext * 0.15);
+    if (id === 'growthSpurt' && k.stage !== MAX_STAGE) k.biomass = Math.min(this.stage.biomassToNext, k.biomass + this.stage.biomassToNext * 0.15);
     if (id === 'scrapPile') {
       this.stats.scrap += 25 * k.stage * k.stage;
       this.stats.scrapPiles = (this.stats.scrapPiles || 0) + 1;
@@ -1623,7 +1816,8 @@ export class Game {
     const k = this.kaiju;
     o.hp = 0;
     o.fallDir = dir && (dir.x || dir.y) ? dir : norm(o.x - k.x, o.y - k.y);
-    if (o.structure && this.collapsing < LIMITS.collapsing) {
+    // In space there is no ground to fall onto: it bursts apart on the spot.
+    if (o.structure && !o.vanish && this.collapsing < LIMITS.collapsing) {
       o.state = 'collapsing';
       o.collapseT = 0;
       this.collapsing++;
@@ -1702,9 +1896,13 @@ export class Game {
 
   // ---------------------------------------------------------------- ambient life
   populate(initial = false) {
+    // Nobody lives out in space. In the back garden, ants (and the odd ladybug) take the place of
+    // people: just as snackable to a kaiju their size.
+    if (this.inSpace) return;
     const k = this.kaiju;
     const span = this.viewSpan();
-    const want = k.stage <= 3 ? CROWD.people : Math.round(CROWD.people * 0.6);
+    const garden = this.realm === 'garden';
+    const want = garden ? (k.stage <= 10 ? 45 : 30) : k.stage <= 3 ? CROWD.people : Math.round(CROWD.people * 0.6);
     const maxR = Math.max(120, span * (initial ? 1.4 : 1.3));
     const minR = initial ? 10 : span * 1.0;
     let tries = 0;
@@ -1718,8 +1916,8 @@ export class Game {
       if (zc && zc.style === 'forest' && !this.rng.chance(0.15)) continue;
       if (this.blockedAt(x, y, 1)) continue;
       // Very rarely, while you are small, one of them is a doctor.
-      let variant = this.rng.int(0, PERSON_VARIANTS - 1);
-      if (!initial && k.stage <= DOCTOR_HEAL.maxStage && this.time >= (this.nextDoctorAt ?? DOCTOR_HEAL.gap[0])
+      let variant = garden ? ANT + (this.rng.chance(0.1) ? ANT_LOOKS - 1 : this.rng.int(0, ANT_LOOKS - 2)) : this.rng.int(0, PERSON_VARIANTS - 1);
+      if (!garden && !initial && k.stage <= DOCTOR_HEAL.maxStage && this.time >= (this.nextDoctorAt ?? DOCTOR_HEAL.gap[0])
         && this.rng.chance(DOCTOR_HEAL.chance) && !this.people.some((q) => q.variant === DOCTOR && !q.taken)) {
         variant = DOCTOR;
         this.nextDoctorAt = this.time + DOCTOR_HEAL.gap[0];
@@ -1727,10 +1925,10 @@ export class Game {
       this.people.push({
         isPerson: true, x, y, heading: this.rng.range(0, Math.PI * 2), speed: this.rng.range(4, 7),
         state: 'walk', t: this.rng.range(1, 4), variant,
-        tier: 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: this.rng.range(0, 6),
+        tier: garden ? 9 : 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: this.rng.range(0, 6),
       });
     }
-    if (k.stage <= 4) {
+    if (this.inCity && k.stage <= 4) {
       const wantCars = CROWD.traffic;
       const roads = this.city.roads;
       tries = 0;
@@ -1858,7 +2056,7 @@ export class Game {
     p.chomped = false;
     this.stats.people++;
     this.addThreat(0.4);
-    const loot = lootFor(1, k.stage, 1);
+    const loot = lootFor(p.tier || 1, k.stage, 1);
     this.xpBoost = this.meta.perks.gluttonHeart ? 1.2 : 1;
     this.addBiomass(loot.biomass * (1 + 0.25 * this.level('ironStomach')));
     this.xpBoost = 1;
@@ -1892,7 +2090,7 @@ export class Game {
     p.vy = d.y * sp + this.rng.range(-3, 3);
     p.vz = 14 + k.r * 2;
     this.stats.people++;
-    const loot = lootFor(1, k.stage, 1);
+    const loot = lootFor(p.tier || 1, k.stage, 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
@@ -2212,9 +2410,9 @@ export class Game {
       }
       this.spawnGroup(type, pos);
     }
-    if (k.stage >= 4) {
+    if (this.look >= 4 || k.stage >= 4) {
       const lead = k.moving ? 1.4 : 0.4;
-      const dmg = (k.stage >= 5 ? 90 : 36) * this.enemyScale().dmg;
+      const dmg = this.stage.maxHp * (k.stage >= 5 ? 0.056 : 0.045) * this.enemyScale().dmg;
       for (let i = 0; i < 4 + k.stage; i++) {
         const t = i / (3 + k.stage);
         this.hazards.push({
@@ -2223,7 +2421,7 @@ export class Game {
         });
       }
     }
-    if (k.stage >= 5) for (let i = 0; i < 2; i++) this.schedule(0.6 + i * 1.2, () => this.spawnJet());
+    if (k.stage >= 5 && esc.jetEvery) for (let i = 0; i < 2; i++) this.schedule(0.6 + i * 1.2, () => this.spawnJet());
   }
 
   spawnElite() {
@@ -2262,15 +2460,32 @@ export class Game {
 
   // A unit type's stats. (Units used to be scaled up from smaller sizes; now each size fields
   // units built to that size, so this is the plain definition.)
+  // Past the city, units are built for one size (`base`) and come back at later sizes of the same
+  // realm grown to match: tougher, harder-hitting, and bigger where the realm's units grow (the
+  // garden). Strafing runs use whatever the current size fields for them (ESCALATION .jet).
   scaledDef(type) {
-    return { ...ENEMIES[type], scale: 1, lift: 0 };
+    const stage = this.kaiju.stage;
+    const esc = ESCALATION[stage];
+    const swap = type === 'jet' && esc && esc.jet;
+    const def = { ...ENEMIES[swap ? esc.jet : type], scale: 1, lift: 0 };
+    if (swap) def.model = def.model || esc.jet;
+    if (def.base) {
+      const n = Math.max(0, stage - def.base);
+      const f = STAGES[stage].radius / STAGES[def.base].radius;
+      def.tier = stage + (def.rel || 0);
+      def.hp *= Math.pow(4, n);
+      def.dmg *= Math.pow(2, n);
+      def.scale = f;
+      for (const key of ['r', 'speed', 'standoff', 'range', 'aoe', 'proj']) if (def[key]) def[key] *= f;
+    }
+    return def;
   }
 
   spawnUnit(type, x, y) {
     const def = this.scaledDef(type);
     const sc = this.enemyScale();
     const u = {
-      isUnit: true, type, def, x, y, r: def.r, tier: def.tier, scale: 1,
+      isUnit: true, type, def, x, y, r: def.r, tier: def.tier, scale: def.scale || 1,
       hp: def.hp * this.diff.enemyHp * sc.hp, maxHp: def.hp * this.diff.enemyHp * sc.hp,
       dmgMul: sc.dmg * SWARM.dmg,
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
@@ -3296,8 +3511,11 @@ export class Game {
       for (let i = 0; i < 6; i++) this.schedule(i * 0.25, () => this.spawnExplosion(b.x + this.rng.range(-b.r, b.r), b.y + this.rng.range(-b.r, b.r), b.r * 0.8));
       this.fxEvent({ t: 'bossDie', b });
       this.units.forEach((u) => (u.fear = 99));
-      this.emit('bossDefeated', { name: b.name });
-      this.schedule(2.2, () => this.end(true));
+      this.emit('bossDefeated', { name: b.name, ascend: this.ascend });
+      this.schedule(this.ascend ? 2.8 : 2.2, () => {
+        if (this.ascend) this.ascendReady = true;
+        else this.end(true);
+      });
     }
     return true;
   }
@@ -3470,6 +3688,8 @@ export class Game {
   // ---------------------------------------------------------------- results
   end(won) {
     if (this.state === 'won' || this.state === 'lost') return;
+    // Once the city's final boss is down the run counts as won, however far it got after that.
+    won = won || Boolean(this.stats.bossDefeated);
     this.state = won ? 'won' : 'lost';
     const s = this.stats;
     const scrapRaw = Math.round(s.scrap);
@@ -3489,12 +3709,19 @@ export class Game {
       scrapBoost: 0.2 * this.level('scavenger') + 0.1 * (s.scrapPiles || 0),
       gateKills: [...s.gateKills], chapter: this.chapter, vaultGems: s.vaultGems, vaults: s.vaults, objectiveDone: s.objectiveDone,
       objective: this.objective.text, frenzies: s.frenzies,
+      peak: s.peak, loop: this.loop, realm: this.realm, realmName: REALMS[this.realm].name,
     };
     this.emit('end', { results: this.results });
   }
 
   debugGrow() {
+    if (this.state !== 'playing') return;
+    if (this.kaiju.stage === MAX_STAGE) {
+      this.stats.bossDefeated = true;
+      this.ascendFromCity();
+      return;
+    }
     this.gateCleared[this.kaiju.stage] = true;
-    if (this.kaiju.stage < MAX_STAGE) this.addBiomass(this.stage.biomassToNext - this.kaiju.biomass);
+    this.addBiomass(this.stage.biomassToNext - this.kaiju.biomass);
   }
 }

@@ -15,6 +15,7 @@ import { Actors, toGeometry } from './actors3d.js';
 import { Ambient } from './ambient3d.js';
 import { personLook } from './models.js';
 import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
+import { RealmBackdrop } from './realm3d.js';
 
 export const QUALITY = {
   high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8 },
@@ -201,6 +202,10 @@ export class Renderer3D {
     this.points = [];
     this.scene.fog = new THREE.Fog(0xf0d6b8, 300, 1200);
     this.scene.background = new THREE.Color(0xf0d6b8);
+    this.skyColor = this.scene.background;
+    // Past the city: starfields, nebula skies and the back garden's lawn (see realm3d.js).
+    this.realm = 'city';
+    this.realmLook = new RealmBackdrop(this.scene);
 
     this.fx = new FX(this.scene);
     this.actors = new Actors(this.scene, (selfLit = 0) => makeVoxelMaterial(this.uniforms, selfLit));
@@ -282,7 +287,8 @@ export class Renderer3D {
     this.h = h;
     // Pixel look: render a small frame (about 260 px on the short side) and let the browser
     // blow it up with nearest-neighbour sampling.
-    const pr = this.pixelArt ? 1 / Math.max(2, Math.round(Math.min(w, h) / 260)) : Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio);
+    // (A huge kaiju also renders at a slightly lower resolution: less to fill, and nobody can tell.)
+    const pr = this.pixelArt ? 1 / Math.max(2, Math.round(Math.min(w, h) / 260)) : Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio) * (this.bigScale || 1);
     this.pr = pr;
     this.canvas.style.imageRendering = this.pixelArt ? 'pixelated' : '';
     this.renderer.setPixelRatio(pr);
@@ -570,7 +576,7 @@ export class Renderer3D {
   }
 
   startRun(game) {
-    this.buildCity(game.city);
+    this.switchWorld(game);
     for (const rec of this.bld.values()) this.disposeRec(rec);
     this.bld.clear();
     this.buildQueue = [];
@@ -589,7 +595,45 @@ export class Renderer3D {
     this.target.set(k.x, 0, k.y);
     this.camDist = this.distFor(game.viewSpan(k.r));
     // Paint the ground around the drop-in point before the first frame.
-    this.terrain.update(k.stage, k.x, k.y, game.viewSpan(k.r), 0, new THREE.Color(SKY[0].water), 0, 60);
+    if (this.realm === 'city') this.terrain.update(k.stage, k.x, k.y, game.viewSpan(k.r), 0, new THREE.Color(SKY[0].water), 0, 60);
+  }
+
+  // A new world under the kaiju (a run starting, or growing into the next realm): drop the old
+  // world's meshes and follow the new one.
+  switchWorld(game) {
+    for (const rec of this.bld.values()) this.disposeRec(rec);
+    this.bld.clear();
+    this.buildQueue = [];
+    this.remeshQueue.clear();
+    this.collapses.clear();
+    for (const map of [this.bInst, this.rInst]) {
+      for (const e of map.values()) {
+        if (!e.im) continue;
+        e.im.count = 0;
+        e.im.visible = false;
+      }
+    }
+    this.fx.clear();
+    this.realm = game.realm || 'city';
+    this.realmLook.set(this.realm);
+    this.terrain.under.visible = this.realm === 'city';
+    if (this.realm === 'city') this.buildCity(game.city);
+    else {
+      this.clearCity();
+      this.terrain.world = null;
+      this.cityBuilt = game.city;
+      this.city = game.city;
+      this.listener = { load: (ch) => this.chunkLoaded(ch), unload: (ch) => this.chunkUnloaded(ch) };
+      game.city.listeners.add(this.listener);
+      for (const ch of game.city.chunks.values()) this.chunkLoaded(ch);
+    }
+    this.propsDirty = true;
+    this.buildingsDirty = true;
+    this.lastPropAt = null;
+    this.lastBldAt = null;
+    // No shadows out in space: there is nothing for them to fall on.
+    const shadows = this.quality.shadows > 0 && !(game.inSpace);
+    if (this.sun.castShadow !== shadows) this.sun.castShadow = shadows;
   }
 
   // ---------------------------------------------------------------- props (instanced, refilled for the view)
@@ -783,7 +827,9 @@ export class Renderer3D {
     const ny = Math.ceil(g.ny / f);
     const nz = Math.ceil(g.nz / f);
     const out = new VoxelGrid(nx, ny, nz);
-    const need = Math.ceil(f * f * f * 0.35);
+    // A cell keeps a voxel when it is about a third full (a wall-thick slab counts, so hollow
+    // shapes like a universe's skin survive the coarsest levels).
+    const need = Math.ceil(Math.min(f * f * f * 0.35, f * f * 0.9));
     for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
       let val = 0;
       let cnt = 0;
@@ -880,16 +926,16 @@ export class Renderer3D {
         if (rec && rec.mesh) continue;
         // The fewer pixels a building covers, the coarser the voxels it is drawn with.
         const px = view.px(o.x, o.y, size) / this.lodBias;
-        const lod = px > 110 ? 0 : px > 40 ? 1 : 2;
+        const lod = px > 110 ? 0 : px > 40 ? 1 : px > 16 ? 2 : 3;
         list.push(lod ? this.instFor(this.bInst, `${key}:L${lod}`, null) : this.instFor(this.bInst, key, v.geo), o, 0);
         if (lod) {
           list[list.length - 3].lodOf = v;
           list[list.length - 3].lod = lod;
         }
-      } else if (!o.walkable && !(rec && rec.collapse)) {
+      } else if (!o.walkable && !o.vanish && !(rec && rec.collapse)) {
         // Rubble gets coarser with distance too, and a pile a few pixels wide isn't drawn.
         const px = view.px(o.x, o.y, size) / this.lodBias;
-        if (px < 5) continue;
+        if (px < 5 + this.lodBias * 2) continue;
         const lod = px > 80 ? 0 : px > 25 ? 1 : 2;
         list.push(this.instFor(this.rInst, `${key}:R${lod}`, null), o, 1);
         list[list.length - 3].rubbleOf = v;
@@ -905,11 +951,20 @@ export class Renderer3D {
     const stage = game.kaiju.stage;
     const shadowLod = stage >= 5 ? 1 : 2;
     const casts = (e) => (e.rubble ? e.lod === 0 && stage <= 3 : !(e.lod >= shadowLod));
+    const geoStart = performance.now();
     for (const map of [this.bInst, this.rInst]) {
       for (const e of map.values()) {
         if (e.im) e.im.castShadow = casts(e);
         if (!e.n || (e.im && e.n <= e.cap)) continue;
-        if (!e.geo) e.geo = e.lodOf ? this.lodGeo(e.lodOf, e.lod) : this.rubbleGeo(e.rubbleOf, e.lod || 0);
+        if (!e.geo) {
+          // Coarse copies are made a few per frame: a size-up switches lots of buildings to a new
+          // level at once, and making them all in one frame was a visible hitch.
+          if (performance.now() - geoStart > 5) {
+            this.buildingsDirty = true;
+            continue;
+          }
+          e.geo = e.lodOf ? this.lodGeo(e.lodOf, e.lod) : this.rubbleGeo(e.rubbleOf, e.lod || 0);
+        }
         this.ensureInst(e, e.n, casts(e));
       }
     }
@@ -1064,10 +1119,14 @@ export class Renderer3D {
 
   destroyed(e) {
     const o = e.obj;
-    if (o.kind === 'prop') return this.propBreak(o, e.dir);
+    // Things far smaller than the kaiju (and anything past this frame's budget, when a shockwave
+    // flattens a whole district at once) just drop to rubble: flying debris nobody can see at
+    // that size is where the lag came from.
+    const tiny = o.tier <= this.stage - 2;
+    if (o.kind === 'prop') return tiny || this.breakBudget <= 0 ? (this.propsDirty = true) : this.propBreak(o, e.dir);
     this.buildingsDirty = true;
     const dist = Math.hypot(o.x - this.target.x, o.y - this.target.z);
-    if (dist > this.camDist * 2) {
+    if (dist > this.camDist * 2 || tiny || this.breakBudget <= 0) {
       const rec = this.bld.get(o.id);
       if (rec) {
         this.disposeRec(rec);
@@ -1075,9 +1134,12 @@ export class Renderer3D {
       }
       return;
     }
+    this.breakBudget--;
     const rec = this.ensureMeshFor(o);
     const size = Math.max(o.w, o.h);
-    this.fx.dustCloud(o.x, 0, o.y, size * 0.6, 12);
+    // Out in space it bursts in a puff of stardust instead of a cloud of dust off the ground.
+    if (o.vanish) this.fx.dustCloud(o.x, o.height * 0.45, o.y, size * 0.6, 14, 0xd8c8ff);
+    else this.fx.dustCloud(o.x, 0, o.y, size * 0.6, 12);
     // In the title shot what falls keeps burning: a column of smoke over the skyline.
     if (this.cinematic && o.height > 30 && Math.random() < 0.6) this.fx.plume(o.x, o.y, Math.min(80, Math.max(24, size * 0.45)), 25 + Math.random() * 20);
     if (e.animated) {
@@ -1172,6 +1234,7 @@ export class Renderer3D {
 
   propBreak(o, dir) {
     this.propsDirty = true;
+    this.breakBudget--;
     const e = this.propCache.get(`${o.type}:${o.variant}`);
     if (!e) return;
     const dist = Math.hypot(o.x - this.target.x, o.y - this.target.z);
@@ -1433,14 +1496,29 @@ export class Renderer3D {
     const t0 = performance.now();
     this.t += dt;
     this.resize();
+    if (game.city !== this.cityBuilt) this.switchWorld(game);
     const k = game.kaiju;
+    const realm = this.realm;
+    // How big the kaiju looks (the city size it plays like), which sets how much detail is worth
+    // drawing: the bigger it is, the coarser everything else gets.
+    this.stage = k.stage;
+    const look = Math.max(1, Math.min(6, game.look || k.stage));
+    this.breakBudget = look >= 5 ? 3 : 6;
+    const big = look >= 5 ? (look >= 6 ? 0.8 : 0.9) : 1;
+    if (big !== this.bigScale) {
+      this.bigScale = big;
+      this.resize(true);
+    }
+    const space = Boolean(game.inSpace);
+    this.fx.zeroG = space;
     this.handleVfx(game);
 
-    // Time of day follows run progress (a cinematic shot picks its own).
+    // Time of day follows run progress (a cinematic shot picks its own); past the city each realm
+    // has its own light.
     const cine = this.cinematic;
     if (cine && cine.dusk !== undefined) this.dusk = cine.dusk;
     else this.dusk += ((game.blackoutT > 0 ? 1 : game.dusk) - this.dusk) * Math.min(1, dt * (game.blackoutT > 0 ? 2 : 0.6));
-    const key = lerpKey(this.dusk);
+    const key = realm === 'city' ? lerpKey(this.dusk) : this.realmLook.key(realm);
     this.uniforms.uNight.value = key.night;
     this.hemi.color.copy(key.hemiS);
     this.hemi.groundColor.copy(key.hemiG);
@@ -1448,7 +1526,8 @@ export class Renderer3D {
     this.sun.color.copy(key.sun);
     this.sun.intensity = key.sunI;
     this.scene.fog.color.copy(key.fog);
-    this.scene.background.copy(key.fog);
+    this.skyColor.copy(key.fog);
+    this.scene.background = (realm !== 'city' && this.realmLook.background(realm)) || this.skyColor;
     if (this.bloom) this.bloom.strength = key.bloom;
     for (const parts of this.bridgeMeshes.values()) {
       for (const bp of parts) {
@@ -1461,8 +1540,17 @@ export class Renderer3D {
     // Camera: tilted, looking slightly ahead of the kaiju, pulling back as it grows.
     const span = game.viewSpan(k.r);
     const aspect = this.w / this.h;
-    const wantDist = this.distFor(span) * (aspect < 1 ? 1.15 : 1);
+    // The zoom-out between realms: the camera pulls back and back (the world swaps out of sight,
+    // under the warp overlay) and then falls into the new one.
+    let warpMul = 1;
+    const warp = game.warp;
+    if (warp) {
+      const f = Math.min(1, warp.t / warp.dur);
+      warpMul = 1 + 40 * (f < 0.5 ? Math.pow(f / 0.5, 2.4) : Math.pow(1 - (f - 0.5) / 0.5, 2.4));
+    }
+    const wantDist = this.distFor(span) * (aspect < 1 ? 1.15 : 1) * warpMul;
     this.camDist += (wantDist - this.camDist) * Math.min(1, dt * 2.2);
+    if (warp) this.camDist = wantDist;
     const lookX = k.x + k.facing.x * k.r * 1.2;
     const lookZ = k.y + k.facing.y * k.r * 1.2;
     if (Math.hypot(lookX - this.target.x, lookZ - this.target.z) > span * 2) {
@@ -1511,8 +1599,9 @@ export class Renderer3D {
       this.camera.near = Math.max(1, d * 0.25);
       this.camera.far = d * 4.5;
       this.camera.updateProjectionMatrix();
-      this.scene.fog.near = d * 1.05;
-      this.scene.fog.far = d * 3.4;
+      // (Space has no haze: what is out there stays sharp against the stars.)
+      this.scene.fog.near = d * (space ? 3.5 : 1.05);
+      this.scene.fog.far = d * (space ? 9 : 3.4);
     }
     if (this.tilt) this.tilt.enabled = !cine;
     if (this.camera.fov !== this.fxFov) {
@@ -1521,7 +1610,7 @@ export class Renderer3D {
     }
     // The title looks out across the whole city from street level: coarser voxels for what is
     // not close, and no x-ray outline (there, buildings hiding its feet are the point).
-    this.lodBias = cine ? 2.5 : 1;
+    this.lodBias = cine ? 2.5 : [1, 1, 1, 1.15, 1.6, 2.4, 3.4][look] * (realm === 'garden' ? 1.4 : 1);
     this.actors.setXray(!cine);
 
     // Sun / moon with a shadow box around the view.
@@ -1544,7 +1633,8 @@ export class Renderer3D {
     }
 
     const half = cine ? d * 0.75 : span * 0.75;
-    this.terrain.update(cine ? Math.min(k.stage, 4) : k.stage, this.target.x, this.target.z, cine ? d * 1.1 : span, key.night, key.water, this.t);
+    if (realm === 'city') this.terrain.update(cine ? Math.min(k.stage, 4) : k.stage, this.target.x, this.target.z, cine ? d * 1.1 : span, key.night, key.water, this.t);
+    else this.realmLook.update(this.t, this.target.x, this.target.z, span);
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);
@@ -1552,11 +1642,11 @@ export class Renderer3D {
     this.updateHospitalMarks(k.stage, Boolean(cine));
     this.updateSearchlights(cine);
     this.updateVaultMark(game);
-    this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
+    if (realm === 'city') this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
     // Charge trail
     if (k.dashT > 0 && Math.random() < 0.7) this.fx.dustCloud(k.x - k.facing.x * k.r, 0, k.y - k.facing.y * k.r, k.r * 0.5, 2, 0xdfe6ee);
     // Footsteps and wading
-    if (k.moving && k.r >= 6) {
+    if (k.moving && k.r >= 6 && !space) {
       const step = Math.floor(k.walkPhase / Math.PI);
       if (step !== this.lastStep) {
         this.lastStep = step;

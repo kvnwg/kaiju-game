@@ -217,7 +217,9 @@ export class Actors {
     const rig = this.kaiju;
     const s = k.r / rig.model.radius;
     rig.root.scale.setScalar(s);
-    rig.root.position.set(k.x, (k.inWater ? -k.r * 0.35 : elev) + (k.z || 0), k.y);
+    // Out in space it floats, bobbing gently, instead of standing on anything.
+    const float = game.inSpace ? k.r * (0.35 + Math.sin(t * 1.7) * 0.06) : 0;
+    rig.root.position.set(k.x, (k.inWater ? -k.r * 0.35 : elev) + (k.z || 0) + float, k.y);
     // Mid-hop: tuck forward on the way up, level out for the landing.
     const hop = k.hopT > 0 ? Math.sin((1 - k.hopT / k.hopMax) * Math.PI * 2) * 0.35 : 0;
     rig.root.rotation.order = 'YZX';
@@ -564,6 +566,8 @@ export class Actors {
       if (n.ball) n.ball.rotation.set(Math.sin(t * 2.2) * 0.25, 0, -lift + Math.sin(t * 2.6) * (b.swingT > 0 ? 0.6 : 0.15));
     }
     if (n.body && b.state === 'break') n.body.position.y = n.body.userData.base.y * 0.45;
+    // The Lawnmower's blade never stops.
+    if (n.blade) n.blade.rotation.y = t * (b.state === 'charge' || b.state === 'donut' ? 40 : 18);
     if (b.state === 'speech') {
       if (n.armL) n.armL.rotation.z = 1.3 + Math.sin(t * 5) * 0.4;
       if (n.armR) n.armR.rotation.z = 1.1 + Math.sin(t * 5 + 1) * 0.3;
@@ -605,12 +609,13 @@ export class Actors {
       if (u.type === 'heli') y = Math.max(20, k.r * 2.2) + Math.sin(t * 2 + u.age) * 2;
       else if (u.type === 'jet') y = Math.max(40, k.r * 3);
       else if (u.type === 'drone') y = Math.max(2, k.r * 0.9) + Math.sin(t * 5 + u.age) * 0.3;
+      else if (u.def.hover) y = u.def.hover * u.r + Math.sin(t * 2 + u.age) * u.r * 0.12;
       else if (u.def.mob || u.type === 'mech' || u.type === 'cop' || u.type === 'dog') y = Math.abs(Math.sin(u.age * (u.def.mob ? 9 : 6))) * u.r * 0.15;
       // Panic: trembling, running hunched away instead of facing the kaiju, cars fishtailing.
       const st = u.stress || 0;
       const shake = st > 0.2 ? Math.sin(t * 60 + u.id * 50) * u.r * 0.12 * st : 0;
       m.position.set(u.x + shake, y, u.y - shake * 0.6);
-      const faceAim = st < 0.12 && (u.type === 'heli' || u.type === 'tank' || u.type === 'artillery' || u.type === 'mech' || u.type === 'cop' || u.type === 'roadblock');
+      const faceAim = st < 0.12 && (u.type === 'heli' || u.type === 'tank' || u.type === 'artillery' || u.type === 'mech' || u.type === 'cop' || u.type === 'roadblock' || (u.def.base && !u.def.mob && u.type !== 'jet'));
       m.rotation.y = -(faceAim ? u.aim : u.heading) + (u.type === 'police' ? Math.sin(t * 9 + u.age) * 0.18 * st : 0);
       m.rotation.order = 'YXZ';
       m.rotation.z = u.type === 'heli' ? Math.sin(t * 3 + u.age) * 0.08 : u.type === 'cop' ? -st * 0.35 : 0;
