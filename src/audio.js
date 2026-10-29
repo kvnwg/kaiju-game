@@ -303,6 +303,14 @@ export class Sfx {
     this.vibrate([0, 550, 60]);
   }
 
+  // A size-up: the kaiju roars over a boom and the level-up jingle.
+  sizeUp() {
+    this.boom(1.2);
+    this.tone({ type: 'sawtooth', f0: 150, f1: 62, dur: 1.1, vol: 0.24, attack: 0.06, delay: 0.08 });
+    this.noise({ dur: 1.1, vol: 0.22, f0: 1600, f1: 260, q: 0.8, attack: 0.06, delay: 0.08 });
+    this.levelUp();
+  }
+
   levelUp() {
     if (!this.ok('level', 0.5)) return;
     [523, 659, 784, 1047].forEach((f, i) => this.tone({ type: 'square', f0: f, f1: f, dur: 0.14, vol: 0.09, delay: i * 0.08 }));
@@ -389,7 +397,7 @@ export class Sfx {
 
   handleEvent(e) {
     if (!this.ctx) return;
-    if (e.type === 'grow') this.levelUp();
+    if (e.type === 'grow') this.sizeUp();
     else if (e.type === 'slam') this.slam();
     else if (e.type === 'hop') this.hop();
     else if (e.type === 'comboTier') this.comboTier(e.tier);

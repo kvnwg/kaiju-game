@@ -17,11 +17,19 @@ import { personLook } from './models.js';
 import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
 import { RealmBackdrop } from './realm3d.js';
 
+// lod: how much sooner buildings and props switch to coarser voxels; far: how far the city is
+// drawn before the haze; debris: share of the usual flying debris; breaks: share of the usual
+// animated collapses each frame. 'lowest' is for devices that are really struggling.
 export const QUALITY = {
-  high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8 },
-  medium: { name: 'Medium', pixelRatio: 1, shadows: 1024, bloom: true, tilt: false, lights: 6 },
-  low: { name: 'Low', pixelRatio: 0.75, shadows: 0, bloom: false, tilt: false, lights: 4 },
+  high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8, lod: 1, far: 1, debris: 1, breaks: 1 },
+  medium: { name: 'Medium', pixelRatio: 1, shadows: 1024, bloom: true, tilt: false, lights: 6, lod: 1, far: 1, debris: 1, breaks: 1 },
+  low: { name: 'Low', pixelRatio: 0.75, shadows: 0, bloom: false, tilt: false, lights: 4, lod: 1.15, far: 0.9, debris: 0.7, breaks: 1 },
+  lowest: { name: 'Lowest', pixelRatio: 0.5, shadows: 0, bloom: false, tilt: false, lights: 0, lod: 1.8, far: 0.7, debris: 0.35, breaks: 0.5 },
 };
+export const QUALITY_ORDER = ['high', 'medium', 'low', 'lowest'];
+// Real frame times (ms) that count as struggling, and as really struggling.
+const SLOW_FRAME = 40;
+const VERY_SLOW_FRAME = 80;
 const YAW = 0.62;
 const PITCH = 0.92; // ~53 degrees down
 
@@ -235,8 +243,10 @@ export class Renderer3D {
 
   // ---------------------------------------------------------------- setup
   setQuality(q) {
+    if (!QUALITY[q]) q = 'medium';
     this.qualityName = q;
     this.quality = QUALITY[q];
+    if (this.fx) this.fx.debrisCap = Math.round(this.fx.debrisMax * this.quality.debris);
     while (this.points.length > this.quality.lights) this.scene.remove(this.points.pop());
     while (this.points.length < this.quality.lights) {
       const p = new THREE.PointLight(0xffffff, 0, 50, 1.6);
@@ -1493,7 +1503,6 @@ export class Renderer3D {
   }
 
   render(game, dt) {
-    const t0 = performance.now();
     this.t += dt;
     this.resize();
     if (game.city !== this.cityBuilt) this.switchWorld(game);
@@ -1503,7 +1512,7 @@ export class Renderer3D {
     // drawing: the bigger it is, the coarser everything else gets.
     this.stage = k.stage;
     const look = Math.max(1, Math.min(6, game.look || k.stage));
-    this.breakBudget = look >= 5 ? 3 : 6;
+    this.breakBudget = Math.max(1, Math.round((look >= 5 ? 3 : 6) * this.quality.breaks));
     const big = look >= 5 ? (look >= 6 ? 0.8 : 0.9) : 1;
     if (big !== this.bigScale) {
       this.bigScale = big;
@@ -1597,11 +1606,12 @@ export class Renderer3D {
       this.camera.lookAt(this.target);
       // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
       this.camera.near = Math.max(1, d * 0.25);
-      this.camera.far = d * 4.5;
+      const reach = space ? 1 : this.quality.far;
+      this.camera.far = d * 4.5 * reach;
       this.camera.updateProjectionMatrix();
       // (Space has no haze: what is out there stays sharp against the stars.)
-      this.scene.fog.near = d * (space ? 3.5 : 1.05);
-      this.scene.fog.far = d * (space ? 9 : 3.4);
+      this.scene.fog.near = d * (space ? 3.5 : 1.05 * reach);
+      this.scene.fog.far = d * (space ? 9 : 3.4 * reach);
     }
     if (this.tilt) this.tilt.enabled = !cine;
     if (this.camera.fov !== this.fxFov) {
@@ -1610,7 +1620,7 @@ export class Renderer3D {
     }
     // The title looks out across the whole city from street level: coarser voxels for what is
     // not close, and no x-ray outline (there, buildings hiding its feet are the point).
-    this.lodBias = cine ? 2.5 : [1, 1, 1, 1.15, 1.6, 2.4, 3.4][look] * (realm === 'garden' ? 1.4 : 1);
+    this.lodBias = (cine ? 2.5 : [1, 1, 1, 1.15, 1.6, 2.4, 3.4][look] * (realm === 'garden' ? 1.4 : 1)) * this.quality.lod;
     this.actors.setXray(!cine);
 
     // Sun / moon with a shadow box around the view.
@@ -1661,21 +1671,35 @@ export class Renderer3D {
 
     if (this.composer) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
-    this.trackPerf(performance.now() - t0, dt);
+    this.trackPerf();
   }
 
-  // Step quality down if frames run long for a few seconds.
-  trackPerf(ms, dt) {
-    this.frameTimes.push(dt);
-    if (this.frameTimes.length < 120) return;
-    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
-    this.frameTimes = [];
-    if (avg > 0.04 && this.autoQuality !== false) {
-      const next = this.qualityName === 'high' ? 'medium' : this.qualityName === 'medium' ? 'low' : null;
-      if (next) {
-        this.setQuality(next);
-        if (this.onQualityChange) this.onQualityChange(next);
-      }
+  // Step quality down when frames run long for a couple of seconds, two steps at once when the
+  // device is really struggling. Measured on the real time between frames (the game's own step is
+  // capped, so it can't tell 15 fps from 3), ignoring one-off stalls such as a world being built,
+  // and never in a hidden tab.
+  trackPerf() {
+    const now = performance.now();
+    const gap = this.lastFrameAt ? now - this.lastFrameAt : 0;
+    this.lastFrameAt = now;
+    if (!gap || (typeof document !== 'undefined' && document.hidden)) return;
+    if (gap > 600) {
+      this.frameTimes = [];
+      return;
     }
+    this.frameTimes.push(gap);
+    const total = this.frameTimes.reduce((a, b) => a + b, 0);
+    if (total < 2500 || this.frameTimes.length < 20) return;
+    // The median, so a few hitches don't count against a device that is otherwise fine.
+    const sorted = [...this.frameTimes].sort((a, b) => a - b);
+    const typical = sorted[Math.floor(sorted.length / 2)];
+    this.frameTimes = [];
+    this.frameMs = typical;
+    if (this.autoQuality === false || typical <= SLOW_FRAME) return;
+    const at = QUALITY_ORDER.indexOf(this.qualityName);
+    const next = QUALITY_ORDER[Math.min(QUALITY_ORDER.length - 1, at + (typical > VERY_SLOW_FRAME ? 2 : 1))];
+    if (next === this.qualityName) return;
+    this.setQuality(next);
+    if (this.onQualityChange) this.onQualityChange(next, true);
   }
 }

@@ -1,6 +1,6 @@
 import {
   WORLD, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
-  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -201,6 +201,14 @@ export class Game {
     this.trainRespawn = 0;
     this.streamWorld(true);
     this.populate(true);
+    // A first run's sheds and playhouses near home are rickety: the first building comes down in
+    // a few bites, seconds into the game.
+    if (firstRun) {
+      const k = this.kaiju;
+      for (const o of this.objectsNear(k.x, k.y, FIRST_RUN.rickety)) {
+        if (o.kind === 'building' && o.tier === 2 && o.state === 'intact') o.hp = o.maxHp = TIER_HP[1] * 1.2;
+      }
+    }
     this.objective = { ...OBJECTIVES[Math.floor(createRng(seed ^ 0x5bd1e995).next() * OBJECTIVES.length)], done: false };
   }
 
@@ -894,7 +902,7 @@ export class Game {
     } else {
       k.stillTime += dt;
     }
-    // Hop: a small kaiju vaults low obstacles (fences, hedges, parked cars) it can't break yet.
+    // Hop: a small kaiju vaults low obstacles (hedges, parked cars) it can't break yet.
     if (k.hopT > 0) {
       k.hopT = Math.max(0, k.hopT - dt);
       const f = 1 - k.hopT / k.hopMax;
@@ -915,7 +923,8 @@ export class Game {
       if (o.state !== 'intact') continue;
       const od = distToRect(k.x, k.y, o);
       if (od >= crushR) continue;
-      const crushable = !o.landmark && (isSnack(o.tier, k.stage) || (!o.structure && o.tier <= k.stage));
+      // Fences are flimsy at any size: walking into one smashes it.
+      const crushable = !o.landmark && (isSnack(o.tier, k.stage) || (!o.structure && o.tier <= k.stage) || o.type === 'fence');
       if (od >= k.r && !crushable) continue;
       const low = !o.structure && !o.landmark && !o.walkable && (o.height || 0) <= k.r * 2.2;
       if (low && k.hopT > 0) continue; // sailing over it
@@ -1596,7 +1605,7 @@ export class Game {
     this.fx.rings.push({ x: k.x, y: k.y, r0: s.radius, r1: s.radius * 4.5, life: 1.1, max: 1.1, color: 0xffffff, width: s.radius * 0.4 });
     this.shake = Math.max(this.shake, arriving ? 0.5 : 0.9);
     // Size-up: a beat of slow motion and a shockwave that flattens everything far smaller.
-    if (!arriving) this.slowmo = Math.max(this.slowmo, 1.1);
+    if (!arriving) this.slowmo = Math.max(this.slowmo, this.firstRun && next === 2 ? FIRST_RUN.sizeUpSlowmo : 1.1);
     for (const o of this.objectsNear(k.x, k.y, s.radius * 4)) if (o.tier <= k.stage - 2 && !o.landmark) this.destroyObject(o, norm(o.x - k.x, o.y - k.y), 'crush');
     for (const u of this.units) if (!u.dead && u.tier < k.stage && Math.hypot(u.x - k.x, u.y - k.y) < s.radius * 4) this.killUnit(u);
     this.emit('grow', { stage: k.stage, name: s.name, size: s.size, realm: this.realm, loop: this.loop });
@@ -1828,7 +1837,9 @@ export class Game {
     this.fxEvent({ t: 'destroy', obj: o, dir: o.fallDir, cause, animated: o.state === 'collapsing' });
 
     if (cause !== 'boss') {
-      const loot = lootFor(o.tier, k.stage, o.value);
+      // A fence a hatchling smashes (see the crush rule) pays a token: it's for fun, not growth.
+      const flimsy = o.type === 'fence' && o.tier > k.stage;
+      const loot = lootFor(o.tier, k.stage, flimsy ? o.value * 0.2 : o.value);
       let biomass = loot.biomass;
       if (cause === 'chain' && !completedSets(this.held).some((s) => s.id === 'demolition')) biomass = 0;
       let scrap = loot.scrap * this.diff.loot * this.scrapMult();
@@ -1847,7 +1858,7 @@ export class Game {
       if (o.structure && o.tier >= k.stage) this.stats.bigTopples++;
       if (o.golden) this.crackVault(o);
       if (o.tier >= 5 && this.stats.firstSkyscraperAt === null) this.stats.firstSkyscraperAt = this.time;
-      this.spawnOrbs(o.x, o.y, Math.min(10, 1 + o.tier * 2), biomass > 0);
+      this.spawnOrbs(o.x, o.y, flimsy ? 1 : Math.min(10, 1 + o.tier * 2), biomass > 0);
       if (o.structure && o.tier >= k.stage) {
         this.fx.floaters.push({ x: o.x, y: o.y, h: o.height * 0.8, text: `+${shortMoney(price)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
       }
@@ -3506,9 +3517,10 @@ export class Game {
     for (const u of this.units) u.fear = Math.max(u.fear, 3);
     this.emit('gateBossDefeated', { name: b.name, text: b.def.defeat });
     // Clear the boss after the death throes; the full growth bar then grows the kaiju.
+    // (A first run skips the Altar on the first size-up: fewer menus in a new player's first minute.)
     this.schedule(1.4, () => {
       if (this.boss === b) this.boss = null;
-      this.openAltar();
+      if (!(this.firstRun && b.gate === 1)) this.openAltar();
     });
     return true;
   }

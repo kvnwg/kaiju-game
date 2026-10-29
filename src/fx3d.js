@@ -148,6 +148,8 @@ export class FX {
     const box = new THREE.BoxGeometry(1, 1, 1);
     this.debrisMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     this.debrisMesh = new THREE.InstancedMesh(box, this.debrisMat, DEBRIS_CAP);
+    this.debrisMax = DEBRIS_CAP;
+    this.debrisCap = DEBRIS_CAP; // fewer on the lowest graphics (see render3d.js QUALITY)
     this.debrisMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.debrisMesh.setColorAt(0, new THREE.Color(1, 1, 1));
     this.debrisMesh.count = 0;
@@ -215,7 +217,7 @@ export class FX {
 
   // ---------------------------------------------------------------- spawners
   addDebris(d) {
-    if (this.debris.length >= DEBRIS_CAP) {
+    if (this.debris.length >= (this.debrisCap || DEBRIS_CAP)) {
       // Recycle the oldest settled piece first.
       let idx = this.debris.findIndex((p) => p.settled);
       if (idx < 0) idx = 0;

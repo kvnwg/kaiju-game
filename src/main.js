@@ -1,14 +1,15 @@
 import { Game } from './game.js';
-import { Renderer3D } from './render3d.js';
+import { Renderer3D, QUALITY } from './render3d.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { loadSave, writeSave, clearSave } from './storage.js';
-import { KAIJU } from './config.js';
+import { KAIJU, STAGES, MAX_STAGE, FIRST_RUN } from './config.js';
 import { Sfx, Music } from './audio.js';
 import { Hub } from './hub.js';
 import { Platform } from './platform.js';
 import { setupTitle, TITLE } from './title.js';
 import { frontPage } from './news.js';
+import { setupIntro, introPhase, shrinkRadius } from './intro.js';
 import { WarpOverlay } from './warp.js';
 import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 import { paceState, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded, paceReport } from './adpacing.js';
@@ -29,6 +30,7 @@ platform.loadingStart();
 // boot(), once the platform is ready, from wherever the platform keeps it.
 let save = null;
 let pace = null; // ad pacing for this player (see adpacing.js)
+let intro = null; // a new player's opening seconds as the full-grown kaiju (see intro.js): { t, phase }
 let settings = null;
 let store = null;
 let hub = null;
@@ -89,9 +91,13 @@ let reviveAdOffered = false; // this run's last knockdown offered an ad revive (
 
 function defaultQuality() {
   const saved = settings.quality;
+  if (params.get('q')) return params.get('q');
   if (saved) return saved;
   const mobile = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  return params.get('q') || (mobile ? 'medium' : 'high');
+  // A weak device (two cores or fewer, or 2 GB of memory or less) starts on Low; the game steps
+  // down further on its own if it still struggles (see Renderer3D.trackPerf).
+  const weak = (navigator.hardwareConcurrency || 4) <= 2 || (navigator.deviceMemory || 4) <= 2;
+  return weak ? 'low' : mobile ? 'medium' : 'high';
 }
 
 // A chapter run: costs energy (the very first run is free), carries the meta loadout in.
@@ -124,6 +130,57 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');
 }
 
+// A new player's first seconds: the full-grown kaiju downtown, theirs to steer, before it shrinks
+// down and the first run begins in a backyard.
+const introEl = document.getElementById('intro');
+const introBar = introEl.querySelector('.intro-bar i');
+introEl.querySelector('.intro-keys').textContent = window.matchMedia('(pointer: coarse)').matches ? 'Drag to stomp around' : 'WASD or arrows to stomp around';
+introEl.querySelector('.intro-skip').addEventListener('click', () => {
+  if (intro && intro.phase === 'play') intro.t = FIRST_RUN.intro;
+});
+
+function startIntro() {
+  renderer.cinematic = null;
+  titleActive = false;
+  game = new Game({ kaijuId: 'rex', firstRun: true, meta: loadout(save, 'rex'), seed: Number(params.get('seed')) || Date.now() });
+  setupIntro(game);
+  renderer.startRun(game);
+  paused = false;
+  ui.hideModals();
+  ui.show('hud', false);
+  intro = { t: 0, phase: 'play' };
+  introEl.dataset.phase = 'play';
+  introEl.classList.remove('hidden');
+  sfx.handleEvent({ type: 'grow' });
+}
+
+function updateIntro(dt) {
+  intro.t += dt;
+  const phase = introPhase(intro.t);
+  if (phase !== intro.phase) {
+    intro.phase = phase;
+    introEl.dataset.phase = phase;
+  }
+  if (phase === 'play') {
+    const v = input.get();
+    const w = renderer.worldDir(v.x, v.y);
+    game.setInput(w.x, w.y);
+    input.takeDash();
+  } else game.setInput(0, 0);
+  game.update(dt);
+  if (phase === 'shrink') game.kaiju.r = shrinkRadius(intro.t);
+  for (const e of game.drainEvents()) sfx.handleEvent(e);
+  introBar.style.transform = `scaleX(${Math.max(0, 1 - intro.t / FIRST_RUN.intro)})`;
+  if (phase === 'done') {
+    intro = null;
+    introEl.classList.add('hidden');
+    save.introSeen = true;
+    persist();
+    ui.flash(1.6);
+    startRun({ kaijuId: 'rex', firstRun: true });
+  }
+}
+
 // The hub, with the city (or the wreckage of the last run) behind it.
 function showHub(tab) {
   renderer.cinematic = null;
@@ -154,7 +211,8 @@ function showTitle() {
     titleActive = false;
     title = null;
     renderer.cinematic = null;
-    if (!save.tutorialDone) startRun({ kaijuId: 'rex', firstRun: true });
+    if (!save.tutorialDone && !save.introSeen) startIntro();
+    else if (!save.tutorialDone) startRun({ kaijuId: 'rex', firstRun: true });
     else showHub('battle');
   });
 }
@@ -187,8 +245,10 @@ function handleEvents(events) {
         }
         flashClass('cine', 1700);
         ui.flash(1);
-        // A beat to watch the shockwave, then the newspaper slams in with the story so far.
-        newsAt = performance.now() + 1000;
+        ui.sizeUp({ size: e.size.toLowerCase(), next: STAGES[e.stage + 1] && STAGES[e.stage + 1].realm === game.realm && e.stage < MAX_STAGE ? STAGES[e.stage + 1].size.toLowerCase() : null });
+        // A beat to watch the shockwave, then the newspaper slams in with the story so far. (Not on a
+        // first run's first size-up: a new player keeps playing.)
+        if (!(game.firstRun && e.stage === 2)) newsAt = performance.now() + 1000;
         break;
       case 'warp':
         hintUntil = 0;
@@ -464,7 +524,8 @@ function frame(now) {
   }
   if (game && renderer) {
     const inRun = !ui.hud.classList.contains('hidden');
-    const playing = inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying;
+    if (intro) updateIntro(dt);
+    const playing = (inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying) || Boolean(intro);
     platform.setPlaying(playing);
     if (playing && pace) tickPlay(pace, dt);
     if (inRun && !paused && !newsUp && !platform.adPlaying) {
@@ -481,7 +542,7 @@ function frame(now) {
       }
     }
     // Behind the hub, wreckage settles in slow motion; the title and a run play at full speed.
-    renderer.render(game, titleActive || (inRun && !paused && !newsUp) ? dt : dt * 0.25);
+    renderer.render(game, titleActive || intro || (inRun && !paused && !newsUp) ? dt : dt * 0.25);
     // The newspaper's photo is the frame just drawn, so it has to be taken straight after render.
     if (newsAt && now >= newsAt && inRun && !paused && (game.state === 'playing' || game.state === 'picking')) {
       newsAt = 0;
@@ -562,9 +623,15 @@ async function boot() {
     if (!window.THREE) throw new Error('three.js did not load');
     renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || settings.pixelArt === true, floaterLayer: document.getElementById('floaters') });
     renderer.onVfx = (list, g) => sfx.handleVfx(list, g);
-    renderer.onQualityChange = (q) => {
+    renderer.onQualityChange = (q, auto) => {
       settings.quality = q;
       persist();
+      // Say so when the game lowered the graphics on its own, and where to change them back.
+      if (auto && !ui.hud.classList.contains('hidden')) {
+        hintUntil = performance.now() + 4500;
+        movedFor = -2; // (the move-to-dismiss rule waits a little longer for this one)
+        ui.hint(`Graphics lowered to ${QUALITY[q].name} to keep things smooth (change it in Pause).`);
+      }
     };
   } catch (err) {
     loading.innerHTML = `<div class="panel small"><h2>3D isn't available</h2><p class="muted">This browser couldn't start WebGL (${err.message}). Try a recent Chrome, Safari or Firefox.</p></div>`;

@@ -83,7 +83,7 @@ html, body {
    (--ui, set in main.js). Things placed in screen pixels from script (floaters, the stick, the prey
    arrow's position) and things that size themselves (title, newspaper) are left out. Viewport units
    inside these get divided by --ui. */
-#hud, #dashBtn, #app > .modal, #hub, #adBreak, #toast { zoom: var(--ui, 1); }
+#hud, #dashBtn, #app > .modal, #hub, #adBreak, #toast, #intro { zoom: var(--ui, 1); }
 :where(#app) button { font-family: inherit; color: inherit; }
 
 #game {
@@ -1733,3 +1733,35 @@ html, body {
 .rev-near { margin: 2px 0 8px; font-weight: 700; color: #ffd36b; }
 .rev-near.best { color: #7dff9a; }
 .rev-why { margin: -4px 0 4px; text-align: center; }
+
+/* ---------- the size-up stamp ---------- */
+.size-up { position: absolute; left: 0; right: 0; top: 24%; display: grid; justify-items: center; gap: 6px; pointer-events: none; opacity: 0; z-index: 6; }
+.size-up b { position: relative; font-family: var(--display); font-weight: 400; font-size: clamp(30px, 9vw, 72px); line-height: 1; color: #b4ff95; text-shadow: var(--outline-big), 5px 6px 0 var(--ink); transform: rotate(-4deg); }
+.size-up span { position: relative; font-family: var(--display); font-size: clamp(12px, 2.6vw, 20px); color: #fff; text-shadow: var(--outline); padding: 6px 12px 4px; background: rgba(42, 23, 54, 0.82); }
+.size-up small { position: relative; font-family: var(--display); font-size: clamp(9px, 1.6vw, 12px); color: #ffd36b; text-shadow: var(--outline); }
+.size-up .su-rays { position: absolute; left: 50%; top: 40%; width: min(90vw, 560px); aspect-ratio: 1; max-width: 100%; transform: translate(-50%, -50%); background: repeating-conic-gradient(from 0deg, rgba(180, 255, 149, 0.28) 0 10deg, transparent 10deg 30deg); mask-image: radial-gradient(circle, #000 18%, transparent 62%); -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 62%); }
+.size-up.show { animation: suLife 2.8s steps(1, end) forwards; }
+.size-up.show b { animation: suSlam 0.36s steps(4) both; }
+.size-up.show span { animation: suSlide 0.3s 0.25s steps(3) both; }
+.size-up.show small { animation: suSlide 0.3s 0.45s steps(3) both; }
+.size-up.show .su-rays { animation: suSpin 2.8s linear both; }
+@keyframes suLife { 0%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes suSlam { 0% { transform: scale(3.2) rotate(-14deg); opacity: 0; } 60% { transform: scale(0.9) rotate(-2deg); opacity: 1; } 100% { transform: rotate(-4deg); opacity: 1; } }
+@keyframes suSlide { 0% { transform: translateY(14px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes suSpin { from { transform: translate(-50%, -50%) rotate(0deg) scale(0.6); } to { transform: translate(-50%, -50%) rotate(60deg) scale(1.1); } }
+@media (prefers-reduced-motion: reduce) { .size-up.show b, .size-up.show span, .size-up.show small, .size-up.show .su-rays { animation-duration: 0.01s; } }
+
+/* ---------- a new player's opening seconds as the giant (see intro.js) ---------- */
+.intro { position: absolute; inset: 0; z-index: 8; pointer-events: none; display: grid; grid-template-rows: auto auto 1fr auto; justify-items: center; gap: 10px; padding: max(18px, env(safe-area-inset-top, 0px)) 16px max(18px, env(safe-area-inset-bottom, 0px)); }
+.intro-top { display: grid; justify-items: center; gap: 4px; text-align: center; animation: suSlide 0.4s steps(4) both; }
+.intro-top b { font-family: var(--display); font-weight: 400; font-size: clamp(20px, 5vw, 40px); line-height: 1; color: var(--butter); text-shadow: var(--outline-big), 4px 5px 0 var(--ink); transform: rotate(-2deg); animation: suSlam 0.4s steps(4) both; }
+.intro-top span { font-family: var(--display); font-size: clamp(12px, 2.4vw, 18px); color: #fff; text-shadow: var(--outline); }
+.intro-top small { font-family: var(--display); font-size: 10px; color: var(--lav); text-shadow: var(--outline); margin-top: 4px; }
+.intro-bar { width: min(260px, 70vw); height: 8px; background: rgba(42, 23, 54, 0.7); box-shadow: 0 0 0 2px var(--ink); }
+.intro-bar i { display: block; height: 100%; background: var(--butter); transform-origin: 0 50%; }
+.intro-small { align-self: center; opacity: 0; }
+.intro-small b { font-family: var(--display); font-weight: 400; font-size: clamp(18px, 4.6vw, 38px); color: #fff; text-shadow: var(--outline-big), 4px 5px 0 var(--ink); }
+.intro-skip { pointer-events: auto; justify-self: end; align-self: end; font-family: var(--display); font-size: 11px; padding: 8px 12px 6px; color: var(--ink-text); background: var(--lav); border: 0; cursor: pointer; }
+.intro-skip:focus-visible { outline: 2px solid var(--butter); outline-offset: 2px; }
+.intro[data-phase='shrink'] .intro-top, .intro[data-phase='shrink'] .intro-bar, .intro[data-phase='shrink'] .intro-skip { visibility: hidden; }
+.intro[data-phase='shrink'] .intro-small { opacity: 1; animation: suSlam 0.5s steps(5) both; }

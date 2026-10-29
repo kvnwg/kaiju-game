@@ -523,3 +523,37 @@ test('past the city: space, the multiverse, the garden, then round to the start'
   assert.equal(g.state, 'won');
   assert.equal(g.results.loop, 2);
 });
+
+test('a fence smashes the moment the kaiju walks into it, at any size', () => {
+  const g = new Game({ seed: 5, firstRun: true });
+  const k = g.kaiju;
+  const fence = g.objects.filter((o) => o.type === 'fence' && o.state === 'intact').sort((a, b) => Math.hypot(a.x - k.x, a.y - k.y) - Math.hypot(b.x - k.x, b.y - k.y))[0];
+  assert.ok(fence, 'a fence near home');
+  const dir = { x: fence.x - k.x, y: fence.y - k.y };
+  const d = Math.hypot(dir.x, dir.y);
+  k.x = fence.x - (dir.x / d) * (k.r + 3);
+  k.y = fence.y - (dir.y / d) * (k.r + 3);
+  for (let i = 0; i < 40 && fence.state === 'intact'; i++) {
+    g.setInput(dir.x / d, dir.y / d);
+    g.update(1 / 30);
+    if (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  assert.notEqual(fence.state, 'intact');
+  assert.equal(k.hopT, 0, 'no hop over it');
+});
+
+test('a first run starts with a rickety shed close to home and skips the Altar on the first size-up', () => {
+  const g = new Game({ seed: 5, firstRun: true });
+  const k = g.kaiju;
+  const sheds = g.objects.filter((o) => o.kind === 'building' && o.tier === 2 && Math.hypot(o.x - k.x, o.y - k.y) < 160);
+  assert.ok(sheds.length && sheds.every((o) => o.hp <= 15));
+  g.gateCleared[1] = true;
+  g.boss = null;
+  g.addBiomass(g.stage.biomassToNext);
+  for (let i = 0; i < 200 && k.stage < 2; i++) {
+    g.update(1 / 30);
+    if (g.state === 'picking') g.choose(g.pick.options[0]);
+    assert.notEqual(g.state, 'altar');
+  }
+  assert.equal(k.stage, 2);
+});

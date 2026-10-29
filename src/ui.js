@@ -130,6 +130,7 @@ export class UI {
     this.comboNum = $('#combo b');
     this.comboBar = $('#combo i');
     this.calloutEl = $('#callout');
+    this.sizeUpEl = $('#sizeUp');
     this.flashEl = $('#screenFlash');
     this.growthEl = $('#growth');
     this.scrapPill = this.scrapEl.parentElement;
@@ -360,6 +361,15 @@ export class UI {
     el.classList.add('show');
   }
 
+  // The size-up stamp: SIZE UP! slams onto the screen with the new size, and what comes next.
+  sizeUp({ size, next }) {
+    const el = this.sizeUpEl;
+    el.innerHTML = `<i class="su-rays"></i><b>SIZE UP!</b><span>Now ${size}-sized</span>${next ? `<small>Next: ${next}</small>` : ''}`;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  }
+
   flash(strength = 1) {
     const el = this.flashEl;
     el.style.setProperty('--a', String(0.55 * strength));
@@ -578,7 +588,7 @@ export class UI {
 
   showPause({ held = new Map(), quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit, onCashOut = null }) {
     const el = this.modals.pause;
-    const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
+    const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low'], ['lowest', 'Lowest']];
     el.innerHTML = `<div class="panel small">
         <h2>Paused</h2>
         <div class="col">
@@ -597,7 +607,7 @@ export class UI {
           <h3>Graphics</h3>
           <div class="segs" id="qualSegs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
         </div>
-        <p class="tiny">Low graphics turn off shadows, bloom and tilt-shift for older devices.</p>
+        <p class="tiny">Low turns off shadows, bloom and tilt-shift. Lowest also halves the resolution and draws less detail and debris, for devices that really struggle. The game lowers these on its own if it runs slowly.</p>
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);
