@@ -128,35 +128,53 @@ export const DIFFICULTIES = {
 };
 
 // MVP roster: Rex, Gorilla Grunt, Ember Lizard, Volt Beetle (design doc: MVP scope).
+// Each kaiju has a signature trait that changes how it plays (see TRAITS and game.js).
 export const KAIJU = {
   rex: {
-    id: 'rex', name: 'Rex', rarity: 'Common', element: 'None',
-    ability: 'Bite', abilityText: 'Heavy single-target damage',
-    playstyle: 'All-rounder, teaches the basics', earn: 'Free from the start',
+    id: 'rex', name: 'Rex', rarity: 'Common', element: 'None', trait: 'pounce',
+    ability: 'Pounce', abilityText: 'Charge at an enemy and you pounce on it, landing with a crushing bite that swallows everyone around you. Every bite heals you and readies the next pounce.',
+    playstyle: 'Predator: leap from crowd to crowd', earn: 'Free from the start',
     color: '#5aa84f', attack: { kind: 'bite', mult: 1.5, cooldown: 0.7, range: 1.7 },
     hpMult: 1, speedMult: 1,
   },
   gorilla: {
-    id: 'gorilla', name: 'Gorilla Grunt', rarity: 'Common', element: 'None',
-    ability: 'Ground Pound', abilityText: 'Area damage around you',
-    playstyle: 'Close-range brawler', earn: 'Beat Harbor Town',
+    id: 'gorilla', name: 'Gorilla Grunt', rarity: 'Common', element: 'None', trait: 'throw',
+    ability: 'Grab & Throw', abilityText: 'Every 5th punch rips a building out of the ground and hurls it at the nearest enemy. Takes 30% less damage while standing its ground.',
+    playstyle: 'Brawler: plant your feet and throw the city', earn: 'Beat Harbor Town',
     color: '#6d5a4e', attack: { kind: 'pound', mult: 1.1, cooldown: 0.85, range: 1.9 },
-    hpMult: 1.15, speedMult: 0.95,
+    hpMult: 1.2, speedMult: 0.9,
   },
   ember: {
-    id: 'ember', name: 'Ember Lizard', rarity: 'Rare', element: 'Fire',
-    ability: 'Fire Trail', abilityText: 'Leave burning ground behind you',
-    playstyle: 'Damage over time, great with destruction augments', earn: 'Rare egg',
+    id: 'ember', name: 'Ember Lizard', rarity: 'Rare', element: 'Fire', trait: 'wildfire',
+    ability: 'Wildfire', abilityText: 'Everything you wreck catches fire, and fire spreads from building to building. Standing in your own flames heals you.',
+    playstyle: 'Arsonist: light a block and dance in the blaze', earn: 'Rare egg',
     color: '#d9622b', attack: { kind: 'bite', mult: 1.0, cooldown: 0.6, range: 1.6 },
-    trail: true, hpMult: 0.95, speedMult: 1.05,
+    trail: true, hpMult: 0.8, speedMult: 1.12,
   },
   volt: {
-    id: 'volt', name: 'Volt Beetle', rarity: 'Epic', element: 'Electric',
-    ability: 'Chain Zap', abilityText: 'Lightning jumps between vehicles',
-    playstyle: 'Hits groups; fits the Storm Bringer set', earn: 'Epic egg',
+    id: 'volt', name: 'Volt Beetle', rarity: 'Epic', element: 'Electric', trait: 'blink',
+    ability: 'Blink & Overload', abilityText: 'Charge teleports you, zapping everything in between. Moving builds charge: when it is full, your next zap overloads into a storm that hits ten targets and stuns them.',
+    playstyle: 'Storm: never stop moving', earn: 'Epic egg',
     color: '#3d6fd6', attack: { kind: 'zap', mult: 0.95, cooldown: 0.6, range: 2.3, chains: 3 },
     hpMult: 1, speedMult: 1,
   },
+};
+
+// The signature traits' numbers.
+// pounce (Rex): the leap lasts `time` dashes, lands a bite of `dmg` x base damage over `radius`
+//   kaiju radii; each person eaten heals `heal` of max health and cuts `cdCut` s off the cooldown.
+// throw (Gorilla): every `every`th hit hurls a building within `reach` radii for `dmg` x base
+//   damage; standing still takes `standDr` less damage.
+// wildfire (Ember): wrecked buildings burn for `burnT` s; each burning spot spreads to a neighbour
+//   with chance `spread` each quarter second, up to `cap` fires; standing in fire heals `heal`/s.
+// blink (Volt): Charge teleports `dist` radii, hitting what it passes for `dmg` x base; charge
+//   builds `rate`/s while moving (drains `drain`/s still) and at 100 the next zap chains to
+//   `overload` targets and freezes them for `stun` s.
+export const TRAITS = {
+  pounce: { time: 1.4, dmg: 3.5, radius: 1.8, heal: 0.02, cdCut: 0.35 },
+  throw: { every: 5, reach: 3, dmg: 6, standDr: 0.3 },
+  wildfire: { burnT: 4, spread: 0.16, cap: 36, gens: 4, heal: 0.03 },
+  blink: { dist: 6, dmg: 2, rate: 26, drain: 12, overload: 10, stun: 1.2 },
 };
 
 export const CITIES = {

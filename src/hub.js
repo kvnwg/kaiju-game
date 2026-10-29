@@ -559,6 +559,7 @@ export class Hub {
       return `<div class="kcard2 ${open ? '' : 'locked'} ${sel ? 'sel' : ''}" style="--kc:${kd.color}">
         <i class="kport big"></i>
         <div class="kinfo"><b>${kd.name}</b><small>${kd.rarity} · ${kd.ability}</small>
+          <em class="kstyle">${kd.playstyle}</em><p class="kability">${kd.abilityText}</p>
           <span class="kstars">${open ? '★'.repeat(ks.stars) + '☆'.repeat(5 - ks.stars) : meta.unlock}</span>
           ${need ? `<span class="shardbar"><i style="width:${Math.min(100, (100 * shards) / need)}%"></i><small>${ico('shard')}${shards}/${need}</small></span>` : '<small>Max stars</small>'}
           ${open ? `<small class="muted">Mastery ${masteryLv}</small>` : ''}

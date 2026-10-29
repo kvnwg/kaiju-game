@@ -126,6 +126,9 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   newsAfterWarp = false;
   warpFx.cancel();
   reviveAdOffered = false;
+  // Rex pounces and Volt Beetle blinks where the others charge.
+  const trait = game.def.trait;
+  dashBtn.querySelector('b').textContent = trait === 'pounce' ? 'Pounce' : trait === 'blink' ? 'Blink' : 'Charge';
   ui.warmNewsFonts();
   hintUntil = firstRun || save.runs < 2 ? performance.now() + 7000 : 0;
   ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');

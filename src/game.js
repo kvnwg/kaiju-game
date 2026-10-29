@@ -1,6 +1,6 @@
 import {
   WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
-  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -868,6 +868,7 @@ export class Game {
     k.dodging = Math.max(0, k.dodging - dt);
     if (k.dashT > 0) {
       k.dashT -= dt;
+      if (k.pounce && k.dashT <= 0) this.landPounce();
       const sp = this.stage.speed * this.def.speedMult * DASH.speed;
       k.vx = k.dashDir.x * sp;
       k.vy = k.dashDir.y * sp;
@@ -985,6 +986,18 @@ export class Game {
       } else k.attackCd = 0.1;
     }
 
+    // Ember Lizard heals standing in its own flames; Volt Beetle charges up on the move.
+    if (this.def.trait === 'wildfire' && k.hp < k.maxHp && this.fires.some((f) => Math.hypot(f.x - k.x, f.y - k.y) < f.r + k.r * 0.3)) {
+      k.hp = Math.min(k.maxHp, k.hp + k.maxHp * TRAITS.wildfire.heal * dt);
+    }
+    if (this.def.trait === 'blink') {
+      const was = k.charge || 0;
+      if (was < 100) k.charge = Math.max(0, Math.min(100, was + (k.moving ? TRAITS.blink.rate : -TRAITS.blink.drain) * dt));
+      if (was < 100 && k.charge >= 100) {
+        this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'CHARGED!', color: '#7ff0ff', life: 0.9, max: 0.9 });
+        this.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.6, r1: k.r * 1.8, life: 0.35, max: 0.35, color: 0x7ff0ff, width: k.r * 0.15 });
+      }
+    }
     if (this.def.trail && k.moving) {
       k.trailT -= dt;
       if (k.trailT <= 0) {
@@ -1080,20 +1093,36 @@ export class Game {
       this.fxEvent({ t: 'dust', x: k.x, y: k.y, r: radius * 0.7 });
       this.shake = Math.max(this.shake, 0.15);
     } else if (atk.kind === 'zap') {
+      // Volt Beetle's Overload: a full charge turns the next zap into a long, stunning storm.
+      const overload = this.def.trait === 'blink' && (k.charge || 0) >= 100;
       const chain = [target];
       let cur = target;
       let amount = dmg;
       this.fangHit(target, amount, dir, target.isPerson ? 'bite' : 'hit');
       this.fangFollowUp(target, dmg, dir);
-      for (let i = 0; i < atk.chains; i++) {
-        const next = this.nearestChainTarget(cur, chain, k.r * 3);
+      for (let i = 0; i < (overload ? TRAITS.blink.overload : atk.chains); i++) {
+        const next = this.nearestChainTarget(cur, chain, k.r * (overload ? 4.5 : 3));
         if (!next) break;
-        amount *= 0.75;
+        amount *= overload ? 0.95 : 0.75;
         chain.push(next);
         this.damageTarget(next, amount, norm(next.x - cur.x, next.y - cur.y));
+        if (overload && next.isUnit && !next.dead) next.frozen = Math.max(next.frozen || 0, TRAITS.blink.stun);
         cur = next;
       }
-      this.fx.bolts.push({ points: [{ x: k.x, y: k.y }, ...chain.map((c) => ({ x: c.x, y: c.y }))], life: 0.22, max: 0.22, width: Math.max(0.4, k.r * 0.12) });
+      this.fx.bolts.push({ points: [{ x: k.x, y: k.y }, ...chain.map((c) => ({ x: c.x, y: c.y }))], life: overload ? 0.4 : 0.22, max: overload ? 0.4 : 0.22, width: Math.max(0.4, k.r * (overload ? 0.3 : 0.12)) });
+      if (overload) {
+        k.charge = 0;
+        if (target.isUnit && !target.dead) target.frozen = Math.max(target.frozen || 0, TRAITS.blink.stun);
+        this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: k.r * 4, life: 0.4, max: 0.4, color: 0x7ff0ff, width: k.r * 0.3 });
+        this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'OVERLOAD!', color: '#7ff0ff', life: 1, max: 1 });
+        this.shake = Math.max(this.shake, 0.3);
+      }
+    }
+    // Gorilla Grunt: every few hits, a building comes up out of the ground and goes flying.
+    if (this.def.trait === 'throw') {
+      k.grip = (k.grip || 0) + 1;
+      if (k.grip >= TRAITS.throw.every && this.throwChunk(target.isUnit || target.isBoss ? null : target)) k.grip = 0;
+      else k.grip = Math.min(k.grip, TRAITS.throw.every);
     }
   }
 
@@ -1444,7 +1473,178 @@ export class Game {
     }
     this.fxEvent({ t: 'dash', x: k.x, y: k.y, dir: k.dashDir, r: k.r });
     this.emit('dash');
+    // Signature traits change the Charge: Rex pounces, Volt Beetle blinks.
+    if (this.def.trait === 'pounce') this.startPounce();
+    else if (this.def.trait === 'blink') this.blink();
     return true;
+  }
+
+  // ---------------------------------------------------------------- signature traits
+  // Rex's Pounce: a long, high leap (over low clutter) that lands with a crushing bite.
+  // It homes onto prey roughly ahead and within the leap (the boss in a boss fight, otherwise the
+  // nearest enemy), landing right on them; with nothing that way it stays an ordinary dash.
+  startPounce() {
+    const k = this.kaiju;
+    const sp = this.stage.speed * this.def.speedMult * DASH.speed;
+    let t = DASH.time * TRAITS.pounce.time;
+    const reach = sp * t * 1.25;
+    let prey = null;
+    let best = Infinity;
+    const consider = (x, y, r) => {
+      const dx = x - k.x;
+      const dy = y - k.y;
+      const d = Math.hypot(dx, dy);
+      if (d > reach + r || d < 1e-3 || (dx * k.dashDir.x + dy * k.dashDir.y) / d < 0.7) return;
+      if (d < best) {
+        best = d;
+        prey = { x, y, d, r };
+      }
+    };
+    // In a boss fight it only ever homes onto the boss, so a dodge goes where it is pointed.
+    const b = this.boss;
+    if (b && !b.dead) {
+      if (b.state !== 'enter') consider(b.x, b.y, b.r);
+    } else for (const u of this.units) if (!u.dead && !u.flying) consider(u.x, u.y, u.r || 0);
+    // Nothing to pounce on that way: it stays a quick dash, so dodging works as it always has.
+    if (!prey) return;
+    k.dashDir = norm(prey.x - k.x, prey.y - k.y);
+    k.facing = { ...k.dashDir };
+    t = Math.max(DASH.time * 0.8, Math.min(t, Math.max(0, prey.d - prey.r - k.r * 0.5) / sp));
+    k.dashT = t;
+    k.pounce = true;
+    k.hopT = k.hopMax = k.dashT;
+    k.hopH = k.r * 1.6;
+  }
+
+  landPounce() {
+    const k = this.kaiju;
+    const T = TRAITS.pounce;
+    k.pounce = false;
+    k.hopT = 0;
+    k.hopMax = 0.5;
+    k.z = 0;
+    const R = k.r * T.radius;
+    // Everyone under the landing is swallowed (or, once Rex is too big to bother, flattened).
+    for (const p of this.people) {
+      if (p.taken || Math.hypot(p.x - k.x, p.y - k.y) > R) continue;
+      if (this.look <= 2) this.eatPerson(p);
+      else this.flingPerson(p, true);
+    }
+    this.areaDamage(k.x, k.y, R, this.baseDamage() * T.dmg, 'hit');
+    this.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.6, r1: R * 1.3, life: 0.45, max: 0.45, color: 0xb4ff95, width: k.r * 0.3 });
+    this.fxEvent({ t: 'dust', x: k.x, y: k.y, r: R });
+    this.fxEvent({ t: 'attack', kind: 'bite' });
+    this.shake = Math.max(this.shake, 0.35);
+  }
+
+  // Rex's Devour: every person (or cop) eaten heals a little and readies the next pounce.
+  devour() {
+    if (this.def.trait !== 'pounce') return;
+    const k = this.kaiju;
+    k.hp = Math.min(k.maxHp, k.hp + k.maxHp * TRAITS.pounce.heal);
+    k.dashCd = Math.max(0, k.dashCd - TRAITS.pounce.cdCut);
+  }
+
+  // Volt Beetle's Blink: a jump straight ahead that zaps and stuns whatever it passes through.
+  blink() {
+    const k = this.kaiju;
+    const T = TRAITS.blink;
+    const x0 = k.x;
+    const y0 = k.y;
+    const x1 = x0 + k.dashDir.x * k.r * T.dist;
+    const y1 = y0 + k.dashDir.y * k.r * T.dist;
+    const w = k.r * 1.2;
+    const dmg = this.baseDamage() * T.dmg;
+    const on = (x, y, pad) => distToSegment(x, y, x0, y0, x1, y1) < w + pad;
+    for (const u of this.units) {
+      if (u.dead || !on(u.x, u.y, u.r || 0)) continue;
+      u.frozen = Math.max(u.frozen || 0, T.stun * 0.5);
+      this.damageUnit(u, dmg);
+    }
+    for (const p of this.people) if (!p.taken && on(p.x, p.y, 0)) this.flingPerson(p, true);
+    for (const o of this.objectsNear((x0 + x1) / 2, (y0 + y1) / 2, k.r * T.dist * 0.5 + w)) {
+      if (o.state === 'intact' && canDamage(o.tier, k.stage, o.landmark) && on(o.x, o.y, Math.max(o.w, o.h) / 2)) this.damageObject(o, dmg, k.dashDir, 'hit', { x: o.x, y: o.y });
+    }
+    const b = this.boss;
+    if (b && !b.dead && b.state !== 'enter' && on(b.x, b.y, b.r)) this.damageBoss(dmg);
+    k.x = x1;
+    k.y = y1;
+    k.dashT = 0;
+    const mid = { x: (x0 + x1) / 2 - k.dashDir.y * k.r * 0.8, y: (y0 + y1) / 2 + k.dashDir.x * k.r * 0.8 };
+    this.fx.bolts.push({ points: [{ x: x0, y: y0 }, mid, { x: x1, y: y1 }], life: 0.3, max: 0.3, width: Math.max(0.6, k.r * 0.35) });
+    for (const [x, y] of [[x0, y0], [x1, y1]]) this.fx.rings.push({ x, y, r0: k.r * 0.4, r1: k.r * 2.2, life: 0.3, max: 0.3, color: 0x7ff0ff, width: k.r * 0.2 });
+    this.shake = Math.max(this.shake, 0.2);
+  }
+
+  // Gorilla Grunt's Grab & Throw: tear up a building and hurl it at the nearest enemy.
+  throwChunk(hit) {
+    const k = this.kaiju;
+    const T = TRAITS.throw;
+    const ok = (o) => o && o.kind === 'building' && o.state === 'intact' && !o.landmark && !o.walkable && canDamage(o.tier, k.stage);
+    let b = ok(hit) ? hit : null;
+    if (!b) {
+      let best = Infinity;
+      for (const o of this.objectsNear(k.x, k.y, k.r * T.reach)) {
+        if (!ok(o)) continue;
+        const d = distToRect(k.x, k.y, o);
+        if (d < best) {
+          best = d;
+          b = o;
+        }
+      }
+    }
+    if (!b) return false;
+    const boss = this.boss && !this.boss.dead && this.boss.state !== 'enter' ? this.boss : null;
+    let t = boss && Math.hypot(boss.x - k.x, boss.y - k.y) < this.viewSpan() * 0.6 ? boss : null;
+    if (!t) {
+      let bd = this.viewSpan() * 0.6;
+      for (const u of this.units) {
+        if (u.dead || u.type === 'jet') continue;
+        const d = Math.hypot(u.x - k.x, u.y - k.y);
+        if (d < bd) {
+          bd = d;
+          t = u;
+        }
+      }
+    }
+    const aim = t || { x: k.x + k.facing.x * k.r * 10, y: k.y + k.facing.y * k.r * 10, w: 4, h: 4 };
+    const size = Math.max(b.w, b.h);
+    this.destroyObject(b, norm(aim.x - b.x, aim.y - b.y), 'hit');
+    const sp = this.stage.speed * 2.2 + 30;
+    const x0 = k.x + k.facing.x * k.r * 0.6;
+    const y0 = k.y + k.facing.y * k.r * 0.6;
+    const d = norm(aim.x - x0, aim.y - y0);
+    this.projectiles.push({
+      friendly: true, kind: 'slab', x: x0, y: y0, x0, y0, vx: d.x * sp, vy: d.y * sp, speed: sp,
+      r: size * 0.3, size: Math.min(size * 0.7, k.r * 2.2), arc: k.r * 3, h0: k.r * 2.4, dmg: this.baseDamage() * T.dmg, life: 3, target: aim, age: 0,
+      color: 0x9a948a,
+      onHit: (p) => {
+        const r = Math.max(k.r * 1.6, size * 0.9);
+        this.areaDamage(p.x, p.y, r, p.dmg, 'hit');
+        this.spawnExplosion(p.x, p.y, r * 0.8);
+        this.fxEvent({ t: 'dust', x: p.x, y: p.y, r: r * 1.2 });
+        this.shake = Math.max(this.shake, 0.4);
+      },
+    });
+    this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.6, text: 'THROW!', color: '#ffc36b', life: 0.8, max: 0.8 });
+    return true;
+  }
+
+  // Ember Lizard's Wildfire: a wrecked or burning building sets its spot alight; fires creep to
+  // their neighbours (see updateFires).
+  ignite(o, gen = 0) {
+    const T = TRAITS.wildfire;
+    if (o.burning || this.fires.length >= T.cap) return;
+    o.burning = true;
+    this.fires.push({ x: o.x, y: o.y, r: Math.max(6, Math.max(o.w, o.h) * 0.55), t: T.burnT, max: T.burnT, tick: 0, spread: gen < T.gens, gen });
+  }
+
+  // What the HUD shows for the trait: Gorilla's grip towards the next throw, Volt's charge.
+  traitMeter() {
+    const k = this.kaiju;
+    if (this.def.trait === 'throw') return { label: 'Grip', value: (k.grip || 0) / TRAITS.throw.every, full: (k.grip || 0) === TRAITS.throw.every - 1 };
+    if (this.def.trait === 'blink') return { label: 'Charge', value: (k.charge || 0) / 100, full: (k.charge || 0) >= 100 };
+    return null;
   }
 
   // A hit that lands during the dash's i-frames.
@@ -1512,6 +1712,7 @@ export class Game {
     let dmg = amount * this.diff.enemyDmg * (this.firstRun ? 0.8 : 1) * (this.meta.perks.graniteHide ? 0.88 : 1) * (this.pressure ? AD_PRESSURE.dmgMul : 1);
     k.lastHitAt = this.time;
     if ((type === 'bullet' || type === 'shell') && this.has('thickHide')) dmg *= 1 - 0.08 * this.level('thickHide');
+    if (this.def.trait === 'throw' && !k.moving) dmg *= 1 - TRAITS.throw.standDr;
     if (k.shield > 0) {
       const absorbed = Math.min(k.shield, dmg);
       k.shield -= absorbed;
@@ -1861,6 +2062,7 @@ export class Game {
       if (o.structure) this.stats.buildings++;
       if (o.structure && o.tier >= k.stage) this.stats.bigTopples++;
       if (o.golden) this.crackVault(o);
+      if (this.def.trait === 'wildfire' && o.structure) this.ignite(o);
       if (o.tier >= 5 && this.stats.firstSkyscraperAt === null) this.stats.firstSkyscraperAt = this.time;
       this.spawnOrbs(o.x, o.y, flimsy ? 1 : Math.min(10, 1 + o.tier * 2), biomass > 0);
       if (o.structure && o.tier >= k.stage) {
@@ -2058,6 +2260,7 @@ export class Game {
     this.killUnit(u);
     this.xpBoost = 1;
     this.noteEat();
+    this.devour();
     return true;
   }
 
@@ -2079,6 +2282,7 @@ export class Game {
     this.xpBoost = 1;
     this.noteEat();
     this.onKill();
+    this.devour();
     this.stats.scrap += loot.scrap * this.diff.loot * 0.5;
     if (k.stage === 1) this.heal(0.01);
     if (p.variant === DOCTOR) {
@@ -2346,6 +2550,11 @@ export class Game {
         for (const p of this.people) if (!p.taken && Math.hypot(p.x - f.x, p.y - f.y) < f.r) this.flingPerson(p, false, f);
         const b = this.boss;
         if (b && !b.dead && b.state !== 'enter' && Math.hypot(b.x - f.x, b.y - f.y) < f.r + b.r) this.damageBoss(dmg);
+        // Wildfire creeps to a neighbouring building now and then.
+        if (f.spread && this.rng.chance(TRAITS.wildfire.spread)) {
+          const next = this.objectsNear(f.x, f.y, f.r * 2 + 24).find((o) => o.state === 'intact' && !o.landmark && !o.burning && !o.walkable && (o.structure || o.type === 'fence' || o.type.startsWith('tree')));
+          if (next) this.ignite(next, f.gen + 1);
+        }
       }
     }
     this.fires = this.fires.filter((f) => f.t > 0);

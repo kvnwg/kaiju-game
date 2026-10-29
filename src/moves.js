@@ -441,7 +441,7 @@ export class MoveSystem {
             if (hit) g.lineDamage(ex, ey, x2, y2, width * 1.6, g.baseDamage() * D * 0.55);
             // Omega Beam: the sweep leaves a burning scar across the city.
             if (omega && hit && eye === 1 && off === 0 && (scorch = (scorch + 1) % 2) === 0) {
-              const f = 0.3 + Math.random() * 0.7;
+              const f = 0.3 + g.rng.next() * 0.7;
               g.fires.push({ x: ex + (x2 - ex) * f, y: ey + (y2 - ey) * f, r: k.r * 0.8, t: 5, max: 5, tick: 0 });
             }
           }
@@ -478,7 +478,7 @@ export class MoveSystem {
       g.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.6, r1: radius, life: 0.5, max: 0.5, color, width: k.r * 0.45 });
       g.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.3, r1: radius * 0.6, life: 0.35, max: 0.35, color: 0xffffff, width: k.r * 0.3 });
       g.fxEvent({ t: 'slam', x: k.x, y: k.y, r: radius, kr: k.r, echo });
-      g.fx.cracks.push({ x: k.x, y: k.y, r: radius * 0.8, life: 2.5, max: 2.5, seed: Math.random() * 100 });
+      g.fx.cracks.push({ x: k.x, y: k.y, r: radius * 0.8, life: 2.5, max: 2.5, seed: g.rng.next() * 100 });
       g.shake = Math.max(g.shake, 0.8);
       g.impact(0.07, 0.9);
       g.schedule(0.16, () => {
@@ -530,7 +530,7 @@ export class MoveSystem {
     let a = ang;
     for (let i = 0; i < steps; i++) {
       g.schedule(i * 0.06, () => {
-        a += (Math.random() - 0.5) * 0.5;
+        a += (g.rng.next() - 0.5) * 0.5;
         const nx = px + Math.cos(a) * seg;
         const ny = py + Math.sin(a) * seg;
         g.lineDamage(px, py, nx, ny, k.r * (chasm ? 1.6 : 0.9), g.baseDamage() * (chasm ? 6 : 3));
@@ -582,7 +582,7 @@ export class MoveSystem {
           fireT -= dt;
           if (fireT <= 0) {
             fireT = 0.15;
-            const t = 0.35 + Math.random() * 0.65;
+            const t = 0.35 + g.rng.next() * 0.65;
             g.fires.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t, r: k.r * 0.9 * S, t: 4, max: 4, tick: 0 });
           }
         }
@@ -594,7 +594,7 @@ export class MoveSystem {
             g.areaDamage(x2, y2, R, g.baseDamage() * 12, 'hit');
             g.spawnExplosion(x2, y2, R);
             g.fx.rings.push({ x: x2, y: y2, r0: R * 0.2, r1: R * 1.3, life: 0.9, max: 0.9, color: 0x7df9ff, width: R * 0.2 });
-            g.fx.cracks.push({ x: x2, y: y2, r: R, life: 3, max: 3, seed: Math.random() * 100 });
+            g.fx.cracks.push({ x: x2, y: y2, r: R, life: 3, max: 3, seed: g.rng.next() * 100 });
             g.shake = 1;
             g.impact(0.15, 1);
           }
@@ -615,8 +615,8 @@ export class MoveSystem {
     if (s.count > 1) {
       const span = g.viewSpan() * 0.35;
       for (let i = 0; i < s.count - 1; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = span * (0.3 + Math.random() * 0.7);
+        const a = g.rng.next() * Math.PI * 2;
+        const d = span * (0.3 + g.rng.next() * 0.7);
         const x = k.x + Math.cos(a) * d;
         const y = k.y + Math.sin(a) * d;
         const r = k.r * 2.2 * this.size() * s.area;
@@ -642,8 +642,8 @@ export class MoveSystem {
     this.showerT = 1.4;
     const s = this.st('meteorCall');
     const span = g.viewSpan() * 0.4;
-    const a = Math.random() * Math.PI * 2;
-    const d = span * (0.25 + Math.random() * 0.75);
+    const a = g.rng.next() * Math.PI * 2;
+    const d = span * (0.25 + g.rng.next() * 0.75);
     const x = k.x + Math.cos(a) * d;
     const y = k.y + Math.sin(a) * d;
     const r = k.r * 2 * this.size() * s.area;
@@ -758,7 +758,7 @@ export class MoveSystem {
             if (s.quake) {
               g.areaDamage(p.x, p.y, r * 1.8, p.dmg * 0.5, 'hit');
               g.fx.rings.push({ x: p.x, y: p.y, r0: r * 0.5, r1: r * 1.8, life: 0.5, max: 0.5, color: 0xffc36b, width: r * 0.2 });
-              g.fx.cracks.push({ x: p.x, y: p.y, r: r * 1.2, life: 2.5, max: 2.5, seed: Math.random() * 100 });
+              g.fx.cracks.push({ x: p.x, y: p.y, r: r * 1.2, life: 2.5, max: 2.5, seed: g.rng.next() * 100 });
             }
           },
         });
@@ -831,7 +831,7 @@ export class MoveSystem {
           const x0 = k.x + Math.cos(ang) * k.r;
           const y0 = k.y + Math.sin(ang) * k.r;
           for (let i = -2; i <= 2; i++) {
-            const a = ang + (i / 2) * (arc / 2) + (Math.random() - 0.5) * 0.1;
+            const a = ang + (i / 2) * (arc / 2) + (g.rng.next() - 0.5) * 0.1;
             g.fx.beams.push({ x1: x0, y1: y0, x2: x0 + Math.cos(a) * reach, y2: y0 + Math.sin(a) * reach, width: k.r * 0.45, life: 0.14, max: 0.14, color, h: k.r * 1.2, h2: k.r * 0.2, noFlash: true });
           }
           for (const u of g.units) {
@@ -1025,10 +1025,10 @@ export class MoveSystem {
     if (!this.targets(k.r * 12).length) return false;
     this.anim('howl', 0.7);
     for (let i = 0; i < s.count && g.allies.length < 30; i++) {
-      const a = Math.random() * Math.PI * 2;
+      const a = g.rng.next() * Math.PI * 2;
       g.allies.push({
         x: k.x + Math.cos(a) * k.r, y: k.y + Math.sin(a) * k.r, r: Math.max(0.8, k.r * 0.3), life: 8 * s.duration, cd: 0.3, target: null, retarget: 0,
-        dmg: this.base() * 0.7 * s.dmg, speed: g.stage.speed * 1.25, heading: a, boom: Boolean(s.boom), echo, phase: Math.random() * 6,
+        dmg: this.base() * 0.7 * s.dmg, speed: g.stage.speed * 1.25, heading: a, boom: Boolean(s.boom), echo, phase: g.rng.next() * 6,
       });
       g.fxEvent({ t: 'dust', x: k.x + Math.cos(a) * k.r, y: k.y + Math.sin(a) * k.r, r: k.r * 0.4 });
     }

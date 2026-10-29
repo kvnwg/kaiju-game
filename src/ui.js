@@ -133,6 +133,9 @@ export class UI {
     this.sizeUpEl = $('#sizeUp');
     this.flashEl = $('#screenFlash');
     this.growthEl = $('#growth');
+    this.traitEl = $('#trait');
+    this.traitLabel = $('#trait b');
+    this.traitFill = $('#trait .track i');
     this.scrapPill = this.scrapEl.parentElement;
     this.lastCombo = 0;
     this.lastBio = 0;
@@ -229,6 +232,14 @@ export class UI {
     this.stageNum.textContent = k.level;
     this.xpFill.style.width = `${Math.min(100, (100 * k.xp) / xpToNext(k.level))}%`;
     this.xpText.textContent = game.pendingPicks > 1 ? `+${game.pendingPicks} picks` : '';
+    // The kaiju's trait meter: Gorilla Grunt's grip towards a throw, Volt Beetle's charge.
+    const tm = game.traitMeter ? game.traitMeter() : null;
+    this.traitEl.classList.toggle('hidden', !tm);
+    if (tm) {
+      if (this.traitLabel.textContent !== tm.label) this.traitLabel.textContent = tm.label;
+      this.traitFill.style.width = `${Math.round(tm.value * 100)}%`;
+      this.traitEl.classList.toggle('full', tm.full);
+    }
     const ob = game.objective;
     if (ob) {
       const objText = ob.done ? `${ob.text} · done` : `${ob.text} (${Math.min(ob.goal, Math.floor(ob.stat(game)))}/${ob.goal})`;
