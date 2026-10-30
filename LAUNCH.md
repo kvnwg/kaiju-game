@@ -35,19 +35,29 @@ script is the CrazyGames SDK itself.
 
 **Description:**
 Start as a hatchling no bigger than a person and eat your way up to a monster taller than the
-skyline. Smash an endless voxel city, pick a new power at every level (laser eyes, atomic breath,
-meteor showers, tail spins) and beat a ridiculous boss at every size: a cyborg hitman, an HOA
-president in power armour, an armoured ice-cream truck, a sentient demolition crane and City Hall
-itself. Every time you grow, the local paper slams onto the screen with the damage report.
-Between runs, upgrade your gear, unlock new kaiju and mutate your way to bigger rampages.
+skyline. Stomp cars, flatten houses and topple skyscrapers in an endless voxel city full of things
+to wreck. Pick a new power every level (laser eyes, atomic breath, meteor showers, tail spins,
+building throws) and beat a ridiculous boss at every size: a cyborg hitman, an HOA president in
+power armour, an armoured ice-cream truck, a sentient demolition crane and City Hall itself.
+
+Then keep growing. Outgrow the planet, eat stars and galaxies, swallow the universe, and wake up
+ant-sized in somebody's back garden.
+
+Four kaiju, four ways to play: Rex pounces and devours, Gorilla Grunt rips buildings out of the
+ground and throws them, Ember Lizard sets the city ablaze, and Volt Beetle teleports through
+everything in its way. Between runs, upgrade your gear, hatch new kaiju and mutate your way to
+bigger rampages. Every time you grow, the local paper slams onto the screen with the damage report.
 
 **Controls:**
 - Move: WASD or arrow keys (phones and tablets: drag anywhere on the screen)
 - Attack: automatic, at whatever is nearest
-- Charge: Space or Shift (touch: the Charge button)
+- Special: Space or Shift (touch: the button in the corner). Rex pounces, Volt Beetle blinks,
+  the others charge
 - Pause: P or the II button
 
-**Suggested tags:** Kaiju, Monster, Destruction, Roguelite, Upgrade, Boss, Voxel, 3D
+**Suggested tags:** Kaiju, Monster, Destruction, Dinosaur, Roguelite, Upgrade, Boss, Voxel, 3D, Casual
+
+**Category:** Action
 
 ## 4. How the game meets the requirements (for QA)
 
