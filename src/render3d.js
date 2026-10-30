@@ -1511,6 +1511,8 @@ export class Renderer3D {
     // (Space has no haze: what is out there stays sharp against the stars.)
     this.scene.fog.near = d * (space ? 3.5 : 1.05 * reach);
     this.scene.fog.far = d * (space ? 9 : 3.4 * reach);
+    // A tool filming the game (tools/trailer.mjs) can take the camera over here.
+    if (this.cameraRig) this.cameraRig(this.camera, game, this);
     if (this.camera.fov !== this.fxFov) {
       this.fxFov = this.camera.fov;
       this.fx.setScale((this.h * this.renderer.getPixelRatio()) / (2 * Math.tan((this.fxFov * Math.PI) / 360)));

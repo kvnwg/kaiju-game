@@ -25,8 +25,8 @@ script is the CrazyGames SDK itself.
 | Implementation | Full (SDK v3) |
 | Devices | Desktop and mobile (touch controls are built in) |
 | Mobile orientation | Landscape and portrait (every screen has a layout for both) |
-| Covers | `store/covers/cover-1920x1080.png`, `cover-800x1200.png`, `cover-800x800.png` |
-| Preview videos | The 16:9 and 2:3 1080p clips (silent, about 19 s, opening on the cover) |
+| Covers | `store/covers/cover-1920x1080.png`, `cover-800x1200.png`, `cover-800x800.png` (rendered by `tools/cover-art.mjs`) |
+| Preview videos | `store/video/kaiju-rampage-1920x1080.mp4` and `kaiju-rampage-1080x1620.mp4`: silent, about 18.5 s, opening on the cover (filmed by `tools/trailer.mjs`, cut by `tools/trailer-edit.py`; the videos are not in git, rebuild them with those two) |
 | Title, description, controls, tags | Below |
 
 ## 3. Store text

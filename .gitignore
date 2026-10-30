@@ -147,3 +147,6 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Preview videos (rebuilt by tools/trailer.mjs and tools/trailer-edit.py)
+store/video/*.mp4
