@@ -319,3 +319,20 @@ test('an old profile carries over into the new save', () => {
   assert.ok(s.unlocked.gorilla);
   assert.equal(Object.keys(GEAR).length, 20);
 });
+
+test('an admin code is checked against its salted hash, in any capitals; nothing else passes', async () => {
+  // (The real code stays out of the repository: this checks the mechanism with a stand-in.)
+  const { adminCodeOk, ADMIN } = await import('../src/meta.js');
+  const { createHash } = await import('node:crypto');
+  assert.match(ADMIN.hash, /^[0-9a-f]{64}$/);
+  const real = ADMIN.hash;
+  ADMIN.hash = createHash('sha256').update(`${ADMIN.salt}STAND-IN`).digest('hex');
+  try {
+    assert.equal(await adminCodeOk('stand-in'), true);
+    assert.equal(await adminCodeOk('  Stand-In '), true);
+    assert.equal(await adminCodeOk('stand-on'), false);
+    assert.equal(await adminCodeOk(''), false);
+  } finally {
+    ADMIN.hash = real;
+  }
+});

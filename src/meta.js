@@ -317,7 +317,7 @@ export function rollover(s, now = Date.now()) {
 // stay topped up. Turning it off keeps what's there.
 export const ADMIN = {
   salt: 'kaiju-rampage:admin:',
-  hash: '5edffb1e9dbc96243b7506f46eedc84fd9dda4837ee28df0fa71b6c3f00e65a5',
+  hash: 'e624f4cd7aa06a31dcd7289fa09bdd0d4b9da54ec725b003edf9a287a911cb58',
   gems: 999999, scrap: 99999999, dna: 99999, geneCores: 999,
 };
 
