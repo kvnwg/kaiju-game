@@ -8,7 +8,8 @@ import { RealmWorld } from './realm.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
-import { PERSON_VARIANTS, DOCTOR, ANT, ANT_LOOKS } from './models.js';
+import { PERSON_VARIANTS, DOCTOR, ANT, ANT_LOOKS, DOG, CAT, BIRD } from './models.js';
+import { HOME_BANG } from './homes.js';
 import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
 import { propDims } from './props.js';
 import { objectPrice, vehiclePrice, unitPrice, bossPrice, shortMoney, TRAIN_PRICE, VAULT_PRICE } from './prices.js';
@@ -46,6 +47,10 @@ const NEUTRAL_META = {
 // already telegraph with ground markers.
 const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6, net: 0.8, volley: 1 };
 const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
+// Where dogs, cats and pigeons turn up among the people.
+const LIVELY = new Set(['suburb', 'park', 'garden', 'pastel']);
+// What the neighbours shout as they run from a kaiju not much bigger than they are.
+const SHOUTS = ['AAAH!', 'HELP!', 'RUN!', 'MY LAWN!', 'NOT THE ROSES!', 'IS THAT A LIZARD?', 'CALL SOMEONE!', 'MY CAKE!', 'GET THE KIDS!', 'IT ATE GARY!', 'SHOO!', 'NOT AGAIN!'];
 
 // Traffic keeps to the right-hand lane, this far from the middle of the road.
 const LANE = 12;
@@ -115,6 +120,8 @@ export class Game {
     const cm = Math.pow(CHAPTER_MUL, chapter - 1);
     this.diff = { ...base, enemyHp: base.enemyHp * cm, enemyDmg: base.enemyDmg * cm };
     this.rng = createRng(seed);
+    // Pets, pigeons and party guests draw from their own stream, so they never shift the rest.
+    this.lifeRng = createRng((seed ^ 0x2c1b3c6d) >>> 0);
     this.firstRun = firstRun;
     this.ascend = ascend;
     this.realm = 'city';
@@ -229,6 +236,7 @@ export class Game {
     this.city = world;
     useCity(world);
     this.grid = world.grid;
+    this.solidGrid = world.solidGrid ?? world.grid;
     // Cells dropped behind the kaiju take their in-flight collapses with them.
     world.listeners.add({
       unload: (chunk) => {
@@ -268,7 +276,7 @@ export class Game {
     const k = this.kaiju;
     const span = this.viewSpan();
     const big = this.inCity && k.stage >= 5;
-    this.city.detail = big ? 1 : 0;
+    this.city.detail = big ? 2 : this.inCity && k.stage >= 3 ? 1 : 0;
     // New blocks per frame: a big kaiju needs about half a block a frame, so two keeps up
     // without a frame doing four blocks of generation at once.
     const margin = this.inCity ? 520 : this.city.cell * 1.24;
@@ -428,7 +436,7 @@ export class Game {
   }
 
   blockedAt(x, y, pad = 0, minTier = 0) {
-    for (const o of this.grid.query(x - pad, y - pad, x + pad, y + pad)) {
+    for (const o of this.solidGrid.query(x - pad, y - pad, x + pad, y + pad)) {
       if (o.state === 'intact' && o.structure && !o.walkable && o.tier >= minTier && distToRect(x, y, o) <= pad) return true;
     }
     return false;
@@ -786,6 +794,7 @@ export class Game {
     this.updateUnits(dt);
     this.updateAllies(dt);
     this.updatePeople(dt);
+    this.updatePools(dt);
     this.updateTraffic(dt);
     this.updateTrains(dt);
     this.updateBoss(dt);
@@ -2094,9 +2103,20 @@ export class Game {
     }
     if (cause !== 'boss' && (o.structure || o.tier >= k.stage - 1)) this.onKill();
     if (o.type === 'power_pole' && cause !== 'boss' && this.has('powerSurge')) this.powerSurge(o);
+    if (HOME_BANG.has(o.type) && cause !== 'boss') this.schedule(0.18, () => this.homeBang(o));
     if (o.structure && o.tier >= 3) {
       if (this.has('gasMain') && this.rng.chance(0.1 + 0.1 * this.level('gasMain'))) this.schedule(0.35, () => this.explode(o));
     }
+  }
+
+  // A grill's gas bottle or a fire pit's embers going up: a small fireball that knocks the patio
+  // furniture flying and sets off whatever else is close.
+  homeBang(o) {
+    const radius = Math.max(7, this.kaiju.r * 1.6);
+    this.areaDamage(o.x, o.y, radius, TIER_HP[2], 'chain', true, false);
+    this.spawnExplosion(o.x, o.y, radius);
+    this.shake = Math.max(this.shake, 0.3);
+    this.fx.floaters.push({ x: o.x, y: o.y, h: 5, text: 'BOOM!', color: '#ffb347', life: 1, max: 1 });
   }
 
   explode(o) {
@@ -2130,8 +2150,12 @@ export class Game {
     const want = garden ? (k.stage <= 10 ? 45 : 30) : k.stage <= 3 ? CROWD.people : Math.round(CROWD.people * 0.6);
     const maxR = Math.max(120, span * (initial ? 1.4 : 1.3));
     const minR = initial ? 10 : span * 1.0;
+    // The kaiju hatches in the middle of a backyard pool party (world.js): the guests are there.
+    if (initial && this.inCity && k.stage === 1 && this.time < 1 && Math.hypot(k.x - this.city.spawn.x, k.y - this.city.spawn.y) < 30) this.partyGuests();
+    // (pets, pigeons and party guests are extras: they don't take a person's place)
+    let crowd = this.people.reduce((n, q) => n + (q.extra ? 0 : 1), 0);
     let tries = 0;
-    while (this.people.length < want && tries++ < want * 4) {
+    while (crowd < want && tries++ < want * 4) {
       const a = this.rng.range(0, Math.PI * 2);
       const d = this.rng.range(minR, maxR);
       const x = k.x + Math.cos(a) * d;
@@ -2152,7 +2176,9 @@ export class Game {
         state: 'walk', t: this.rng.range(1, 4), variant,
         tier: garden ? 9 : 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: this.rng.range(0, 6),
       });
+      crowd++;
     }
+    if (!garden && this.inCity && k.stage <= 2) this.populatePets(minR, maxR);
     if (this.inCity && k.stage <= 4) {
       const wantCars = CROWD.traffic;
       const roads = this.city.roads;
@@ -2177,6 +2203,182 @@ export class Game {
         });
       }
     }
+  }
+
+  // Wading into a backyard pool while small: a big splash going in, and spray as you thrash about.
+  updatePools(dt) {
+    const k = this.kaiju;
+    if (!this.inCity || k.stage > 2) {
+      k.inPool = null;
+      return;
+    }
+    let pool = null;
+    for (const d of this.city.decalGrid.query(k.x - 1, k.y - 1, k.x + 1, k.y + 1)) {
+      if (d.kind === 'pool' && Math.abs(k.x - d.x) < d.w / 2 && Math.abs(k.y - d.y) < d.h / 2) pool = d;
+    }
+    if (pool && pool !== k.inPool) {
+      this.fxEvent({ t: 'splash', x: k.x, y: k.y, r: k.r * 2.2, big: true });
+      this.fx.floaters.push({ x: k.x, y: k.y, h: k.r * 2.5, text: 'SPLASH!', color: '#9fe8ff', life: 1, max: 1 });
+      this.shake = Math.max(this.shake, 0.15);
+      k.splashT = 0.35;
+    } else if (pool && k.moving) {
+      k.splashT = (k.splashT ?? 0) - dt;
+      if (k.splashT <= 0) {
+        k.splashT = 0.35;
+        this.fxEvent({ t: 'splash', x: k.x, y: k.y, r: k.r });
+      }
+    }
+    k.inPool = pool;
+  }
+
+  // Dogs and cats about the yards and parks, and pigeons pecking at the lawns, while the kaiju is
+  // small: a few of each in view, out in the ring where new people turn up.
+  populatePets(minR, maxR) {
+    const k = this.kaiju;
+    const r = this.lifeRng;
+    let pets = 0;
+    let flocks = 0;
+    for (const q of this.people) {
+      if (q.pet === 'dog' || q.pet === 'cat') pets += q.guest ? 0 : 1;
+      else if (q.pet === 'bird' && q.lead) flocks++;
+    }
+    for (let tries = 0; tries < 12 && (pets < 7 || flocks < 3); tries++) {
+      const a = r.range(0, Math.PI * 2);
+      const d = r.range(minR, maxR);
+      const x = k.x + Math.cos(a) * d;
+      const y = k.y + Math.sin(a) * d;
+      const zc = this.cellAt(x, y);
+      if (!zc || !LIVELY.has(zc.style) || isWater(x, y) || this.blockedAt(x, y, 1)) continue;
+      if (flocks < 3 && (pets >= 7 || r.chance(0.3))) {
+        this.pigeons(x, y);
+        flocks++;
+        continue;
+      }
+      const pet = r.chance(0.6) ? 'dog' : 'cat';
+      this.people.push({
+        isPerson: true, extra: true, pet, x, y, heading: r.range(0, Math.PI * 2), speed: r.range(3, 6), state: 'walk', t: r.range(1, 4),
+        variant: (pet === 'dog' ? DOG : CAT) + r.int(0, 1), tier: 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: r.range(0, 6),
+      });
+      pets++;
+    }
+  }
+
+  // A flock of pigeons on the lawn around (x, y).
+  pigeons(x, y) {
+    const r = this.lifeRng;
+    for (let i = r.int(3, 6); i > 0; i--) {
+      const px = x + r.range(-4, 4);
+      const py = y + r.range(-4, 4);
+      if (isWater(px, py) || this.blockedAt(px, py, 0.4)) continue;
+      this.people.push({
+        isPerson: true, extra: true, pet: 'bird', lead: i === 1, x: px, y: py, heading: r.range(0, Math.PI * 2), speed: 0, state: 'perch', t: 0,
+        variant: BIRD, tier: 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0, phase: r.range(0, 6),
+      });
+    }
+  }
+
+  // The party the kaiju hatches into: guests milling round the tables and the pool, a dog among
+  // them, and pigeons after the crumbs.
+  partyGuests() {
+    const r = this.lifeRng;
+    const sp = this.city.spawn;
+    for (let i = 0; i < 12; i++) {
+      const a = r.range(0, Math.PI * 2);
+      const d = r.range(7, 24);
+      const x = sp.x + Math.cos(a) * d;
+      const y = sp.y + Math.sin(a) * d;
+      if (isWater(x, y) || this.blockedAt(x, y, 1)) continue;
+      const dog = i === 0;
+      this.people.push({
+        isPerson: true, extra: true, guest: true, x, y, heading: r.range(0, Math.PI * 2), speed: r.range(1, 2.5), state: 'walk', t: r.range(1, 4),
+        variant: dog ? DOG + r.int(0, 1) : r.int(0, PERSON_VARIANTS - 1), tier: 1, z: 0, vz: 0, vx: 0, vy: 0, spin: 0,
+        phase: r.range(0, 6), ...(dog ? { pet: 'dog' } : {}),
+      });
+    }
+    this.pigeons(sp.x + r.range(-14, 14), sp.y - r.range(10, 20));
+    // ...and the moment they see what just came out of the egg.
+    const seen = this.people.filter((p) => !p.pet && Math.hypot(p.x - sp.x, p.y - sp.y) < 26).slice(0, 3);
+    seen.forEach((p, i) => this.schedule(0.5 + i * 0.35, () => this.shout(p, i === 0 ? 'AAAH!' : null)));
+  }
+
+  // A neighbour shouting as they run (now and then while the kaiju is small).
+  shout(p, text = null) {
+    if (p.taken) return;
+    const line = text ?? SHOUTS[this.lifeRng.int(0, SHOUTS.length - 1)];
+    this.fx.floaters.push({ x: p.x, y: p.y, h: 6.5, text: line, color: '#ffffff', life: 1.2, max: 1.2 });
+  }
+
+  // One step along a person's heading, turning aside at walls and water.
+  stepPerson(p, dt) {
+    const nx = p.x + Math.cos(p.heading) * p.speed * dt;
+    const ny = p.y + Math.sin(p.heading) * p.speed * dt;
+    if (isWater(nx, ny) || this.blockedAt(nx, ny, 0.6)) {
+      p.heading += Math.PI / 2 * ((p.extra ? this.lifeRng : this.rng).chance(0.5) ? 1 : -1);
+    } else {
+      p.x = nx;
+      p.y = ny;
+    }
+    p.phase += dt * p.speed * 1.5;
+  }
+
+  // Pets have their own ideas. Pigeons peck until you come close, then the whole flock bursts into
+  // the air; a dog charges you, barking, before it thinks better of it; a cat hisses and bolts.
+  // True when it has moved them itself this frame.
+  petMoves(p, dt, d, dx, dy, panicR) {
+    const k = this.kaiju;
+    if (p.pet === 'bird') {
+      if (p.state === 'fly') {
+        p.z += dt * (10 + p.t * 6);
+        p.t += dt;
+        p.x += Math.cos(p.heading) * 22 * dt;
+        p.y += Math.sin(p.heading) * 22 * dt;
+        p.phase += dt * 40;
+        if (p.z > 45) p.state = 'gone';
+        return true;
+      }
+      if (d < panicR * 0.6) {
+        for (const q of this.people) {
+          if (q.pet !== 'bird' || q.state === 'fly' || q.taken || Math.hypot(q.x - p.x, q.y - p.y) > 16) continue;
+          q.state = 'fly';
+          q.taken = true;
+          q.t = 0;
+          q.heading = Math.atan2(q.y - k.y, q.x - k.x) + this.lifeRng.range(-0.7, 0.7);
+        }
+        this.fxEvent({ t: 'flap', x: p.x, y: p.y });
+      } else p.phase += dt * 3;
+      return true;
+    }
+    if (p.pet === 'dog' && !p.barked && d < panicR) {
+      p.barked = true;
+      p.state = 'charge';
+      p.t = 1.2;
+      p.barkT = 0;
+    }
+    if (p.state === 'charge') {
+      p.t -= dt;
+      p.barkT -= dt;
+      if (p.barkT <= 0) {
+        p.barkT = 0.45;
+        this.fxEvent({ t: 'bark', x: p.x, y: p.y });
+        this.fx.floaters.push({ x: p.x, y: p.y, h: 3.5, text: 'woof!', color: '#fff2c8', life: 0.7, max: 0.7 });
+      }
+      p.heading = Math.atan2(-dy, -dx);
+      p.speed = 15;
+      // Close enough to see how big you really are: it turns tail.
+      if (p.t <= 0 || d < k.r + 4) {
+        p.state = 'flee';
+        p.speed = 17;
+        return false;
+      }
+      this.stepPerson(p, dt);
+      return true;
+    }
+    if (p.pet === 'cat' && !p.hissed && d < panicR) {
+      p.hissed = true;
+      this.fxEvent({ t: 'hiss', x: p.x, y: p.y });
+      this.fx.floaters.push({ x: p.x, y: p.y, h: 3, text: 'hiss!', color: '#ffd0e0', life: 0.7, max: 0.7 });
+    }
+    return false;
   }
 
   updatePeople(dt) {
@@ -2220,30 +2422,32 @@ export class Game {
         p.state = 'gone';
         continue;
       }
+      if (p.pet && this.petMoves(p, dt, d, dx, dy, panicR)) continue;
       if (d < panicR) {
         p.state = 'flee';
         p.heading = Math.atan2(dy, dx) + Math.sin(this.time * 3 + p.phase) * 0.5;
-        p.speed = 13 + (p.variant % 3);
+        p.speed = p.pet === 'cat' ? 19 : p.pet === 'dog' ? 17 : 13 + (p.variant % 3);
       } else if (p.state === 'flee' && d > panicR * 1.6) {
         p.state = 'walk';
-        p.speed = this.rng.range(4, 7);
+        p.speed = (p.extra ? this.lifeRng : this.rng).range(4, 7);
       }
       p.t -= dt;
       if (p.state === 'walk' && p.t <= 0) {
-        p.t = this.rng.range(2, 6);
-        p.heading = Math.round(this.rng.range(0, 4)) * (Math.PI / 2) + this.rng.range(-0.2, 0.2);
+        const rr = p.extra ? this.lifeRng : this.rng;
+        p.t = rr.range(2, 6);
+        p.heading = Math.round(rr.range(0, 4)) * (Math.PI / 2) + rr.range(-0.2, 0.2);
       }
-      const nx = p.x + Math.cos(p.heading) * p.speed * dt;
-      const ny = p.y + Math.sin(p.heading) * p.speed * dt;
-      if (isWater(nx, ny) || this.blockedAt(nx, ny, 0.6)) {
-        p.heading += Math.PI / 2 * (this.rng.chance(0.5) ? 1 : -1);
-      } else {
-        p.x = nx;
-        p.y = ny;
-      }
-      p.phase += dt * p.speed * 1.5;
+      this.stepPerson(p, dt);
     }
     this.people = this.people.filter((p) => p.state !== 'gone' && !(p.state === 'flung' && p.t <= 0));
+    if (this.inCity && k.stage <= 2) {
+      this.shoutT = (this.shoutT ?? 2) - dt;
+      if (this.shoutT <= 0) {
+        this.shoutT = this.lifeRng.range(1.8, 3.2);
+        const near = this.people.find((p) => p.state === 'flee' && !p.pet && !p.taken && Math.hypot(p.x - k.x, p.y - k.y) < k.r * 6 + 14);
+        if (near) this.shout(near);
+      }
+    }
     this.director.crowdT -= dt;
     if (this.director.crowdT <= 0) {
       this.director.crowdT = 0.5;

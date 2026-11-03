@@ -163,6 +163,35 @@ export class Sfx {
     this.noise({ dur: 0.06, vol: 0.08, f0: 1200, f1: 300, type: 'bandpass', q: 3, delay: 0.04 });
   }
 
+  // A small dog's "rowf rowf": two short, falling barks, a bit of throat in each.
+  bark() {
+    if (!this.ok('bark', 0.35)) return;
+    const f = 380 + Math.random() * 140;
+    for (const d of [0, 0.17]) {
+      this.tone({ type: 'sawtooth', f0: f, f1: f * 0.55, dur: 0.09, vol: 0.07, delay: d });
+      this.noise({ dur: 0.08, vol: 0.06, f0: 1400, f1: 500, q: 2, type: 'bandpass', delay: d });
+    }
+  }
+
+  // A cat's hiss.
+  hiss() {
+    if (!this.ok('hiss', 0.4)) return;
+    this.noise({ dur: 0.35, vol: 0.07, f0: 5200, f1: 3600, q: 0.8, type: 'highpass', attack: 0.03 });
+  }
+
+  // A flock taking off: a flurry of wingbeats.
+  flap() {
+    if (!this.ok('flap', 0.3)) return;
+    for (let i = 0; i < 7; i++) this.noise({ dur: 0.05, vol: 0.05, f0: 1800, f1: 700, q: 1.2, type: 'bandpass', delay: i * 0.045 + Math.random() * 0.02 });
+  }
+
+  // Into the pool: a slap and a wash of spray.
+  splash() {
+    if (!this.ok('splash', 0.25)) return;
+    this.noise({ dur: 0.06, vol: 0.12, f0: 900, f1: 300, q: 1 });
+    this.noise({ dur: 0.55, vol: 0.09, f0: 3500, f1: 600, q: 0.6, delay: 0.03 });
+  }
+
   squeak() {
     if (!this.ok('squeak', 0.08)) return;
     const f = 900 + Math.random() * 300;
@@ -388,6 +417,18 @@ export class Sfx {
           break;
         case 'move':
           this.move(e.id);
+          break;
+        case 'bark':
+          this.bark();
+          break;
+        case 'hiss':
+          this.hiss();
+          break;
+        case 'flap':
+          this.flap();
+          break;
+        case 'splash':
+          this.splash();
           break;
         default:
           break;

@@ -193,10 +193,11 @@ const YARDS = {
 };
 const ALLEY = { dumpster: 2, trash_bags: 4, cardboard: 3, pallets: 2, ac_unit: 2, drums: 1, crates: 1.5, wheelie_bin: 1.5, utility_box: 0.6, recycling: 0.8, shopping_cart: 0.5, motorbike: 0.4 };
 const GARDEN_YARD = { tree_round: 3, bench: 2, flower_bed: 2, planter: 2, picnic_table: 1, topiary: 1, bird_bath: 0.8, hedge: 1, potted_plant: 1, apple_tree: 0.5, berry_bush: 0.6, bush: 1 };
-const BACKYARD = {
-  tree_round: 2, tree_autumn: 1, apple_tree: 0.6, swing_set: 1, trampoline: 1, pool: 0.8, hot_tub: 0.5, bbq: 1.5, doghouse: 1, picnic_table: 1,
-  lawn_chair: 2, gnome: 1.5, flower_bed: 2, bush: 2, bike: 1, clothesline: 1.2, veg_patch: 1.2, kiddie_pool: 0.7, mower: 0.7, bird_bath: 0.7,
-  firewood: 0.5, wheelbarrow: 0.5, chicken_coop: 0.25, ac_unit: 0.6, wheelie_bin: 0.5, topiary: 0.3, berry_bush: 0.4,
+// What else turns up in a backyard, round whatever it's laid out for.
+const YARD_EXTRAS = {
+  bird_feeder: 1, bird_bath: 1, compost_bin: 0.8, wheelbarrow: 0.6, veg_patch: 0.8, rose_bush: 1.5, bush: 1.5, gnome: 1,
+  lawn_chair: 1, mower: 0.6, firewood: 0.5, hose_reel: 0.5, flamingo: 0.6, toys: 0.6, bike: 0.5, sprinkler: 0.6, wheelie_bin: 0.3,
+  clothesline: 0.5,
 };
 // Big, tall things for the open country beside the highways: a kaiju the size of a building still
 // has something to knock down out there.
@@ -404,7 +405,10 @@ function generateChunk(world, c, r) {
   const chunk = { c, r, key: world.key(c, r), zone: zc, objects: [], roads: [], lights: [], decals: [], powerLines: [], bridges: [], metro: [], loaded: true };
   const { objects, lights, decals, powerLines } = chunk;
   let li = 0;
-  const lean = world.detail >= 1;
+  // Detail: 1 leaves out the yard-sized `micro` things once the kaiju has outgrown the yards, 2
+  // all pocket-sized clutter once it's huge.
+  const trim = world.detail >= 1;
+  const lean = world.detail >= 2;
   const sp = p.spawn;
   const nearSpawn = Math.abs(c) <= 1 && Math.abs(r) <= 1;
   const metroLines = [isMetroRow(r, p) ? r * cell : null, isMetroRow(r + 1, p) ? (r + 1) * cell : null].filter((v) => v !== null);
@@ -457,6 +461,8 @@ function generateChunk(world, c, r) {
     });
   };
 
+  // While a house lot is being dressed, all its pocket-sized things count as micro.
+  let yardMicro = false;
   const addProp = (id, x, y, rot = 0, variant = crng.int(0, (PROP_BY_ID[id].variants || 3) - 1)) => {
     const pt = PROP_BY_ID[id];
     const d = propDims(id);
@@ -469,13 +475,19 @@ function generateChunk(world, c, r) {
     // Big kaiju never see pocket-sized clutter, so cells generated late leave it out; and
     // nothing stands under the elevated metro.
     if ((lean && pt.tier === 1) || (id !== 'metro_entrance' && metroLines.some((ly) => Math.abs(y - ly) < 14 + o.h / 2))) o.skip = true;
+    const trimmed = !o.skip && trim && (pt.micro || (yardMicro && pt.tier === 1));
+    if (trimmed) o.skip = true;
     add(o);
+    // (a trimmed one still holds its place, so what's placed after it lands where it always did)
+    if (trimmed) occSpan(o.x, o.y, o.w, o.h, (k) => void (occ[k] = 1));
     if (pt.light && !o.skip) lights.push({ x, y, w: 0, h: 0, height: pt.light.h, color: pt.light.color, obj: o, flicker: pt.light.flicker });
     return o;
   };
 
   const water = (x, y) => waterField(x, y, p) > 0;
-  const footprintDry = (x, y, w, h) => !water(x, y) && !water(x - w / 2, y - h / 2) && !water(x + w / 2, y - h / 2) && !water(x - w / 2, y + h / 2) && !water(x + w / 2, y + h / 2);
+  // (set while dressing a lot already known to be well clear of water: the field is costly)
+  let dryHere = false;
+  const footprintDry = (x, y, w, h) => dryHere || (!water(x, y) && !water(x - w / 2, y - h / 2) && !water(x + w / 2, y - h / 2) && !water(x - w / 2, y + h / 2) && !water(x + w / 2, y + h / 2));
 
   // `n` tries at dropping something from `table` into the rectangle, each only where it fits
   // between what is already there (with `gap` to spare) and on dry land.
@@ -816,82 +828,277 @@ function generateChunk(world, c, r) {
     }
   }
 
+  // Suburbs: nine lots to a block, each a home someone lives in. The house faces its street across
+  // a front lawn, with a driveway down one side and a fenced backyard behind, laid out around the
+  // one thing that family loves: a pool, the kids' play things, the vegetable garden, the fire pit
+  // or the pets. Behind the middle house of the first block a birthday party is in full swing (the
+  // kaiju hatches into it). While the kaiju is small this is its whole world, so it's laid out like
+  // a real street; most of the small stuff is `micro` and left out of blocks made once it's grown.
   function fillSuburb() {
     const { x, y, w } = zc;
     const lots = 3;
     const lot = w / lots;
     for (let i = 0; i < lots; i++) {
       for (let j = 0; j < lots; j++) {
-        const lx = x + i * lot;
-        const ly = y + j * lot;
         const rot = j === lots - 1 ? 0 : j === 0 ? 2 : i === 0 ? 3 : i === lots - 1 ? 1 : 0;
-        const pick = pickBuilding(['suburb'], 3, lot * 0.55, lot * 0.45, rot);
+        // The party lot's house is a shallow one, so it stands clear of the spawn behind it.
+        const party = c === 0 && r === 0 && i === 1 && j === 1;
+        const pick = pickBuilding(['suburb'], 3, lot * 0.55, lot * (party ? 0.3 : 0.45), rot);
         if (!pick) continue;
-        const d = dimsOf(pick.id, pick.variant);
-        const bw = rot % 2 ? d.h : d.w;
-        const bh = rot % 2 ? d.w : d.h;
-        const fx = rot === 1 ? 1 : rot === 3 ? -1 : 0;
-        const fy = rot === 0 ? 1 : rot === 2 ? -1 : 0;
-        const hx = lx + lot / 2 + fx * (lot / 2 - bw / 2 - 10);
-        const hy = ly + lot / 2 + fy * (lot / 2 - bh / 2 - 10);
-        if (!footprintDry(hx, hy, bw, bh)) continue;
-        addBuilding(pick.id, hx, hy, rot, pick.variant);
-        if (rng.chance(0.6)) addProp(rng.weighted({ car: 3, hatchback: 3, pickup: 3, van: 2, camper_van: 0.5, sports_car: 0.4, motorbike: 0.4 }), hx + (fx ? 0 : bw / 2 + 9), hy + (fy ? 0 : bh / 2 + 9), fx ? 0 : 1);
-        frontYard(hx, hy, bw, bh, fx, fy, rot);
-        backyard(lx, ly, lot, -fx, -fy, hx, hy, bw, bh);
+        yardMicro = true;
+        dressLot(x + i * lot, y + j * lot, lot, rot, pick, party);
+        yardMicro = false;
+        dryHere = false;
       }
     }
   }
 
-  // Front yard: the strip between the house and the street gets a path to the door, bins out by
-  // the kerb, a mailbox, and a hedge, flower beds or a tree.
-  function frontYard(hx, hy, bw, bh, fx, fy, rot) {
-    if (!fx && !fy) return;
-    // Along: the direction across the house front; depth: out from the front wall to the street.
+  function dressLot(lx, ly, lot, rot, pick, party) {
+    const d = dimsOf(pick.id, pick.variant);
+    const bw = rot % 2 ? d.h : d.w;
+    const bh = rot % 2 ? d.w : d.h;
+    const fx = rot === 1 ? 1 : rot === 3 ? -1 : 0;
+    const fy = rot === 0 ? 1 : rot === 2 ? -1 : 0;
+    // The lot's own frame: u runs along the street, v from the middle of the lot out toward it.
     const ax = fy ? 1 : 0;
     const ay = fx ? 1 : 0;
-    const half = fy ? bw / 2 : bh / 2;
-    const face = fy ? bh / 2 : bw / 2;
-    const at = (along, out) => [hx + ax * along + fx * (face + out), hy + ay * along + fy * (face + out)];
-    const [px, py] = at(0, 5);
-    decals.push({ kind: 'path', x: px, y: py, w: fx ? 10 : 3, h: fx ? 3 : 10 });
-    addProp('mailbox', ...at(half - 3, 9), rot);
-    for (let k = crng.int(0, 2); k > 0; k--) addProp('wheelie_bin', ...at(-half + 2 + k * 2.5, 8.5), rot);
-    const style = crng.next();
-    const hedgeLen = propDims('hedge').w;
-    if (style < 0.35) {
-      for (let a = -half + hedgeLen / 2; a < half - hedgeLen / 2; a += hedgeLen) if (Math.abs(a) > hedgeLen / 2 + 1) addProp('hedge', ...at(a, 7.5), fx ? 1 : 0);
-    } else if (style < 0.7) {
-      for (const side of [-1, 1]) addProp('flower_bed', ...at(side * half * 0.5, 2), fx ? 1 : 0);
-    }
-    if (crng.chance(0.45)) addProp(crng.weighted({ tree_round: 3, tree_autumn: 1, tree_blossom: 1, apple_tree: 0.5 }), ...at(crng.chance(0.5) ? -half * 0.6 : half * 0.6, 4), crng.int(0, 3));
-    if (crng.chance(0.3)) addProp(crng.weighted({ gnome: 2, bike: 1, bird_bath: 1, potted_plant: 1, kiddie_pool: 0.4 }), ...at(crng.range(-half + 2, half - 2), 2.5), crng.int(0, 3));
-  }
+    const cx = lx + lot / 2;
+    const cy = ly + lot / 2;
+    const half = lot / 2;
+    const P = (u, v) => [cx + ax * u + fx * v, cy + ay * u + fy * v];
+    const size = (wu, wv) => (fy ? [wu, wv] : [wv, wu]);
+    // A prop's x side along the street (its z side then runs toward it).
+    const along = fy ? 0 : 1;
+    const hw = fy ? bw : bh;
+    const hd = fy ? bh : bw;
+    const side = crng.chance(0.5) ? 1 : -1; // the driveway's side
+    const hu = -side * Math.max(0, Math.min(8, half - hw / 2 - 18));
+    const hv = half - hd / 2 - (party ? 10 : 18);
+    const [hx, hy] = P(hu, hv);
+    if (!footprintDry(hx, hy, bw, bh)) return;
+    addBuilding(pick.id, hx, hy, rot, pick.variant);
+    // A lot dry at its corners and middle is dry all over (lakes and rivers are far bigger).
+    dryHere = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]].every(([a, b]) => waterField(cx + a * half, cy + b * half, p) < -40);
+    const front = hv + hd / 2;
+    const back = hv - hd / 2;
 
-  // Backyard: a fenced patch behind the house with sheds, swings, pools and garden clutter.
-  function backyard(lx, ly, lot, bx, by, hx, hy, hw, hh) {
-    const yx0 = bx > 0 ? hx + hw / 2 + 4 : lx + 4;
-    const yx1 = bx < 0 ? hx - hw / 2 - 4 : lx + lot - 4;
-    const yy0 = by > 0 ? hy + hh / 2 + 4 : ly + 4;
-    const yy1 = by < 0 ? hy - hh / 2 - 4 : ly + lot - 4;
-    if (yx1 - yx0 < 20 || yy1 - yy0 < 20) return;
-    const fenceLen = propDims('fence').w;
-    for (let fx = yx0; fx < yx1 - fenceLen / 2; fx += fenceLen) {
-      if (by >= 0) addProp('fence', fx + fenceLen / 2, yy1, 0);
-      if (by <= 0) addProp('fence', fx + fenceLen / 2, yy0, 0);
+    // The house and the shed: a border plant (see plantAt) only has to keep out of these.
+    const solid = [{ x: hx, y: hy, w: bw, h: bh }];
+    const put = (id, u, v, pr = crng.int(0, 3)) => {
+      const [px, py] = P(u, v);
+      const pd = propDims(id);
+      const pw = pr % 2 ? pd.h : pd.w;
+      const ph = pr % 2 ? pd.w : pd.h;
+      if (!free(px, py, pw, ph) || !footprintDry(px, py, pw, ph)) return null;
+      return addProp(id, px, py, pr);
+    };
+    // Planting in rows (borders, hedges, lamps down a path) packs closer than the clutter grid
+    // allows, so these only keep clear of the buildings.
+    const plantAt = (id, u, v, pr = crng.int(0, 3)) => {
+      const [px, py] = P(u, v);
+      const pd = propDims(id);
+      const pw = pr % 2 ? pd.h : pd.w;
+      const ph = pr % 2 ? pd.w : pd.h;
+      if (solid.some((b) => Math.abs(px - b.x) < (pw + b.w) / 2 + 0.5 && Math.abs(py - b.y) < (ph + b.h) / 2 + 0.5) || !footprintDry(px, py, pw, ph)) return null;
+      return addProp(id, px, py, pr);
+    };
+    const paint = (kind, u, v, wu, wv, more = {}) => {
+      const [px, py] = P(u, v);
+      const [pw, ph] = size(wu, wv);
+      decals.push({ kind, x: px, y: py, w: pw, h: ph, horiz: fy !== 0, ...more });
+    };
+    // Keep things off a patch (the water of a pool) that only paint covers.
+    const reserve = (u, v, wu, wv) => {
+      const [px, py] = P(u, v);
+      const [pw, ph] = size(wu, wv);
+      occSpan(px, py, pw, ph, (k) => void (occ[k] = 1));
+    };
+    // `n` tries at dropping things from `table` into a stretch of the lot.
+    const sprinkle = (u0, v0, u1, v1, n, table, gap = 1) => {
+      const [ax0, ay0] = P(u0, v0);
+      const [ax1, ay1] = P(u1, v1);
+      scatter(Math.min(ax0, ax1), Math.min(ay0, ay1), Math.max(ax0, ax1), Math.max(ay0, ay1), n, table, gap);
+    };
+
+    // The lawn, each one mown (or not) its own way, and the beds along the front of the house.
+    paint('lawn', 0, 0, lot - 2, lot - 2, { tone: crng.int(0, 3), z: -1 });
+    paint('bed', hu, front + 1.6, hw - 4, 3);
+    for (let a = -hw / 2 + 4; a < hw / 2 - 3; a += crng.range(5, 8)) {
+      if (Math.abs(a) > 4) plantAt(crng.weighted({ rose_bush: 3, bush: 2, flower_bed: 1, potted_plant: 1 }), hu + a, front + 1.6, along);
     }
-    for (let fy = yy0; fy < yy1 - fenceLen / 2; fy += fenceLen) {
-      if (bx >= 0) addProp('fence', yx1, fy + fenceLen / 2, 1);
-      if (bx <= 0) addProp('fence', yx0, fy + fenceLen / 2, 1);
+
+    // The driveway down one side, with the family car on it (and maybe a second, a boat or a
+    // hoop at the top), a path from the pavement to the door, the mailbox and the bins.
+    const du = hu + side * (hw / 2 + 8);
+    const dv1 = front - hd * 0.65;
+    paint('drive', du, (half + 2 + dv1) / 2, 12, half + 2 - dv1);
+    const depthRot = fy ? 1 : 0;
+    if (rng.chance(0.6)) addProp(rng.weighted({ car: 3, hatchback: 3, pickup: 3, van: 2, camper_van: 0.5, sports_car: 0.4, motorbike: 0.4 }), ...P(du, front - 4), depthRot);
+    const extra = crng.next();
+    if (extra < 0.18) put(crng.weighted({ car: 2, hatchback: 2, boat_trailer: 2, camper_van: 0.6 }), du, front + 9, depthRot);
+    else if (extra < 0.24) put('garage_sale', du, front + 10, along);
+    else if (extra < 0.42) paint('chalk', du, half - 6, 4, 9);
+    if (crng.chance(0.3)) put('hoop', du, dv1 + 2, along);
+    paint('walk', hu, (front + half + 2) / 2, 3, half + 2 - front);
+    if (crng.chance(0.5)) for (let v = front + 3; v < half - 2; v += 4) for (const s of [-1, 1]) plantAt('garden_lamp', hu + s * 2.6, v, 0);
+    put('mailbox', hu + side * 3.5, half - 2, along);
+    for (let k = crng.int(0, 2); k > 0; k--) put('wheelie_bin', du + side * 7 + side * (k - 1) * 2.5, half - 3, along);
+
+    // The rest of the front: a tree out by the street, a porch swing, the odd flamingo, gnome,
+    // sign, bike or sprinkler, and on a sunny day a lemonade stand at the kerb.
+    const lawnU0 = -side * (half - 4);
+    const lawnU1 = hu - side * 4;
+    if (crng.chance(0.7)) put(crng.weighted({ tree_round: 3, tree_blossom: 1.5, tree_autumn: 1, apple_tree: 0.6, tree_birch: 1 }), (lawnU0 + lawnU1) / 2 + crng.range(-4, 4), half - 8, crng.int(0, 3));
+    if (crng.chance(0.4)) put(crng.chance(0.6) ? 'porch_swing' : 'lawn_chair', hu - side * (hw / 4), front + 2.6, along);
+    sprinkle(Math.min(lawnU0, lawnU1), front + 3, Math.max(lawnU0, lawnU1), half - 2, crng.int(1, 4), { flamingo: 2, gnome: 2, lawn_sign: 1, bike: 1, sprinkler: 1.2, toys: 0.8, bird_bath: 0.7, kiddie_pool: 0.3 });
+    if (crng.chance(0.04)) put('lemonade_stand', hu - side * 9, half - 3, along);
+    const edgeU = -side * (half - 2);
+    if (crng.chance(0.55)) {
+      const hl = propDims('hedge').w;
+      for (let v = front - 2; v < half - hl / 2 - 1; v += hl) plantAt('hedge', edgeU, v + hl / 2, along + 1);
+    } else for (let v = front; v < half - 3; v += crng.range(4, 6)) plantAt(crng.weighted({ bush: 3, rose_bush: 2, flower_bed: 1 }), edgeU, v, along + 1);
+    // Shrubs along the driveway's edge.
+    if (crng.chance(0.5)) for (let v = dv1 + 4; v < half - 4; v += crng.range(5, 8)) plantAt(crng.weighted({ bush: 2, rose_bush: 1, potted_plant: 0.6 }), du + side * 7.6, v, along + 1);
+    // Down the far side of the house: the air conditioner and the hose.
+    put('ac_unit', hu - side * (hw / 2 + 3), hv - hd * 0.2, along);
+    if (crng.chance(0.5)) put('hose_reel', hu - side * (hw / 2 + 2.5), front - 3, along);
+
+    // The backyard: a fence round it, a shed in a far corner, a patio off the back of the house.
+    const yv0 = -half + 4;
+    const yv1 = back - 2;
+    if (yv1 - yv0 < 20) return;
+    {
+      const [x0, y0] = P(-half + 4, yv0);
+      const [x1, y1] = P(half - 4, yv1);
+      const yx0 = Math.min(x0, x1);
+      const yx1 = Math.max(x0, x1);
+      const yy0 = Math.min(y0, y1);
+      const yy1 = Math.max(y0, y1);
+      const bx = -fx;
+      const by = -fy;
+      const fenceLen = propDims('fence').w;
+      for (let px = yx0; px < yx1 - fenceLen / 2; px += fenceLen) {
+        if (by >= 0) addProp('fence', px + fenceLen / 2, yy1, 0);
+        if (by <= 0) addProp('fence', px + fenceLen / 2, yy0, 0);
+      }
+      for (let py = yy0; py < yy1 - fenceLen / 2; py += fenceLen) {
+        if (bx >= 0) addProp('fence', yx1, py + fenceLen / 2, 1);
+        if (bx <= 0) addProp('fence', yx0, py + fenceLen / 2, 1);
+      }
     }
     if (rng.chance(0.75)) {
       const shed = rng.chance(0.8) ? 'garden_shed' : rng.chance(0.5) ? 'playhouse' : 'carport';
-      const sx = rng.chance(0.5) ? yx0 + 9 : yx1 - 9;
-      const sy = rng.chance(0.5) ? yy0 + 8 : yy1 - 8;
-      const rot = rng.int(0, 3);
-      if (footprintDry(sx, sy, 16, 16)) addBuilding(shed, sx, sy, rot);
+      const su = rng.chance(0.5) ? 1 : -1;
+      rng.chance(0.5);
+      const sr = rng.int(0, 3);
+      const [sx, sy] = P(su * (half - 12), yv0 + 9);
+      if (footprintDry(sx, sy, 16, 16)) {
+        const sb = addBuilding(shed, sx, sy, sr);
+        solid.push({ x: sb.x, y: sb.y, w: sb.w, h: sb.h });
+      }
     }
-    scatter(yx0 + 2, yy0 + 2, yx1 - 2, yy1 - 2, crng.int(10, 16), BACKYARD);
+    // Borders along the fences: a strip of soil planted with shrubs and roses, a tree in each back
+    // corner.
+    const plant = { rose_bush: 3, bush: 3, berry_bush: 1, flower_bed: 1.5, topiary: 0.4, potted_plant: 0.4 };
+    paint('bed', 0, yv0 + 2.4, lot - 10, 3.2);
+    for (let u = -half + 7; u < half - 6; u += crng.range(4, 6)) plantAt(crng.weighted(plant), u, yv0 + 2.4, along);
+    for (const s2 of [-1, 1]) {
+      paint('bed', s2 * (half - 6.4), (yv0 + 6 + back - 4) / 2, 3.2, back - 4 - yv0 - 6);
+      for (let v = yv0 + 7; v < back - 5; v += crng.range(4.5, 7)) plantAt(crng.weighted(plant), s2 * (half - 6.4), v, along + 1);
+      put(crng.weighted({ tree_round: 3, tree_autumn: 1, tree_birch: 1.2, apple_tree: 0.6, tree_blossom: 0.8 }), s2 * (half - 11), yv0 + 8, crng.int(0, 3));
+    }
+    const pw = Math.min(hw * 0.8, 34);
+    const pv = back - 8;
+    paint(crng.chance(0.6) ? 'patio' : 'deck', hu, pv, pw, 13);
+    if (crng.chance(0.22)) put('pergola', hu, pv, along);
+    else {
+      put('patio_set', hu - pw / 4, pv, 0);
+      put(crng.chance(0.8) ? 'grill' : 'bbq', hu + pw / 2 - 3, pv - 2, along + 2);
+      if (crng.chance(0.35)) put('outdoor_sofa', hu + pw / 6, pv + 1, along);
+    }
+    for (const s of [-1, 1]) if (crng.chance(0.5)) put('potted_plant', hu + s * (pw / 2 - 1), pv + 5, 0);
+
+    // What the yard is for.
+    const ru0 = -half + 6;
+    const ru1 = half - 6;
+    const rv0 = yv0 + 3;
+    const rv1 = pv - 9;
+    const mid = (rv0 + rv1) / 2;
+    const theme = party ? 'party' : crng.weighted({ pool: 3, family: 3, garden: 2, chill: 2, pets: 1.4 });
+    if (rv1 - rv0 >= 14) {
+      if (theme === 'pool') {
+        const pu = Math.min(34, ru1 - ru0 - 26);
+        const pd = Math.min(15, rv1 - rv0 - 4);
+        const pc = crng.range(-6, 6);
+        paint('patio', pc, mid, pu + 12, pd + 9, { z: 0.5 });
+        paint('pool', pc, mid, pu, pd, { z: 1, kidney: crng.chance(0.3) });
+        for (let k = crng.int(1, 3); k > 0; k--) put('pool_float', pc + crng.range(-pu / 2 + 3, pu / 2 - 3), mid + crng.range(-pd / 2 + 2, pd / 2 - 2));
+        put('pool_ladder', pc - pu / 2 + 2, mid + pd / 2 - 1.5, along);
+        put('diving_board', pc + pu / 2 - 1, mid, along + 1);
+        reserve(pc, mid, pu, pd);
+        // Loungers along the far side, a parasol between them, towels on the deck.
+        const lv = mid - pd / 2 - 3.2;
+        for (let k = 0; k < crng.int(2, 3); k++) put('sun_lounger', pc - pu / 2 + 3 + k * 5, lv, fy ? 0 : 1);
+        put('parasol', pc + pu / 2 - 6, lv - 1, 0);
+        if (crng.chance(0.6)) paint('towel', pc + crng.range(-pu / 3, pu / 3), mid + pd / 2 + 2.5, 5, 2.5);
+      } else if (theme === 'family') {
+        put('trampoline', ru0 + 10, mid, 0);
+        put(crng.chance(0.6) ? 'play_fort' : 'swing_set', ru1 - 12, mid, along);
+        paint('sandbox', 0, mid + 4, 10, 9);
+        put('sand_toys', 0, mid + 4, crng.int(0, 3));
+        put('goal_small', crng.range(-10, 10), rv0 + 1, along);
+        sprinkle(ru0, rv0, ru1, rv1, 3, { toys: 3, bike: 1, kiddie_pool: 1, lawn_chair: 0.6 });
+      } else if (theme === 'garden') {
+        const gu = crng.chance(0.5) ? -1 : 1;
+        const beds = Math.min(4, Math.floor((rv1 - rv0 - 6) / 6));
+        paint('gravel', gu * 14, rv0 + beds * 3, 10, beds * 6 + 2);
+        for (let k = 0; k < beds; k++) put('raised_bed', gu * 14, rv0 + 3 + k * 6, along);
+        put('glasshouse', -gu * 20, rv0 + 5, along);
+        put('garden_arch', gu * 14, rv0 + beds * 6 + 2, along);
+        sprinkle(ru0, rv0, ru1, rv1, 6, { compost_bin: 1, wheelbarrow: 1, bird_feeder: 1, rose_bush: 2, apple_tree: 0.8, bird_bath: 0.6, veg_patch: 1 });
+      } else if (theme === 'chill') {
+        const cu = crng.range(-14, 14);
+        paint('gravel', cu, mid, 13, 12);
+        put('fire_pit', cu, mid, 0);
+        put('hammock', -cu * 0.4 + (cu > 0 ? -16 : 16), mid - 2, along);
+        for (let k = 0; k < 4; k++) put('garden_lamp', cu + (k % 2 ? 7 : -7), mid + (k < 2 ? 6 : -6), 0);
+        sprinkle(ru0, rv0, ru1, rv1, 4, { outdoor_sofa: 1, bird_bath: 1, rose_bush: 1.5, hot_tub: 1 });
+      } else if (theme === 'pets') {
+        put('doghouse', ru0 + 6, mid, along);
+        put('rabbit_hutch', ru1 - 6, mid + 3, along);
+        if (crng.chance(0.6)) {
+          put('chicken_coop', ru1 - 8, rv0 + 4, along);
+          flock('chicken', ...P(ru1 - 14, rv0 + 6), crng.int(2, 4), 5);
+        }
+        sprinkle(ru0, rv0, ru1, rv1, 3, { toys: 2, kiddie_pool: 1, bird_feeder: 1 });
+      } else {
+        // A pool party, and the kaiju hatches in the middle of it (the lot's middle is the spawn):
+        // the long table with the cake, presents and balloons, chairs, the pool full of floats, a
+        // bouncy castle, and confetti all over the lawn.
+        paint('confetti', -4, -6, 44, 26);
+        put('party_table', -13, -9, along);
+        put('party_table', 1, -12, along);
+        put('gift_pile', -6, -15, along);
+        for (const [u, v] of [[-20, -4], [8, -6], [-8, 2], [10, -18], [-22, -16]]) put('balloons', u, v, 0);
+        for (const [u, v] of [[-26, -24], [-4, -26]]) put('patio_set', u, v, 0);
+        put('bouncy_castle', -36, rv0 + 6, along);
+        paint('patio', 27, -14, 26, 34, { z: 0.5 });
+        paint('pool', 27, -14, 14, 26, { z: 1 });
+        for (let k = 0; k < 4; k++) put('pool_float', 27 + crng.range(-4, 4), -14 + crng.range(-10, 10));
+        put('diving_board', 27, -28.5, fy ? 0 : 1);
+        reserve(27, -14, 14, 26);
+        for (const v of [-22, -16, -10]) put('sun_lounger', 39, v, fy ? 1 : 0);
+        put('parasol', 40, -4, 0);
+        sprinkle(ru0, rv0, 12, rv1, 6, { lawn_chair: 2, toys: 2, gift_pile: 0.6, kiddie_pool: 0.4 });
+      }
+    }
+    // Stepping stones from the patio down the side of the garden, and a shade tree out on the lawn.
+    paint('walk', side * (half - 16), (pv - 6.5 + yv0 + 6) / 2, 2.6, pv - 6.5 - yv0 - 6);
+    for (let k = 0; k < 2; k++) if (put(crng.weighted({ tree_round: 3, tree_blossom: 1, tree_autumn: 1, apple_tree: 1 }), crng.range(-24, 24), crng.range(rv0 + 8, rv1 - 4), crng.int(0, 3))) break;
+    // Trees and shrubs along the back fence, a washing line, and whatever else lives out here.
+    for (let k = crng.int(1, 3); k > 0; k--) put(crng.weighted({ tree_round: 3, tree_autumn: 1, tree_birch: 1, apple_tree: 0.6, bush: 2, berry_bush: 0.6 }), crng.range(ru0 + 4, ru1 - 4), yv0 + 3.5, crng.int(0, 3));
+    if (crng.chance(0.35)) put('clothesline', crng.range(ru0 + 10, ru1 - 10), rv0 + 9, along);
+    sprinkle(ru0, rv0, ru1, rv1, crng.int(4, 8), YARD_EXTRAS);
   }
 
   // Parks: crossing paths, a centrepiece, a pond, a playground, a sports court, trees.
@@ -951,6 +1158,93 @@ function generateChunk(world, c, r) {
     for (const [ax, ay, bx, by] of [[x + 4, y + 4, cx - 8, cy - 8], [cx + 8, y + 4, x + w - 4, cy - 8], [x + 4, cy + 8, cx - 8, y + w - 4], [cx + 8, cy + 8, x + w - 4, y + w - 4]]) scatter(ax, ay, bx, by, 12, lawn, 2);
     if (crng.chance(0.4)) scatter(x + 4, y + 4, x + w - 4, y + w - 4, 4, { porta_potty: 1 }, 1);
     if (crng.chance(0.12)) scatter(x + 4, y + 4, x + w - 4, y + w - 4, 6, { hot_air_balloon: 1 }, 3);
+    parkLife(x, y, w, cx, cy, q, pond, pg, gz);
+  }
+
+  // What a hatchling finds in a park: rose beds round the fountain and along the paths, reeds and
+  // swan boats on the pond, more to climb in the playground, picnics on blankets, kites up, and
+  // sometimes a skate patch or a kids' football pitch. All of it pocket-sized.
+  function parkLife(x, y, w, cx, cy, q, pond, pg, gz) {
+    const putAt = (id, px, py, rot = crng.int(0, 3)) => {
+      const pd = propDims(id);
+      const pw = rot % 2 ? pd.h : pd.w;
+      const ph = rot % 2 ? pd.w : pd.h;
+      return free(px, py, pw, ph) && !water(px, py) ? addProp(id, px, py, rot) : null;
+    };
+    yardMicro = true;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      decals.push({ kind: 'roses', x: cx + sx * 20, y: cy + sy * 20, w: 13, h: 13, z: 0.5 });
+      putAt('bench', cx + sx * 12, cy + sy * 25, sy > 0 ? 2 : 0);
+    }
+    // Planted strips either side of both paths, between the lamps.
+    for (const s2 of [-1, 1]) {
+      for (let t = 8; t < w - 8; t += 60) {
+        const len = 40;
+        if (Math.abs(x + t + len / 2 - cx) < 40) continue;
+        decals.push({ kind: 'bed', x: x + t + len / 2, y: cy + s2 * 9.5, w: len, h: 3 });
+        decals.push({ kind: 'bed', x: cx + s2 * 9.5, y: y + t + len / 2, w: 3, h: len });
+        for (let a = 2; a < len - 1; a += crng.range(4, 6)) {
+          addProp(crng.weighted({ rose_bush: 3, flower_bed: 1, bush: 1 }), x + t + a, cy + s2 * 9.5, 0);
+          addProp(crng.weighted({ rose_bush: 3, flower_bed: 1, bush: 1 }), cx + s2 * 9.5, y + t + a, 1);
+        }
+      }
+    }
+    // A loop path just inside the railings, trees between it and the street, benches and lamps.
+    const e = 16;
+    for (const [px, py, pw, ph] of [[cx, y + e, w - e * 2, 7], [cx, y + w - e, w - e * 2, 7], [x + e, cy, 7, w - e * 2], [x + w - e, cy, 7, w - e * 2]]) decals.push({ kind: 'path', x: px, y: py, w: pw, h: ph });
+    for (let t = 10; t < w - 8; t += crng.range(14, 20)) {
+      for (const [px, py] of [[x + t, y + 6], [x + t, y + w - 6], [x + 6, y + t], [x + w - 6, y + t]]) {
+        if (Math.abs(px - cx) < 10 || Math.abs(py - cy) < 10) continue;
+        putAt(crng.weighted({ tree_round: 3, tree_birch: 2, tree_blossom: 1, tree_autumn: 1 }), px, py);
+      }
+    }
+    for (let t = 30; t < w - 24; t += 34) {
+      if (Math.abs(x + t - cx) < 24) continue;
+      putAt('bench', x + t, y + e + 6, 0);
+      putAt('bench', x + t, y + w - e - 6, 2);
+      putAt('bench', x + e + 6, y + t, 1);
+      putAt('bench', x + w - e - 6, y + t, 3);
+      if (crng.chance(0.5)) putAt('trash_can', x + t + 6, y + e + 6, 0);
+    }
+    // The pond: reeds round the edge, swan boats out on it, a sign.
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + crng.range(-0.2, 0.2);
+      addProp('reeds', pond.x + Math.cos(a) * 46, pond.y + Math.sin(a) * 36, crng.int(0, 3));
+    }
+    for (let k = crng.int(1, 2); k > 0; k--) addProp('swan_boat', pond.x + crng.range(-20, 20), pond.y + crng.range(-14, 14), crng.int(0, 3));
+    putAt('park_sign', pond.x + 30, pond.y + 44, 0);
+    // The playground gets a roundabout, spring riders, a fort and a gym for the grown-ups.
+    putAt('merry_go_round', pg.x + 2, pg.y - 2, 0);
+    for (const sx of [-1, 1]) putAt('spring_rider', pg.x + sx * 22, pg.y + 2);
+    putAt('play_fort', pg.x - 34, pg.y - 2, 0);
+    putAt('outdoor_gym', pg.x + 36, pg.y + 22, 0);
+    putAt('drinking_fountain', pg.x - 20, pg.y + 28, 0);
+    putAt('bike_rack', pg.x + 20, pg.y + 30, 0);
+    // Picnics on blankets, each with its basket, and kites up over the lawn.
+    for (let k = 0; k < 4; k++) {
+      const bx = gz.x + crng.range(-50, 50);
+      const by = gz.y + crng.range(-40, 40);
+      if (!free(bx, by, 8, 7) || water(bx, by)) continue;
+      decals.push({ kind: 'blanket', x: bx, y: by, w: 7, h: 5.5 });
+      addProp('picnic_basket', bx + 1.5, by, crng.int(0, 3));
+    }
+    for (let k = crng.int(1, 3); k > 0; k--) putAt('kite', x + crng.range(30, w - 30), y + crng.range(30, w - 30));
+    // A skate patch, or a kids' pitch, on whichever lawn has room.
+    const spot = q(crng.int(0, 3));
+    const ox = (spot.x < cx ? 1 : -1) * 56;
+    if (crng.chance(0.5)) {
+      const sx = spot.x + ox;
+      if (free(sx, spot.y, 32, 24)) {
+        decals.push({ kind: 'skate', x: sx, y: spot.y, w: 30, h: 22 });
+        addProp('skate_ramp', sx - 10, spot.y, 0);
+        addProp('skate_ramp', sx + 10, spot.y, 2);
+      }
+    } else if (free(spot.x + ox, spot.y, 50, 32)) {
+      decals.push({ kind: 'pitch', x: spot.x + ox, y: spot.y, w: 46, h: 28, horiz: true, z: 0.5 });
+      addProp('goal_small', spot.x + ox - 24, spot.y, 1);
+      addProp('goal_small', spot.x + ox + 24, spot.y, 3);
+    }
+    yardMicro = false;
   }
 
   // Plazas: a paved square with tree rows, flower beds, a centrepiece, a big screen,
@@ -1337,6 +1631,9 @@ export class World {
     CUR = this.p;
     this.spawn = { ...this.p.spawn };
     this.grid = new SpatialHash(128);
+    // Just the buildings, for walls in the way (people and units walking round them): the yards'
+    // clutter far outnumbers them.
+    this.solidGrid = new SpatialHash(128);
     this.lightGrid = new SpatialHash(256);
     this.decalGrid = new SpatialHash(256);
     this.roadGrid = new SpatialHash(420);
@@ -1347,7 +1644,7 @@ export class World {
     this.roadGraph = { graph: this.graph, key: roadKey };
     this.metroSegs = new Map();
     this.nextId = 1;
-    this.detail = 0; // 1 = leave out pocket-sized clutter (set once the kaiju is huge)
+    this.detail = 0; // 1 = leave out the yard-sized micro things, 2 = all pocket-sized clutter (see generateChunk)
     this._objects = null;
     this._roads = null;
   }
@@ -1410,7 +1707,10 @@ export class World {
       }
       this.saved.delete(chunk.key);
     }
-    for (const o of chunk.objects) this.grid.insert(o);
+    for (const o of chunk.objects) {
+      this.grid.insert(o);
+      if (o.structure && !o.walkable) this.solidGrid.insert(o);
+    }
     for (const l of chunk.lights) this.lightGrid.insert(l);
     for (const d of chunk.decals) this.decalGrid.insert(d);
     for (const rd of chunk.roads) {
@@ -1439,6 +1739,7 @@ export class World {
         saved.set(o.li, { state: o.state === 'collapsing' ? 'rubble' : o.state, hp: o.hp, fallDir: o.fallDir });
       }
       this.grid.remove(o);
+      if (o.structure && !o.walkable) this.solidGrid.remove(o);
     }
     if (saved) this.saved.set(chunk.key, saved);
     for (const l of chunk.lights) this.lightGrid.remove(l);

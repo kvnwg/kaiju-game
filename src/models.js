@@ -255,8 +255,15 @@ export const PERSON_VARIANTS = 8;
 export const DOCTOR = PERSON_VARIANTS;
 // In the back garden the crowd is ants (two colours) and the odd ladybug (see antModel).
 export const ANT = PERSON_VARIANTS + 1;
-export const PERSON_LOOKS = PERSON_VARIANTS + 4;
+export const ANT_LOOKS = 3;
+// Out in the yards and parks while the kaiju is small: dogs (two looks) that bark and charge,
+// cats (two) that bolt, and pigeons that burst into the air (see petModel and game.js).
+export const DOG = ANT + ANT_LOOKS;
+export const CAT = DOG + 2;
+export const BIRD = CAT + 2;
+export const PERSON_LOOKS = BIRD + 1;
 export function personLook(i) {
+  if (i >= DOG) return petModel(i - DOG);
   if (i >= ANT) return antModel(i - ANT);
   if (i !== DOCTOR) return personModel(i);
   const m = personModel(1, { shirt: 0xf4f6f8, pants: 0x8fd1c0, hat: 0x6ab8a8, badge: 0xff2a2a });
@@ -595,8 +602,39 @@ Object.assign(UNIT_MODELS, {
   },
 });
 
+// A dog, a cat or a pigeon, nose toward +x like the ants. 0-1 dogs, 2-3 cats, 4 the pigeon.
+export function petModel(i) {
+  if (i === 4) {
+    const g = new VoxelGrid(4, 3, 2);
+    g.box(0, 0, 0, 3, 2, 2, 0x8a8f9a);
+    g.box(0, 1, 0, 2, 2, 2, 0x6a6e78);
+    g.box(2, 1, 0, 3, 3, 2, 0x5a8a7a);
+    g.set(3, 2, 0, 0xe8a03a);
+    g.set(2, 2, 1, 0x1a1a1a);
+    return { grid: g, origin: { x: 2, z: 1 }, v: 0.5 };
+  }
+  const cat = i >= 2;
+  const g = new VoxelGrid(7, 4, 2);
+  const [fur, patch] = [[0xd8a24a, 0xb07a2a], [0xf2f2f2, 0x1e1e22], [0xf28a3a, 0xc8642a], [0x6a6e76, 0x3a3d44]][i];
+  const coat = (x, y, z) => (hash3(x, y, z) < (i === 1 ? 0.3 : 0.15) ? patch : fur);
+  for (const x of [1, 4]) for (const z of [0, 1]) g.set(x, 0, z, patch);
+  g.box(1, 1, 0, 5, 2, 2, coat);
+  g.box(5, 1, 0, 7, cat ? 3 : 3, 2, fur);
+  g.set(6, 2, 0, 0x1a1a1a);
+  g.set(6, 1, 1, cat ? 0xf2a8b8 : 0x1a1a1a);
+  if (cat) {
+    g.set(5, 3, 0, patch);
+    g.set(5, 3, 1, patch);
+    g.set(0, 2, 1, fur);
+    g.set(0, 3, 1, fur);
+  } else {
+    g.set(5, 3, 0, patch);
+    g.set(0, 2, 1, fur);
+  }
+  return { grid: g, origin: { x: 3.5, z: 1 }, v: cat ? 0.42 : 0.55 };
+}
+
 // Garden ants (and the odd ladybug) take the place of people in the back garden.
-export const ANT_LOOKS = 3;
 export function antModel(i) {
   const g = new VoxelGrid(5, 2, 3);
   if (i === 2) {

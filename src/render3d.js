@@ -632,7 +632,8 @@ export class Renderer3D {
       if (o.kind !== 'prop' || o.state !== 'intact') continue;
       const px = view.px(o.x, o.y, Math.max(o.height, o.w)) / this.lodBias;
       if (px < 3.5 || !view.visible(o.x, o.y, o.height, o.height)) continue;
-      found.push(o, this.propEntry(o.type, o.variant, px < 7 ? 2 : px < 14 ? 1 : 0));
+      // (at the coarsest copy one colourway stands in for all, which saves a draw per variant)
+      found.push(o, px < 7 ? this.propEntry(o.type, 0, 2) : this.propEntry(o.type, o.variant, px < 14 ? 1 : 0));
     }
     let grow = false;
     for (let i = 1; i < found.length; i += 2) {
@@ -1297,6 +1298,12 @@ export class Renderer3D {
           break;
         case 'poof':
           this.fx.dustCloud(e.x, 1, e.y, 1.2, 3, 0xf2efe6);
+          break;
+        case 'splash':
+          // Water thrown up in a crown, and a ring spreading across the pool.
+          this.fx.dustCloud(e.x, 0.5, e.y, e.r * 0.6, e.big ? 12 : 4, 0xbfeaff);
+          this.fx.sparks(e.x, e.r * 0.4, e.y, 0xe8faff, Math.max(0.3, e.r * 0.12), e.big ? 12 : 4);
+          game.fx.rings.push({ x: e.x, y: e.y, r0: e.r * 0.3, r1: e.r * (e.big ? 2 : 1.2), life: 0.5, max: 0.5, color: 0xd8f6ff, width: e.r * 0.12 });
           break;
         case 'unitDie': {
           const u = e.u;

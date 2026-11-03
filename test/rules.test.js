@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STAGES, MAX_STAGE, LAST_STAGE, REALMS, canDamage, isSnack, lootFor, TIER_HP, WORLD, CHAPTER_THEMES } from '../src/config.js';
 import { World } from '../src/world.js';
+import { PROP_BY_ID } from '../src/props.js';
 
 test('six city sizes from human to skyline, each roughly doubling, then five more past the city', () => {
   assert.equal(MAX_STAGE, 6);
@@ -201,6 +202,39 @@ test('blocks are full of small things to wreck, and the countryside of big ones'
       assert.ok(!blds.some((b) => Math.abs(o.x - b.x) < (b.w - o.w) / 2 && Math.abs(o.y - b.y) < (b.h - o.h) / 2), `${o.type} inside a building`);
     }
   }
+});
+
+test('suburban lots are laid out like homes: lawn, drive, path, patio, and a yard for something', () => {
+  const sub = chunks.filter((c) => c.zone.style === 'suburb');
+  const kinds = (c, k) => c.decals.filter((d) => d.kind === k).length;
+  for (const c of sub) {
+    const houses = c.objects.filter((o) => o.kind === 'building' && o.tier === 3).length;
+    // Every house has its lawn, driveway and front path (a lot whose house fell in a lake has none).
+    assert.ok(kinds(c, 'lawn') >= houses && kinds(c, 'drive') >= houses && kinds(c, 'walk') >= houses, `${c.key}: ${houses} houses`);
+  }
+  const all = sub.flatMap((c) => c.decals);
+  assert.ok(all.filter((d) => d.kind === 'pool').length >= sub.length, 'pools, about one a block');
+  assert.ok(all.some((d) => d.kind === 'patio') && all.some((d) => d.kind === 'deck'), 'patios and decks');
+  const types = new Set(sub.flatMap((c) => c.objects.map((o) => o.type)));
+  for (const t of ['patio_set', 'sun_lounger', 'pool_float', 'grill', 'rose_bush', 'raised_bed', 'fire_pit', 'trampoline', 'doghouse']) assert.ok(types.has(t), t);
+  // The block the kaiju hatches in throws a party.
+  const home = city.chunks.get(city.key(0, 0));
+  assert.ok(home.decals.some((d) => d.kind === 'confetti') && home.objects.some((o) => o.type === 'party_table'));
+});
+
+test('the yards\' small things are left out once the kaiju outgrows them, and nothing else moves', () => {
+  const near = (detail) => {
+    const w = new World(1337);
+    w.detail = detail;
+    w.update(w.spawn.x, w.spawn.y, 1300, Infinity);
+    return w;
+  };
+  const small = near(0);
+  const grown = near(1);
+  const sig = (w) => w.objects.filter((o) => o.kind === 'building').map((o) => `${o.type}@${o.x.toFixed(1)},${o.y.toFixed(1)}#${o.li}`).sort().join(' ');
+  assert.equal(sig(grown), sig(small), 'the same buildings in the same places, with the same indices');
+  assert.ok(!grown.objects.some((o) => o.kind === 'prop' && PROP_BY_ID[o.type].micro), 'no micro things');
+  assert.ok(grown.objects.length < small.objects.length * 0.6, `${grown.objects.length} vs ${small.objects.length}`);
 });
 
 test('every seed makes a different world, and the run always starts in the suburbs', () => {

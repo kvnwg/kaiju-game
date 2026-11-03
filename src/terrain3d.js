@@ -408,8 +408,189 @@ export class Terrain {
       ctx.fillStyle = c;
       ctx.fillRect(x - ww / 2, y - hh / 2, ww, hh);
     };
-    for (const d of w.decalGrid.query(x0 - 4, y0 - 4, x0 + size + 4, y0 + size + 4)) {
+    // A rounded rectangle (pools, kidney or not).
+    const RR = (x, y, ww, hh, rad, c) => {
+      const l = x - ww / 2;
+      const t = y - hh / 2;
+      const q = Math.min(rad, ww / 2, hh / 2);
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(l + q, t);
+      ctx.arcTo(l + ww, t, l + ww, t + hh, q);
+      ctx.arcTo(l + ww, t + hh, l, t + hh, q);
+      ctx.arcTo(l, t + hh, l, t, q);
+      ctx.arcTo(l, t, l + ww, t, q);
+      ctx.closePath();
+      ctx.fill();
+    };
+    // Stripes across a decal, every `gap` units, running along x (horiz) or along y.
+    const stripes = (d, gap, wd, c, horiz = d.horiz) => {
+      ctx.fillStyle = c;
+      if (horiz) for (let yy = d.y - d.h / 2 + gap / 2; yy < d.y + d.h / 2; yy += gap) ctx.fillRect(d.x - d.w / 2, yy, d.w, wd);
+      else for (let xx = d.x - d.w / 2 + gap / 2; xx < d.x + d.w / 2; xx += gap) ctx.fillRect(xx, d.y - d.h / 2, wd, d.h);
+    };
+    // Lawns first, then what's laid on them (patios, then the pools let into those).
+    const painted = w.decalGrid.query(x0 - 4, y0 - 4, x0 + size + 4, y0 + size + 4).sort((a, b) => (a.z || 0) - (b.z || 0));
+    for (const d of painted) {
       switch (d.kind) {
+        case 'lawn': {
+          // Each yard its own green: mown in stripes, left lush, or gone a bit patchy.
+          const tone = d.tone ?? 0;
+          R(d.x, d.y, d.w, d.h, ['#6fa64e', '#77ad55', '#7aa64f'][tone]);
+          if (tone === 0 && fine(3)) stripes(d, 8, 4, 'rgba(255,255,255,0.07)', !d.horiz);
+          if (tone === 2 && fine(2)) {
+            ctx.fillStyle = 'rgba(170,150,80,0.28)';
+            for (let q = 0; q < 10; q++) {
+              ctx.beginPath();
+              ctx.ellipse(d.x + (cheap(q, d.x, 9) - 0.5) * d.w * 0.9, d.y + (cheap(q, d.y, 10) - 0.5) * d.h * 0.9, 3 + cheap(q, 3, d.x) * 6, 2 + cheap(q, 4, d.y) * 4, 0, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+          break;
+        }
+        case 'drive':
+          R(d.x, d.y, d.w, d.h, '#bdb8ad');
+          if (fine(1.5)) {
+            stripes(d, 10, 0.5, 'rgba(0,0,0,0.13)', d.horiz);
+            ctx.fillStyle = 'rgba(40,36,30,0.16)';
+            ctx.beginPath();
+            ctx.ellipse(d.x, d.y, 2.6, 1.8, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        case 'walk': {
+          // Stepping stones from the pavement to the front door.
+          const long = d.h > d.w;
+          const n = Math.floor((long ? d.h : d.w) / 4);
+          for (let q = 0; q < n; q++) {
+            const t = -((long ? d.h : d.w) / 2) + 2 + q * 4;
+            if (long) R(d.x, d.y + t, d.w, 3, '#d8cfba');
+            else R(d.x + t, d.y, 3, d.h, '#d8cfba');
+          }
+          break;
+        }
+        case 'patio':
+          R(d.x, d.y, d.w + 1.2, d.h + 1.2, '#b5aa94');
+          R(d.x, d.y, d.w, d.h, '#d2c8b4');
+          if (fine(1.5)) {
+            stripes(d, 4, 0.35, 'rgba(0,0,0,0.12)', true);
+            stripes(d, 4, 0.35, 'rgba(0,0,0,0.12)', false);
+          }
+          break;
+        case 'deck':
+          R(d.x, d.y, d.w + 1, d.h + 1, '#7e5a36');
+          R(d.x, d.y, d.w, d.h, '#a97c4e');
+          if (fine(1.5)) stripes(d, 2, 0.35, 'rgba(60,36,16,0.35)', d.horiz);
+          break;
+        case 'pool': {
+          // Coping, water deepening toward one end, and light dancing on it.
+          const rad = d.kidney ? Math.min(d.w, d.h) * 0.48 : 2.5;
+          RR(d.x, d.y, d.w + 3, d.h + 3, rad + 1.5, '#efe9dc');
+          RR(d.x, d.y, d.w, d.h, rad, '#46bde8');
+          ctx.save();
+          ctx.globalAlpha = 0.45;
+          const deep = d.w > d.h;
+          if (deep) RR(d.x + d.w * 0.22, d.y, d.w * 0.5, d.h - 1.5, rad, '#2b93cf');
+          else RR(d.x, d.y + d.h * 0.22, d.w - 1.5, d.h * 0.5, rad, '#2b93cf');
+          ctx.restore();
+          if (fine(1.1)) {
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            for (let q = 0; q < 14; q++) ctx.fillRect(d.x + (cheap(q, d.x, 11) - 0.5) * (d.w - 4), d.y + (cheap(q, d.y, 12) - 0.5) * (d.h - 3), 1.6 + cheap(q, 5, 6) * 2.4, 0.4);
+          }
+          break;
+        }
+        case 'bed':
+          R(d.x, d.y, d.w, d.h, '#6a4a2e');
+          if (fine(1.5)) {
+            for (let q = 0; q < Math.floor(d.w * d.h * 0.5); q++) {
+              ctx.fillStyle = q % 4 === 0 ? ['#e05a7a', '#f2d24a', '#ffffff', '#a070e0'][q % 16 >> 2] : '#3f8a3a';
+              ctx.fillRect(d.x - d.w / 2 + cheap(q, d.x, 13) * d.w, d.y - d.h / 2 + cheap(q, d.y, 14) * d.h, 0.9, 0.9);
+            }
+          }
+          break;
+        case 'gravel':
+          R(d.x, d.y, d.w, d.h, '#c2b9a8');
+          if (fine(1.5)) {
+            ctx.fillStyle = 'rgba(90,80,64,0.25)';
+            for (let q = 0; q < Math.floor(d.w * d.h * 0.4); q++) ctx.fillRect(d.x - d.w / 2 + cheap(q, d.x, 15) * d.w, d.y - d.h / 2 + cheap(q, d.y, 16) * d.h, 0.5, 0.5);
+          }
+          break;
+        case 'chalk': {
+          // Hopscotch on the driveway.
+          if (!fine(1.1)) break;
+          ctx.strokeStyle = 'rgba(255,240,250,0.85)';
+          ctx.lineWidth = 0.35;
+          const long = d.h > d.w;
+          for (let q = 0; q < 5; q++) {
+            const t = -((long ? d.h : d.w) / 2) + q * 1.8;
+            const pair = q % 2 === 1;
+            for (const s2 of pair ? [-0.9, 0.9] : [0]) {
+              if (long) ctx.strokeRect(d.x + s2 - 0.9, d.y + t, 1.8, 1.8);
+              else ctx.strokeRect(d.x + t, d.y + s2 - 0.9, 1.8, 1.8);
+            }
+          }
+          break;
+        }
+        case 'confetti':
+          if (!fine(1.1)) break;
+          for (let q = 0; q < 160; q++) {
+            ctx.fillStyle = ['#ff5a8a', '#ffd23f', '#4fc3f7', '#7ed957', '#b388ff', '#ffffff'][q % 6];
+            ctx.fillRect(d.x + (cheap(q, d.x, 17) - 0.5) * d.w, d.y + (cheap(q, d.y, 18) - 0.5) * d.h, 0.7, 0.45);
+          }
+          break;
+        case 'pitch': {
+          // A football pitch: mown bands, white lines, the centre circle and the boxes.
+          R(d.x, d.y, d.w + 6, d.h + 6, '#5c9a42');
+          if (fine(2)) stripes(d, 10, 5, 'rgba(255,255,255,0.06)', !d.horiz);
+          ctx.strokeStyle = 'rgba(245,245,240,0.9)';
+          ctx.lineWidth = 0.7;
+          ctx.strokeRect(d.x - d.w / 2, d.y - d.h / 2, d.w, d.h);
+          ctx.beginPath();
+          if (d.horiz) {
+            ctx.moveTo(d.x, d.y - d.h / 2);
+            ctx.lineTo(d.x, d.y + d.h / 2);
+          } else {
+            ctx.moveTo(d.x - d.w / 2, d.y);
+            ctx.lineTo(d.x + d.w / 2, d.y);
+          }
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, Math.min(d.w, d.h) * 0.16, 0, Math.PI * 2);
+          ctx.stroke();
+          const bx = d.horiz ? d.w * 0.14 : d.w * 0.5;
+          const by = d.horiz ? d.h * 0.5 : d.h * 0.14;
+          for (const s2 of [-1, 1]) {
+            if (d.horiz) ctx.strokeRect(d.x + s2 * (d.w / 2) - (s2 > 0 ? bx : 0), d.y - by / 2, bx, by);
+            else ctx.strokeRect(d.x - bx / 2, d.y + s2 * (d.h / 2) - (s2 > 0 ? by : 0), bx, by);
+          }
+          break;
+        }
+        case 'blanket': {
+          // A picnic blanket, checked.
+          const c2 = ['#d94f4f', '#3b6fd1', '#3a8a5a'][Math.abs(Math.floor(d.x)) % 3];
+          R(d.x, d.y, d.w, d.h, '#f4efe4');
+          ctx.fillStyle = c2;
+          for (let xx = 0; xx < d.w; xx += 1.5) for (let yy = 0; yy < d.h; yy += 1.5) if ((Math.round(xx / 1.5) + Math.round(yy / 1.5)) % 2 === 0) ctx.fillRect(d.x - d.w / 2 + xx, d.y - d.h / 2 + yy, 1.5, 1.5);
+          break;
+        }
+        case 'roses': {
+          // A round rose garden: rings of colour round a path.
+          const rings = ['#cdbb94', '#3f8a3a', '#e05a7a', '#3f8a3a', '#f2d24a', '#3f8a3a', '#ffffff'];
+          for (let q = 0; q < rings.length; q++) {
+            ctx.fillStyle = rings[q];
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, (d.w / 2) * (1 - q / rings.length), 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
+        case 'skate':
+          R(d.x, d.y, d.w, d.h, '#a3a6ab');
+          if (fine(1.5)) {
+            stripes(d, 12, 0.4, 'rgba(0,0,0,0.12)', true);
+            stripes(d, 12, 0.4, 'rgba(0,0,0,0.12)', false);
+          }
+          break;
         case 'path':
           R(d.x, d.y, d.w, d.h, '#cdbb94');
           if (fine(1)) {

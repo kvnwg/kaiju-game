@@ -5,6 +5,7 @@ import { createRng } from './rng.js';
 import { REALM_PROPS } from './realmtypes.js';
 import { BIOME_PROPS } from './biomes.js';
 import { CLUTTER_PROPS } from './clutter.js';
+import { HOME_PROPS } from './homes.js';
 
 const CAR_COLORS = [0xd64545, 0x3f7fd1, 0xf0c33c, 0xe8e8e8, 0x3b3b3b, 0x5cb85c, 0xf08a3c, 0x7fb8c8, 0xb05a9a, 0xd8c8a8];
 
@@ -154,7 +155,7 @@ export const PROP_TYPES = [
 // Desert, farm, snow, lantern and fair props (see biomes.js), street clutter, parked vehicles,
 // animals and the rest (see clutter.js), then space clutter and the garden floor, past the city
 // (see realmtypes.js).
-PROP_TYPES.push(...BIOME_PROPS, ...CLUTTER_PROPS, ...REALM_PROPS);
+PROP_TYPES.push(...BIOME_PROPS, ...CLUTTER_PROPS, ...HOME_PROPS, ...REALM_PROPS);
 
 export const PROP_BY_ID = Object.fromEntries(PROP_TYPES.map((p) => [p.id, p]));
 

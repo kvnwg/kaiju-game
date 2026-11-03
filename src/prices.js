@@ -5,6 +5,7 @@
 // Buildings are priced by floor area (the world is about 2.7 units to the metre, a floor 3.5 m);
 // props, vehicles, military hardware and bosses each have a sticker price. People aren't priced.
 import { CLUTTER_PRICE } from './clutter.js';
+import { HOME_PRICE } from './homes.js';
 
 const UNITS_PER_M = 2.7;
 const FLOOR_M = 3.5;
@@ -63,6 +64,7 @@ const PROP_PRICE = {
   bottle_cap: 0.02, berry: 0.25, stone: 0.01,
   // Street clutter, parked vehicles, animals and the rest.
   ...CLUTTER_PRICE,
+  ...HOME_PRICE,
 };
 const PROP_TIER_PRICE = [0, 300, 10000, 200000];
 
