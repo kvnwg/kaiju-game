@@ -3,10 +3,12 @@
 // when something is in reach; the visuals are described through game.fx
 // (slashes, beams, rings, swirls, cracks) and the kaiju's animation state (kaiju.anim).
 import { canDamage } from './config.js';
-import { MOVES, moveStats } from './augments.js';
+import { MOVES, ALWAYS_ON, moveStats } from './augments.js';
 import { norm, distToRect, closestPoint, angleDiff, distToSegment } from './geom.js';
 
 const GHOST = 0xc58bff; // tint for Echo repeats
+// What a thrown tower looks like, by district.
+const JAVELIN_COLORS = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96, farm: 0xb83a2a, desert: 0xd8a878, snow: 0x8a5a3a, lantern: 0xc8302a, fair: 0xff5a8a, downtown: 0x6a8aa8 };
 // What Car Toss throws in each realm: cars in the city, junk and rocks in space, acorns in the garden.
 const THROWABLES = {
   city: ['car', 'hatchback', 'taxi', 'van', 'pickup', 'bus'],
@@ -63,9 +65,10 @@ export class MoveSystem {
     // Overclock: cooldowns run faster while badly hurt.
     if (g.has('overclock') && k.hp < k.maxHp * 0.5) dt *= 1 + 0.15 * g.level('overclock');
     if (g.has('orbitingSpines')) this.orbit(dt);
+    if (g.has('magmaFootprints')) this.magma(dt);
     if (g.has('extinctionEvent')) this.meteorShower(dt);
     for (const m of MOVES) {
-      if (!g.has(m.id) || m.id === 'orbitingSpines') continue;
+      if (!g.has(m.id) || ALWAYS_ON.has(m.id)) continue;
       if (this.timers[m.id] === undefined) this.timers[m.id] = 1;
       this.timers[m.id] -= dt;
       if (this.timers[m.id] > 0) continue;
@@ -100,6 +103,8 @@ export class MoveSystem {
       case 'magneticRoar': return this.magneticRoar(echo);
       case 'frenzyBite': return this.frenzyBite(echo);
       case 'broodCall': return this.broodCall(echo);
+      case 'skyscraperJavelin': return this.skyscraperJavelin(echo);
+      case 'gravityBelch': return this.gravityBelch(echo);
       default: return false;
     }
   }
@@ -768,6 +773,211 @@ export class MoveSystem {
       });
     }
     return true;
+  }
+
+  // ------------------------------------------------------------ Skyscraper Javelin
+  // Rips the tallest thing in reach out of the ground (a skyscraper if there is one, anything it
+  // can break if not) and throws it flat and fast, point first, through everything in a line.
+  skyscraperJavelin(echo) {
+    const g = this.g;
+    const k = this.k;
+    const s = this.st('skyscraperJavelin');
+    const S = this.size() * s.area;
+    const range = k.r * 16 * s.length;
+    const targets = this.targets(range * 0.85, Math.max(1, s.count));
+    if (!targets.length) return false;
+    // The tallest building in reach; failing that, anything else it can break (a tree, a mast...).
+    const around = g.objectsNear(k.x, k.y, k.r * 5).filter((o) => o.state === 'intact' && !o.walkable && !o.landmark && o.tier <= k.stage && canDamage(o.tier, k.stage, false));
+    const tall = (o) => (o.structure ? 1e6 : 0) + (o.height || 0) * Math.max(o.w, o.h);
+    const near = around.sort((a, b) => tall(b) - tall(a)).slice(0, Math.max(1, s.count));
+    if (!near.length) return false;
+    this.anim('heave', 0.6);
+    for (let i = 0; i < s.count; i++) {
+      const b = near[i % near.length];
+      const t = targets[i % targets.length];
+      const tall = Math.max(b.height || 0, b.w, b.h);
+      const thin = Math.min(b.w, b.h);
+      if (b.state === 'intact') g.destroyObject(b, norm(t.x - b.x, t.y - b.y), 'hit');
+      g.schedule(0.34 + i * 0.22, () => {
+        const x0 = k.x + k.facing.x * k.r * 0.5;
+        const y0 = k.y + k.facing.y * k.r * 0.5;
+        const d = norm(t.x - x0, t.y - y0);
+        const sp = g.stage.speed * 3.6 + 80;
+        const life = range / sp;
+        g.projectiles.push({
+          friendly: true, kind: 'javelin', pierce: true, x: x0, y: y0, x0, y0, vx: d.x * sp, vy: d.y * sp, speed: sp, age: 0,
+          r: k.r * 0.4, len: Math.min(Math.max(tall * 0.9, k.r * 2.4), k.r * 5), thick: Math.max(k.r * 0.35, Math.min(thin * 0.45, k.r * 0.9)),
+          w: k.r * 1.1 * S * s.width, dmg: this.base() * s.dmg * 4.5, life, max: life, hit: new Set(), h0: k.r * 1.8, h1: k.r * 0.35,
+          trench: s.trench ? k.r * 0.9 : 0, trenchT: 0, color: echo ? GHOST : JAVELIN_COLORS[b.style] || 0x9aa4b4,
+          onHit: (p) => {
+            g.fxEvent({ t: 'dust', x: p.x, y: p.y, r: k.r * 1.4 });
+            g.shake = Math.max(g.shake, 0.35);
+            if (s.blast) {
+              const r = k.r * 2.2 * S;
+              g.areaDamage(p.x, p.y, r, p.dmg * 1.2, 'hit');
+              g.spawnExplosion(p.x, p.y, r * 0.8);
+              g.shake = Math.max(g.shake, 0.6);
+            }
+          },
+        });
+        g.fxEvent({ t: 'javelin', x: x0, y: y0, r: k.r });
+      });
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------ Gravity Belch
+  // Belches up a black hole between the kaiju and its prey. For a couple of seconds it drags in
+  // whatever is near (soldiers, people, cars, boats, small buildings) and swallows what reaches the
+  // middle; then it collapses back down the kaiju's throat and comes out again as a barrage, a
+  // shot for every couple of things it ate on top of the usual.
+  gravityBelch(echo) {
+    const g = this.g;
+    const k = this.k;
+    const moves = this;
+    const s = this.st('gravityBelch');
+    const S = this.size() * s.area;
+    const [t] = this.targets(k.r * 9 * S);
+    if (!t) return false;
+    this.anim('belch', 0.6);
+    const dir = norm(t.x - k.x, t.y - k.y);
+    const at = Math.max(k.r * 2.6, Math.min(Math.hypot(t.x - k.x, t.y - k.y), k.r * 6 * S));
+    const hole = { x: k.x + dir.x * at, y: k.y + dir.y * at, r: k.r * 3.2 * S, mass: 0 };
+    const dur = 2.2 * s.duration;
+    g.fx.wells.push({ x: hole.x, y: hole.y, r: hole.r, life: dur + 0.5, max: dur + 0.5, ghost: Boolean(echo) });
+    let tick = 0;
+    let suck = 0;
+    this.active.push({
+      t: 0,
+      update(dt) {
+        this.t += dt;
+        if (this.t < dur) {
+          const pull = (o, f, pad = 0, minTier = 0) => {
+            const d = Math.hypot(o.x - hole.x, o.y - hole.y);
+            if (d > hole.r * 1.5 || d < 0.3) return d;
+            const step = Math.min(d, hole.r * f * (1.6 - d / (hole.r * 1.5)) * dt);
+            const nx = o.x + ((hole.x - o.x) / d) * step;
+            const ny = o.y + ((hole.y - o.y) / d) * step;
+            if (!(pad && g.blockedAt(nx, ny, pad, minTier))) {
+              o.x = nx;
+              o.y = ny;
+            }
+            return Math.hypot(o.x - hole.x, o.y - hole.y);
+          };
+          const eaten = (x, y) => {
+            hole.mass++;
+            g.fxEvent({ t: 'suck', x, y, tx: hole.x, ty: hole.y, r: hole.r });
+          };
+          for (const u of g.units) {
+            if (u.dead || u.road || u.type === 'jet' || u.tier > k.stage) continue;
+            const d = pull(u, 1.1, u.flying ? 0 : u.r * 0.6, u.def.mob ? u.tier : 0);
+            if (d < hole.r * 0.25 && u.tier < k.stage) {
+              g.killUnit(u);
+              eaten(u.x, u.y);
+            }
+          }
+          for (const p of g.people) {
+            if (p.taken) continue;
+            const d = pull(p, 1.4);
+            if (d < hole.r * 0.3) {
+              p.taken = true;
+              p.state = 'gone';
+              eaten(p.x, p.y);
+              g.stats.people = (g.stats.people || 0) + 1;
+              g.addBiomass(1);
+            }
+          }
+          for (const c of g.traffic) {
+            if (!c.dead && Math.hypot(c.x - hole.x, c.y - hole.y) < hole.r * 0.8) {
+              g.killCar(c);
+              eaten(c.x, c.y);
+            }
+          }
+          for (const c of g.boats) {
+            if (!c.dead && canDamage(c.tier, k.stage) && Math.hypot(c.x - hole.x, c.y - hole.y) < hole.r * 0.8) {
+              g.killBoat(c);
+              eaten(c.x, c.y);
+            }
+          }
+          // Smaller things near the middle are torn up and swallowed, a few a second.
+          suck -= dt;
+          if (suck <= 0) {
+            suck = 0.2;
+            for (const o of g.objectsNear(hole.x, hole.y, hole.r * 0.7)) {
+              if (o.state !== 'intact' || o.landmark || o.walkable || o.tier >= k.stage) continue;
+              g.destroyObject(o, norm(hole.x - o.x, hole.y - o.y), 'hit');
+              eaten(o.x, o.y);
+            }
+          }
+          tick -= dt;
+          if (tick <= 0) {
+            tick = 0.3;
+            g.areaDamage(hole.x, hole.y, hole.r * 0.6, g.baseDamage() * (s.crush ? 1.6 : 0.5) * s.dmg, 'hit');
+          }
+          return;
+        }
+        // Down the hatch, then back out as a barrage.
+        this.done = true;
+        g.schedule(0.45, () => {
+          if (g.state !== 'playing') return;
+          const shots = s.count + Math.min(8, Math.floor(hole.mass / 2));
+          const prey = moves.targets(k.r * 14, shots);
+          g.fxEvent({ t: 'belchOut', x: k.x, y: k.y, r: k.r });
+          for (let i = 0; i < shots; i++) {
+            g.schedule(i * 0.05, () => {
+              const x = k.x + k.facing.x * k.r * 0.9;
+              const y = k.y + k.facing.y * k.r * 0.9;
+              const tg = prey[i % Math.max(1, prey.length)];
+              const spread = (i / Math.max(1, shots - 1) - 0.5) * 1.6;
+              const fa = Math.atan2(k.facing.y, k.facing.x) + spread;
+              const tx = tg ? tg.x : x + Math.cos(fa) * k.r * 7;
+              const ty = tg ? tg.y : y + Math.sin(fa) * k.r * 7;
+              const sp = g.stage.speed * 2.8 + 50;
+              const d = norm(Math.cos(fa) * 0.5 + (tx - x) / Math.max(1, Math.hypot(tx - x, ty - y)), Math.sin(fa) * 0.5 + (ty - y) / Math.max(1, Math.hypot(tx - x, ty - y)));
+              g.projectiles.push({
+                friendly: true, kind: 'gravShot', x, y, x0: x, y0: y, vx: d.x * sp, vy: d.y * sp, speed: sp, age: 0, tx, ty, target: tg || null,
+                r: k.r * 0.3, size: k.r * 0.32, arc: k.r * 1.5, h0: k.r * 1.4, dmg: g.baseDamage() * 2.4 * s.dmg, life: 3, color: echo ? GHOST : 0xb06aff,
+                onHit: (p) => {
+                  g.areaDamage(p.x, p.y, k.r * 0.9 * S, p.dmg * 0.6, 'hit');
+                  g.fxEvent({ t: 'sparks', x: p.x, y: p.y, h: k.r * 0.3, color: 0xc89aff });
+                  g.fxEvent({ t: 'dust', x: p.x, y: p.y, r: k.r * 0.7 });
+                },
+              });
+            });
+          }
+        });
+      },
+    });
+    return true;
+  }
+
+  // ------------------------------------------------------------ Magma Footprints (always on)
+  // Every step on the move leaves a pool of lava that burns whatever crosses it, cars and
+  // soldiers chasing you most of all. Charging (with River) pours a continuous line of it.
+  magma() {
+    const g = this.g;
+    const k = this.k;
+    if (!k.moving || g.earth) return;
+    const s = this.st('magmaFootprints');
+    const moved = Math.hypot(k.x - (this.magmaX ?? k.x), k.y - (this.magmaY ?? k.y));
+    this.magmaX = k.x;
+    this.magmaY = k.y;
+    this.magmaGap = (this.magmaGap ?? 0) - moved;
+    if (this.magmaGap > 0) return;
+    const river = k.dashT > 0 && s.river;
+    this.magmaGap = k.r * (river ? 0.45 : 1.15);
+    this.magmaSide = -(this.magmaSide || 1);
+    const side = river ? 0 : this.magmaSide * k.r * 0.35;
+    const x = k.x - k.facing.y * side - k.facing.x * k.r * 0.3;
+    const y = k.y + k.facing.x * side - k.facing.y * k.r * 0.3;
+    const S = this.size() * s.area;
+    const life = 2.6 * s.duration;
+    g.fires.push({ x, y, r: k.r * 0.55 * S, t: life, max: life, tick: 0.1, dmgMul: 1.3 * s.dmg, lava: true });
+    if (s.erupt) {
+      g.areaDamage(x, y, k.r * 0.9 * S, this.base() * s.dmg * 0.8, 'hit');
+      g.fxEvent({ t: 'sparks', x, y, h: k.r * 0.2, color: 0xff7a1a });
+    }
+    g.fxEvent({ t: 'magma', x, y, r: k.r * 0.55 * S });
   }
 
   // ------------------------------------------------------------ Acid Spit

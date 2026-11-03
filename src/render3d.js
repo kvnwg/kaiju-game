@@ -107,8 +107,9 @@ const TILT_SHIFT = {
 };
 
 // selfLit: how much of its own colour a surface shows regardless of light (keeps the kaiju readable at dusk).
-export function makeVoxelMaterial(uniforms, selfLit = 0) {
-  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+// `glossy`: a shiny finish with hard highlights (the void form's pitch-black skin).
+export function makeVoxelMaterial(uniforms, selfLit = 0, glossy = false) {
+  const m = glossy ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 38, specular: 0xb8a8f0 }) : new THREE.MeshLambertMaterial({ vertexColors: true });
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSelf = { value: selfLit };
@@ -128,9 +129,12 @@ export function makeVoxelMaterial(uniforms, selfLit = 0) {
         if (fE > 0.5) totalEmissiveRadiance += baseCol * mix(0.55, 1.75, uNight);
         // City glow at night: every surface keeps a little of its own colour so facades read.
         totalEmissiveRadiance += baseCol * 0.2 * smoothstep(0.0, 0.7, uNight);
-        totalEmissiveRadiance += baseCol * uSelf * (0.35 + 0.65 * uNight);`);
+        totalEmissiveRadiance += baseCol * uSelf * (0.35 + 0.65 * uNight);${glossy ? `
+        // Gloss: faces turning away from the eye catch a cool violet sheen, so black reads as shiny.
+        float rim = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.2);
+        totalEmissiveRadiance += vec3(0.36, 0.3, 0.62) * rim * 0.55;` : ''}`);
     // Separate program per self-lit level.
-    m.customProgramCacheKey = () => `voxel-${selfLit}`;
+    m.customProgramCacheKey = () => `voxel-${selfLit}${glossy ? '-gloss' : ''}`;
   };
   return m;
 }
@@ -197,7 +201,7 @@ export class Renderer3D {
     this.globe = new GlobeView(this.scene);
 
     this.fx = new FX(this.scene);
-    this.actors = new Actors(this.scene, (selfLit = 0) => makeVoxelMaterial(this.uniforms, selfLit));
+    this.actors = new Actors(this.scene, (selfLit = 0, glossy = false) => makeVoxelMaterial(this.uniforms, selfLit, glossy));
     this.ambient = new Ambient(this.scene, this.voxelMat);
     this.terrain = new Terrain(this.scene, this.renderer);
     this.bridgeMeshes = new Map();
@@ -525,6 +529,7 @@ export class Renderer3D {
     this.fx.clear();
     this.actors.clear();
     this.actors.setKaiju(game.def.id, game.meta && game.meta.skin);
+    this.voidSkin = false;
     this.ambient.reset();
     for (const [, f] of this.floaters) f.el.remove();
     this.floaters.clear();
@@ -1221,6 +1226,48 @@ export class Renderer3D {
         case 'hit':
           this.chip(e);
           break;
+        case 'suck': {
+          // Something swallowed by a black hole: a streak of grit and light falling into it.
+          const k = game.kaiju;
+          for (let i = 0; i < 5; i++) {
+            const life = 0.35 + Math.random() * 0.15;
+            const sx = e.x + (Math.random() - 0.5) * k.r;
+            const sz = e.y + (Math.random() - 0.5) * k.r;
+            this.fx.dust.add({ x: sx, y: k.r * 0.6, z: sz, vx: (e.tx - sx) / life, vy: k.r * 0.8, vz: (e.ty - sz) / life, drag: 0, size: k.r * 0.4, grow: -0.6, life, max: life, a: 0.7, r: 0.35, g: 0.25, b: 0.45 });
+          }
+          break;
+        }
+        case 'belchOut': {
+          // The barrage comes up: a violet flash at the mouth.
+          const m = this.actors.mouthWorld();
+          this.fx.twinkle(m.x, m.y, m.z, Math.max(e.r * 1.6, game.viewSpan(e.r) * 0.06), 0xc89aff, 0.3);
+          this.fx.flash(m.x, m.y, m.z, 0x9a5cff, 1.4, e.r * 4, 0.3);
+          break;
+        }
+        case 'javelin':
+          this.fx.dustCloud(e.x, 0, e.y, e.r * 0.8, 6);
+          break;
+        case 'voidOn': {
+          // The kaiju goes dark: a column of black smoke and violet light, a shockwave of shadow.
+          for (let i = 0; i < 40; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = e.r * (1 + Math.random() * 4);
+            this.fx.dust.add({ x: e.x, y: e.r * (0.3 + Math.random()), z: e.y, vx: Math.cos(a) * sp, vy: e.r * (0.5 + Math.random() * 2.5), vz: Math.sin(a) * sp, drag: 1.2, size: e.r * (0.6 + Math.random() * 0.8), grow: 1.4, life: 1.6, max: 1.6, a: 0.75, r: 0.05, g: 0.03, b: 0.08 });
+          }
+          for (let i = 0; i < 24; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = e.r * (2 + Math.random() * 6);
+            this.fx.glow.add({ x: e.x, y: e.r, z: e.y, vx: Math.cos(a) * sp, vy: e.r * Math.random() * 3, vz: Math.sin(a) * sp, drag: 2, size: e.r * 0.4, grow: -0.5, life: 0.8, max: 0.8, a: 0.9, r: 0.6, g: 0.3, b: 1 });
+          }
+          this.fx.flash(e.x, e.r * 1.5, e.y, 0x9a5cff, 3, e.r * 12, 0.8);
+          this.fx.twinkle(e.x, e.r * 1.4, e.y, e.r * 4, 0xc89aff, 0.6);
+          break;
+        }
+        case 'voidOff':
+          this.fx.flash(e.x, e.r * 1.5, e.y, 0xfff2c8, 2.5, e.r * 10, 0.6);
+          this.fx.twinkle(e.x, e.r * 1.4, e.y, e.r * 3.5, 0xffffff, 0.5);
+          this.fx.dustCloud(e.x, 0, e.y, e.r * 1.2, 12, 0xf2efe6);
+          break;
         case 'attack':
           // (drawn once the kaiju is posed this frame, so it lands on the snapping jaws)
           if (e.kind === 'bite') this.glintQueued = true;
@@ -1643,6 +1690,7 @@ export class Renderer3D {
       this.target.z + Math.cos(YAW) * Math.cos(PITCH) * d + (Math.random() - 0.5) * shake,
     );
     this.camera.lookAt(this.target);
+    this.fx.cameraPos = this.camera.position;
     // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
     this.camera.near = Math.max(1, d * 0.25);
     // (Space has no haze: what is out there stays sharp against the stars. Nor does the globe.)
@@ -1686,6 +1734,18 @@ export class Renderer3D {
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);
+    // The void form: the kaiju turns glossy black (and back), trailing wisps of shadow.
+    if (Boolean(game.dark) !== Boolean(this.voidSkin)) {
+      this.voidSkin = Boolean(game.dark);
+      this.actors.setKaiju(game.def.id, game.dark ? 'void' : game.meta && game.meta.skin);
+    }
+    if (game.dark && Math.random() < 0.6) {
+      const a = Math.random() * Math.PI * 2;
+      this.fx.dust.add({ x: k.x + Math.cos(a) * k.r * 0.6, y: k.r * (0.4 + Math.random() * 1.2), z: k.y + Math.sin(a) * k.r * 0.6, vx: 0, vy: k.r * 0.9, vz: 0, drag: 1, size: k.r * 0.45, grow: 1.3, life: 0.9, max: 0.9, a: 0.55, r: 0.07, g: 0.04, b: 0.1 });
+    }
+    if (game.dark && k.dashT > 0 && Math.random() < 0.8) {
+      this.fx.glow.add({ x: k.x - k.facing.x * k.r * 0.8, y: k.r * 0.6, z: k.y - k.facing.y * k.r * 0.8, vx: 0, vy: k.r * 1.5, vz: 0, drag: 1, size: k.r * 0.7, grow: -0.3, life: 0.4, max: 0.4, a: 0.85, r: 1, g: 0.35, b: 0.12 });
+    }
     this.actors.update(game, dt, this.t, elev);
     if (this.glintQueued) {
       this.glintQueued = false;

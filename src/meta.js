@@ -176,6 +176,9 @@ export const SKINS = {
   shadow: { name: 'Shadow', gems: 800, tint: [0.32, 0.18, 0.5], mix: 0.6 },
   neon: { name: 'Neon', gems: 1200, tint: [0.15, 0.95, 1], mix: 0.45, glow: true },
   zombie: { name: 'Zombie', how: 'Rampage Pass tier 30', tint: [0.45, 0.62, 0.35], mix: 0.6 },
+  // The void form's look (three Void Shards in a run): never sold or worn outside it. Glossy pitch
+  // black, with the brightest voxels (eyes, teeth, belly plates) burning violet.
+  void: { name: 'Void', hidden: true, tint: [0.035, 0.03, 0.05], mix: 0.97, glossy: true, glowColor: [0.78, 0.32, 1] },
 };
 
 // ---------------------------------------------------------------- time helpers

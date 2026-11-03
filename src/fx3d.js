@@ -402,6 +402,7 @@ export class FX {
       this.syncBeams(game);
       this.syncSlashes(game);
       this.syncSwirls(game);
+      this.syncWells(game);
       this.syncCracks(game);
       this.syncBolts(game);
       this.syncGlowThings(game, dt);
@@ -684,6 +685,52 @@ export class FX {
   }
 
   // Cyclone: a funnel of dust and grit whipping around the kaiju.
+  // Gravity Belch's black holes: a pitch-black ball wrapped in a spinning violet accretion ring,
+  // light and grit spiralling into it. It swells open, holds, then collapses in its last half second.
+  syncWells(game) {
+    const k = game.kaiju;
+    const wells = game.fx.wells;
+    if (!this.wellPool) this.wellPool = [];
+    while (this.wellPool.length < wells.length) {
+      const core = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color: 0x050308 }));
+      const ring = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.9, 40), new THREE.MeshBasicMaterial({ color: 0x9a5cff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+      const halo = new THREE.Mesh(new THREE.RingGeometry(1, 1.25, 40), new THREE.MeshBasicMaterial({ color: 0xffd8ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+      core.renderOrder = 6;
+      ring.renderOrder = halo.renderOrder = 7;
+      this.scene.add(core, ring, halo);
+      this.wellPool.push({ core, ring, halo });
+    }
+    this.wellPool.forEach((w, i) => {
+      const e = wells[i];
+      w.core.visible = w.ring.visible = w.halo.visible = Boolean(e);
+      if (!e) return;
+      const age = e.max - e.life;
+      const open = Math.min(1, age / 0.3);
+      const close = Math.min(1, e.life / 0.5);
+      const s = e.r * 0.42 * open * close;
+      const y = k.r * 1.1;
+      w.core.position.set(e.x, y, e.y);
+      w.core.scale.setScalar(Math.max(0.01, s));
+      w.ring.position.copy(w.core.position);
+      w.ring.scale.setScalar(Math.max(0.01, s));
+      w.ring.rotation.set(-Math.PI / 2 + 0.45, 0, this.t * 3);
+      w.ring.material.color.setHex(e.ghost ? 0xc58bff : 0x9a5cff);
+      w.halo.position.copy(w.core.position);
+      w.halo.scale.setScalar(Math.max(0.01, s));
+      w.halo.lookAt(this.cameraPos || new THREE.Vector3(e.x, y + 100, e.y + 100));
+      // Light and grit falling in.
+      for (let j = 0; j < 4; j++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = e.r * (0.9 + Math.random() * 0.6);
+        const life = 0.45;
+        const sx = e.x + Math.cos(a) * r;
+        const sz = e.y + Math.sin(a) * r;
+        const c = rgb(j % 2 ? 0xb88aff : 0x6a3ad8);
+        this.glow.add({ x: sx, y: y + (Math.random() - 0.5) * e.r * 0.4, z: sz, vx: (e.x - sx) / life - Math.sin(a) * r, vy: 0, vz: (e.y - sz) / life + Math.cos(a) * r, drag: 0, size: k.r * 0.35, grow: -0.7, life, max: life, a: 0.8 * close, ...c });
+      }
+    });
+  }
+
   syncSwirls(game) {
     const k = game.kaiju;
     for (const sw of game.fx.swirls) {
@@ -819,6 +866,19 @@ export class FX {
         const y = arcHeight(p);
         put(p.x, y, p.y, p.size, p.color, rot + p.age * 4, 1, 0.9);
         if (Math.random() < 0.7) this.dust.add({ x: p.x, y, z: p.y, vx: 0, vy: 0, vz: 0, size: p.size * 0.6, grow: 1.5, life: 0.5, max: 0.5, a: 0.35, drag: 2, ...rgb(0xb8b0a4) });
+      } else if (p.kind === 'javelin') {
+        // A tower thrown point first: long and low, sinking a little as it flies, shedding grit.
+        const f = 1 - Math.max(0, p.life) / p.max;
+        const y = p.h0 + (p.h1 - p.h0) * f;
+        put(p.x, y, p.y, p.thick, p.color, rot, p.len / p.thick, 1);
+        put(p.x + (p.vx / p.speed) * p.len * 0.42, y, p.y + (p.vy / p.speed) * p.len * 0.42, p.thick * 1.05, 0x4a5462, rot, 0.25, 1.05);
+        if (Math.random() < 0.8) this.dust.add({ x: p.x - (p.vx / p.speed) * p.len * 0.5, y, z: p.y - (p.vy / p.speed) * p.len * 0.5, vx: 0, vy: 0, vz: 0, size: p.thick * 1.4, grow: 1.4, life: 0.45, max: 0.45, a: 0.35, drag: 2, ...rgb(0xb8b0a4) });
+        if (Math.random() < 0.4) this.bits.add({ x: p.x, y, z: p.y, vx: (Math.random() - 0.5) * p.thick * 8, vy: p.thick * 4, vz: (Math.random() - 0.5) * p.thick * 8, drag: 1, lift: -p.thick * 30, size: Math.max(0.3, p.thick * 0.25), life: 0.5, max: 0.5, a: 1, ...rgb(0xfff2b0) });
+      } else if (p.kind === 'gravShot') {
+        const y = arcHeight(p);
+        put(p.x, y, p.y, p.size, 0x1a1024, rot, 1);
+        put(p.x, y, p.y, p.size * 0.6, p.color, rot + 0.8, 1);
+        if (Math.random() < 0.9) this.glow.add({ x: p.x, y, z: p.y, vx: 0, vy: 0, vz: 0, size: p.size * 3, grow: -1, life: 0.3, max: 0.3, a: 0.8, ...rgb(p.color) });
       } else if (p.kind === 'acid') {
         const y = arcHeight(p);
         put(p.x, y, p.y, p.size, p.color, rot, 1.4);
@@ -908,10 +968,22 @@ export class FX {
     const k = game.kaiju;
     for (const o of game.fx.orbs) put(o.x, k.r * 0.8 + Math.sin(o.t * 10) * k.r * 0.2, o.y, Math.max(0.35, k.r * 0.12), o.color, o.t * 5, 1);
     for (const f of game.fires) {
+      if (f.lava) {
+        // A pool of lava on the ground, cooling from white-hot orange to a dark crust.
+        const heat = Math.max(0, Math.min(1, f.t / f.max));
+        const col = heat > 0.6 ? 0xff7a1a : heat > 0.3 ? 0xd8401a : heat > 0.12 ? 0x8a2412 : 0x3a1e18;
+        put(f.x, 0.12, f.y, f.r * 1.5, col, 0, 1, 0.03);
+        put(f.x, 0.14, f.y, f.r * 1.5, col, Math.PI / 4, 1, 0.03);
+        if (heat > 0.5) put(f.x, 0.16, f.y, f.r * 0.7, 0xffd060, 0.3, 1, 0.03);
+        if (Math.random() < 0.35 * heat) this.glow.add({ x: f.x + (Math.random() - 0.5) * f.r, y: 0.4, z: f.y + (Math.random() - 0.5) * f.r, vx: 0, vy: f.r * 1.2, vz: 0, drag: 1, size: f.r * 0.35, grow: -0.4, life: 0.4, max: 0.4, a: 0.8, ...rgb(Math.random() < 0.5 ? 0xff5a1a : 0xffb040) });
+        continue;
+      }
       if (Math.random() < 0.5) {
-        const c = rgb(f.acid ? (Math.random() < 0.5 ? 0x7dff3a : 0xc8ff4a) : Math.random() < 0.5 ? 0xff7a1a : 0xffc04a);
+        const c = rgb(f.acid ? (Math.random() < 0.5 ? 0x7dff3a : 0xc8ff4a) : f.hell ? (Math.random() < 0.5 ? 0xff3a1a : 0xff8a2a) : Math.random() < 0.5 ? 0xff7a1a : 0xffc04a);
         this.glow.add({ x: f.x + (Math.random() - 0.5) * f.r, y: 0.5, z: f.y + (Math.random() - 0.5) * f.r, vx: 0, vy: f.r * 1.5, vz: 0, drag: 1, size: f.r * 0.6, grow: -0.3, life: 0.5, max: 0.5, a: 0.8 * Math.min(1, f.t), ...c });
       }
+      // The void's fire smokes black.
+      if (f.hell && Math.random() < 0.3) this.dust.add({ x: f.x + (Math.random() - 0.5) * f.r, y: f.r * 0.5, z: f.y + (Math.random() - 0.5) * f.r, vx: 0, vy: f.r * 1.2, vz: 0, drag: 1, size: f.r * 0.8, grow: 1.2, life: 0.9, max: 0.9, a: 0.5, ...rgb(0x140c18) });
     }
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
@@ -925,6 +997,7 @@ export class FX {
     this.bits.items = [];
     for (const m of this.ringPool) m.visible = false;
     for (const s of this.twinkles) s.visible = false;
+    for (const w of this.wellPool || []) w.core.visible = w.ring.visible = w.halo.visible = false;
     for (const [, entry] of this.hazardMeshes) for (const o of entry.parts) this.scene.remove(o);
     this.hazardMeshes.clear();
     this.lights = [];

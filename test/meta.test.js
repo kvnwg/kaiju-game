@@ -272,8 +272,9 @@ test('no real-money store: gems come from play and from ads, 30 an ad, a few min
   assert.equal(ECONOMY.adGems, 30);
   assert.equal(energyCap(s, T0), ECONOMY.energyCap);
   assert.equal(s.purchases, undefined, 'no purchase records');
-  // Every skin can be earned in play: for gems or from the pass.
-  for (const sk of Object.values(SKINS)) assert.ok(sk.gems || sk.how, sk.name);
+  // Every skin can be earned in play: for gems or from the pass. (The void's look is only ever
+  // worn in void form, never sold.)
+  for (const sk of Object.values(SKINS)) assert.ok(sk.gems || sk.how || sk.hidden, sk.name);
   s.cur.gems = SKINS.golden.gems;
   assert.ok(buySkin(s, 'golden'));
   assert.equal(s.cur.gems, 0);

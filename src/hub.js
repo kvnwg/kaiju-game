@@ -520,7 +520,7 @@ export class Hub {
           <button class="link" data-act="odds" data-id="${id}">Odds and details</button>
         </div></div>`;
     };
-    const skins = Object.entries(SKINS).map(([id, sk]) => {
+    const skins = Object.entries(SKINS).filter(([, sk]) => !sk.hidden).map(([id, sk]) => {
       const owned = s.skins.owned[id];
       const on = s.skins.equipped === id;
       const tint = `rgb(${sk.tint.map((v) => Math.round(v * 255)).join(',')})`;
@@ -944,6 +944,7 @@ export class Hub {
         : `<div class="row"><input id="redeemCode" class="code-input" maxlength="24" placeholder="Have a code?" autocomplete="off" spellcheck="false"><button class="btn ghost" data-act="redeem">Redeem</button></div>`}
       <div class="col">
         ${s.settings.admin ? `<button class="btn ghost" data-act="adminjump" data-stage="7">Admin: start a run on the globe</button>
+        <button class="btn ghost" data-act="adminvoid">Admin: start with 2 Void Shards</button>
         <button class="btn ghost" data-act="adminoff">Turn admin mode off</button>` : ''}
         ${this.debug ? `<button class="btn ghost" data-act="dev" data-what="rich">Dev: +10,000 gems, +1M scrap, +500 DNA</button>
         <button class="btn ghost" data-act="dev" data-what="level">Dev: +5 account levels</button>
@@ -1389,6 +1390,11 @@ export class Hub {
         if (!s.settings.admin) break;
         this.closeModal();
         this.onPlay({ kaijuId: s.lastKaiju, chapter: s.chapter.selected, mode: s.chapter.mode, startStage: Number(d.stage) || 7 });
+        break;
+      case 'adminvoid':
+        if (!s.settings.admin) break;
+        this.closeModal();
+        this.onPlay({ kaijuId: s.lastKaiju, chapter: s.chapter.selected, mode: s.chapter.mode, voidStart: true });
         break;
       case 'adminoff':
         s.settings.admin = false;

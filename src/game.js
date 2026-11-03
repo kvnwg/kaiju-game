@@ -2,7 +2,7 @@ import {
   WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
   BOAT_SCALE, UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
-import { AUGMENT_BY_ID, MOVES, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
+import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, offerAugments, applyPick, completedSets, maxLevel, moveStats, MOVE_SLOTS } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
 import { RealmWorld, EmptyWorld } from './realm.js';
 import { EarthSim, EARTH } from './earth.js';
@@ -52,7 +52,12 @@ const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone
 const ATTACK_WINDUP = 0.16;
 // Augment moves on the globe, where there is nothing but countries to hit: these carve one big
 // crater round the kaiju; the rest a run of craters ahead of it.
-const AROUND_MOVES = new Set(['seismicSlam', 'roar', 'magneticRoar', 'tailSpin', 'vortexBelch', 'frenzyBite', 'broodCall', 'clawStrike']);
+const AROUND_MOVES = new Set(['seismicSlam', 'roar', 'magneticRoar', 'tailSpin', 'vortexBelch', 'frenzyBite', 'broodCall', 'clawStrike', 'gravityBelch']);
+// The void form (three Void Shards): twice the damage and health, and a long burning charge whose
+// every hit lands as hard as a full second in the path of maxed-out Laser Eyes (both eyes' beams,
+// ten ticks a second; see moves.js laserEyes). `steer`: how fast the charge turns, radians a second.
+const LASER_MAX = moveStats('laserEyes', AUGMENT_BY_ID.laserEyes.levels.length + 1);
+export const VOID_FORM = { dmg: 2, hp: 2, dashTime: 1, steer: 4, dashHit: LASER_MAX.dmg * 0.55 * 2 * 10, fireEvery: 0.7 };
 // What a thing of each size is worth to the damage counter when it's priced by how big it looks
 // to the kaiju (the back garden: see worth): street clutter, a car, a house, an apartment block, a
 // tower, a skyline landmark.
@@ -134,6 +139,9 @@ export class Game {
     this.rng = createRng(seed);
     // Pets, pigeons and party guests draw from their own stream, so they never shift the rest.
     this.lifeRng = createRng((seed ^ 0x2c1b3c6d) >>> 0);
+    this.voidRng = createRng((seed ^ 0x766f6964) >>> 0); // the Void Shard's own odds
+    this.dark = null; // void form, while it lasts: { sealed } (see becomeVoid)
+    this.voidSpent = false; // the shards were used up this run
     this.firstRun = firstRun;
     this.ascend = ascend;
     this.realm = 'city';
@@ -173,7 +181,7 @@ export class Game {
     this.hazards = [];
     this.scheduled = [];
     this.fires = [];
-    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [], slashes: [], swirls: [], cracks: [] };
+    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [], slashes: [], swirls: [], cracks: [], wells: [] };
     this.moves = new MoveSystem(this);
     this.vfx = [];
     this.boss = null;
@@ -432,7 +440,7 @@ export class Game {
   }
 
   baseDamage() {
-    let m = this.stage.damage * this.meta.atkMul * (1 + 0.1 * this.level('might')) * (1 + 0.1 * this.level('glassCannon'));
+    let m = this.stage.damage * this.meta.atkMul * (1 + 0.1 * this.level('might')) * (1 + 0.1 * this.level('glassCannon')) * (this.dark ? VOID_FORM.dmg : 1);
     if (this.has('momentum')) m *= 1 + 0.08 * this.level('momentum') * (this.kaiju.momentum || 0);
     if (this.has('rageMode')) m *= 1 + (0.2 + 0.2 * this.level('rageMode')) * (1 - this.kaiju.hp / this.kaiju.maxHp);
     return m;
@@ -440,7 +448,7 @@ export class Game {
 
   // ---- stats from passives
   maxHpFor(stage = this.kaiju.stage) {
-    return STAGES[stage].maxHp * this.def.hpMult * this.meta.hpMul * (this.maxHpPenalty || 1) * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon'));
+    return STAGES[stage].maxHp * this.def.hpMult * this.meta.hpMul * (this.maxHpPenalty || 1) * (1 + 0.15 * this.level('toughness')) * (1 - 0.06 * this.level('glassCannon')) * (this.dark ? VOID_FORM.hp : 1);
   }
 
   scrapMult() {
@@ -916,11 +924,12 @@ export class Game {
       k.dashT -= dt;
       if (k.pounce && k.dashT <= 0) this.landPounce();
       const sp = this.stage.speed * this.def.speedMult * DASH.speed;
+      if (k.voidDash) this.steerVoidDash(dt);
       k.vx = k.dashDir.x * sp;
       k.vy = k.dashDir.y * sp;
       k.moving = true;
       // Trample: units in the way take a heavy hit and get thrown aside.
-      for (const u of this.units) {
+      for (const u of k.voidDash ? [] : this.units) {
         if (u.dead || u.flying || k.dashHits.has(u) || Math.hypot(u.x - k.x, u.y - k.y) > k.r * 1.3 + u.r) continue;
         k.dashHits.add(u);
         const away = norm(u.x - k.x, u.y - k.y);
@@ -964,6 +973,7 @@ export class Game {
     }
     k.x += k.vx * dt * (k.hopT > 0 ? 1.15 : 1);
     k.y += k.vy * dt * (k.hopT > 0 ? 1.15 : 1);
+    if (k.voidDash) this.burnVoidDash(dt);
 
     // Crush what is smaller, bump into what is your size or bigger.
     let bumped = null;
@@ -1535,10 +1545,14 @@ export class Game {
     if (this.state !== 'playing' || k.dashCd > 0) return false;
     k.dashDir = k.moving ? norm(this.input.x, this.input.y) : { ...k.facing };
     k.facing = { ...k.dashDir };
-    k.dashT = DASH.time;
-    k.dashCd = DASH.cd * this.meta.dashCdMul * (this.meta.perks.rudderTail ? 0.65 : 1);
-    k.dodging = DASH.iframes;
-    k.invuln = Math.max(k.invuln, DASH.iframes);
+    // The void's charge lasts a whole second, burns a trail and can't be touched while it runs.
+    const dark = Boolean(this.dark);
+    k.dashT = dark ? VOID_FORM.dashTime : DASH.time;
+    k.dashMax = k.dashT;
+    k.dashCd = DASH.cd * this.meta.dashCdMul * (this.meta.perks.rudderTail ? 0.65 : 1) + (dark ? VOID_FORM.dashTime : 0);
+    k.dodging = dark ? VOID_FORM.dashTime : DASH.iframes;
+    k.invuln = Math.max(k.invuln, k.dodging);
+    k.voidDash = dark ? { hit: new Set(), fireT: 0, lx: k.x, ly: k.y } : null;
     k.perfect = false;
     k.dashHits = new Set();
     if (k.netted > 0) {
@@ -1548,8 +1562,8 @@ export class Game {
     this.fxEvent({ t: 'dash', x: k.x, y: k.y, dir: k.dashDir, r: k.r });
     this.emit('dash');
     // Signature traits change the Charge: Rex pounces, Volt Beetle blinks.
-    // (Not on the globe, where there is nothing to pounce on or blink past.)
-    if (this.earth) return true;
+    // (Not on the globe, where there is nothing to pounce on or blink past, nor in void form.)
+    if (this.earth || dark) return true;
     if (this.def.trait === 'pounce') this.startPounce();
     else if (this.def.trait === 'blink') this.blink();
     return true;
@@ -1896,6 +1910,86 @@ export class Game {
     if (k.stage === MAX_STAGE) this.bossTimer = BOSS.arriveDelay;
   }
 
+  // ---------------------------------------------------------------- the void
+  // Three Void Shards: the kaiju turns pitch black. Every other augment is sealed away (moves and
+  // passives alike), damage and health double, and the charge becomes a second-long burning run.
+  // Level-ups offer only moves, to build a new moveset, and always the way back (leaveVoid).
+  becomeVoid() {
+    if (this.dark || this.state === 'won' || this.state === 'lost') return;
+    const k = this.kaiju;
+    const sealed = new Map([...this.held].filter(([id]) => id !== 'voidShard'));
+    this.dark = { sealed };
+    this.voidSpent = true;
+    this.held = new Map([['voidShard', 3]]);
+    this.moves.active = [];
+    this.moves.timers = {};
+    k.maxHp = this.maxHpFor();
+    k.hp = k.maxHp;
+    k.shield = 0;
+    this.impact(0.25, 1);
+    this.shake = Math.max(this.shake, 1);
+    this.slowmo = Math.max(this.slowmo, 1.2);
+    this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: k.r * 8, life: 1, max: 1, color: 0x9a5cff, width: k.r * 0.5 });
+    this.fx.rings.push({ x: k.x, y: k.y, r0: k.r * 0.5, r1: k.r * 5, life: 0.7, max: 0.7, color: 0x14101c, width: k.r * 0.8 });
+    // The release flattens what's small around it.
+    if (!this.earth) this.areaDamage(k.x, k.y, k.r * 6, this.baseDamage() * 4, 'hit', true);
+    this.fxEvent({ t: 'voidOn', x: k.x, y: k.y, r: k.r });
+    this.emit('voidOn');
+  }
+
+  // The way back: the sealed build returns, and any moves learned in the dark come along while
+  // there are slots for them. The shards are spent either way.
+  leaveVoid() {
+    if (!this.dark) return;
+    const k = this.kaiju;
+    const learned = [...this.held].filter(([id]) => id !== 'voidShard');
+    this.held = new Map(this.dark.sealed);
+    for (const [id, lvl] of learned) {
+      const moves = MOVES.filter((m) => this.held.has(m.id)).length;
+      if (this.held.has(id)) this.held.set(id, Math.max(this.held.get(id), lvl));
+      else if (moves < MOVE_SLOTS) this.held.set(id, lvl);
+    }
+    this.dark = null;
+    this.moves.active = [];
+    const frac = k.hp / k.maxHp;
+    k.maxHp = this.maxHpFor();
+    k.hp = Math.max(1, k.maxHp * frac);
+    this.fx.rings.push({ x: k.x, y: k.y, r0: k.r, r1: k.r * 5, life: 0.8, max: 0.8, color: 0xfff2c8, width: k.r * 0.4 });
+    this.fxEvent({ t: 'voidOff', x: k.x, y: k.y, r: k.r });
+    this.emit('voidOff');
+  }
+
+  // The void charge steers toward the stick, a little at a time.
+  steerVoidDash(dt) {
+    const k = this.kaiju;
+    if (Math.hypot(this.input.x, this.input.y) < 0.2) return;
+    const want = Math.atan2(this.input.y, this.input.x);
+    const now = Math.atan2(k.dashDir.y, k.dashDir.x);
+    let d = want - now;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    const a = now + Math.max(-VOID_FORM.steer * dt, Math.min(VOID_FORM.steer * dt, d));
+    k.dashDir = { x: Math.cos(a), y: Math.sin(a) };
+  }
+
+  // Everything the void charge passes through takes one hit (as hard as a full second of maxed
+  // Laser Eyes), and it leaves fire behind it.
+  burnVoidDash(dt) {
+    const k = this.kaiju;
+    const v = k.voidDash;
+    const dmg = this.baseDamage() * VOID_FORM.dashHit;
+    // (swept a little ahead, so what it hits breaks before it can block the way: it plows through)
+    if (!this.earth) this.lineDamage(v.lx, v.ly, k.x + k.dashDir.x * k.r, k.y + k.dashDir.y * k.r, k.r * 2.2, dmg, v.hit);
+    v.fireT -= Math.hypot(k.x - v.lx, k.y - v.ly);
+    if (v.fireT <= 0 && !this.earth) {
+      v.fireT = k.r * VOID_FORM.fireEvery;
+      this.fires.push({ x: k.x - k.dashDir.x * k.r * 0.6, y: k.y - k.dashDir.y * k.r * 0.6, r: k.r * 0.95, t: 3.5, max: 3.5, tick: 0, dmgMul: 1.6, hell: true });
+    }
+    v.lx = k.x;
+    v.ly = k.y;
+    if (k.dashT <= 0) k.voidDash = null;
+  }
+
   // ---------------------------------------------------------------- the globe
   // On the globe there is no city to stream and no military: the kaiju walks the real Earth (it
   // stays put and the globe turns under it, see earth.js), bites craters out of the countries in
@@ -1936,6 +2030,24 @@ export class Game {
     E.move(k.vx * dt, k.vy * dt);
     k.x = 0;
     k.y = 0;
+    // Magma Footprints melt the ground underfoot; a void charge gouges a trench.
+    const stepped = Math.hypot(k.vx, k.vy) * dt;
+    if (this.has('magmaFootprints') && stepped > 0) {
+      this.earthMagma = (this.earthMagma || 0) - stepped;
+      if (this.earthMagma <= 0) {
+        this.earthMagma = k.r * 1.1;
+        const st = this.moves.st('magmaFootprints');
+        this.earthCrater(-k.facing.x * k.r * 0.4, -k.facing.y * k.r * 0.4, k.r * 0.38 * st.area * this.moves.size());
+      }
+    }
+    if (k.voidDash) {
+      k.voidDash.fireT -= stepped;
+      if (k.voidDash.fireT <= 0) {
+        k.voidDash.fireT = k.r * 0.9;
+        this.earthCrater(0, 0, k.r * 0.65);
+      }
+      if (k.dashT <= 0) k.voidDash = null;
+    }
 
     // Bites: wind up, lunge, and a crater where the jaws close.
     k.attackCd -= dt;
@@ -2073,7 +2185,7 @@ export class Game {
   updateEarthMoves(dt) {
     const mv = this.moves;
     for (const m of MOVES) {
-      if (!this.has(m.id) || m.id === 'orbitingSpines') continue;
+      if (!this.has(m.id) || ALWAYS_ON.has(m.id)) continue;
       if (mv.timers[m.id] === undefined) mv.timers[m.id] = 1;
       mv.timers[m.id] -= dt;
       if (mv.timers[m.id] > 0) continue;
@@ -2195,7 +2307,7 @@ export class Game {
     this.active.clear();
     this.collapsing = 0;
     this.moves.active = [];
-    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [], slashes: [], swirls: [], cracks: [] };
+    this.fx = { orbs: [], floaters: [], rings: [], beams: [], bolts: [], slashes: [], swirls: [], cracks: [], wells: [] };
     this.boss = null;
     this.bossTimer = null;
     this.gateTimer = null;
@@ -2239,7 +2351,9 @@ export class Game {
     let guarantee = null;
     // First session: Laser Eyes is guaranteed on the first pick so the player sees a big move early.
     if (this.firstRun && this.picksMade === 0) guarantee = 'laserEyes';
-    const options = offerAugments({ held: this.held, rng: this.rng, guarantee });
+    const options = offerAugments({ held: this.held, rng: this.rng, guarantee, ...this.voidOffer() });
+    if (this.voidGuarantee && !this.dark && (this.held.get('voidShard') || 0) < 3 && !options.includes('voidShard')) options[options.length - 1] = 'voidShard';
+    this.voidGuarantee = false;
     this.pick = { level: this.kaiju.level - this.pendingPicks + 1, options };
     this.state = 'picking';
     this.emit('pick', { pick: this.pick });
@@ -2251,16 +2365,32 @@ export class Game {
     if (this.rerolls > 0) this.rerolls--;
     else if (useAd && this.adRerollAvailable) this.adRerollAvailable = false;
     else return false;
-    p.options = offerAugments({ held: this.held, rng: this.rng, exclude: p.options });
+    p.options = offerAugments({ held: this.held, rng: this.rng, exclude: p.options, ...this.voidOffer() });
     this.emit('pick', { pick: p });
     return true;
+  }
+
+  // How the void figures in an offer: its shard can turn up (until it is used), and in void form
+  // every offer is moves only, plus the way back.
+  voidOffer() {
+    return { voidRng: this.voidSpent || this.dark ? null : this.voidRng, dark: Boolean(this.dark) };
   }
 
   choose(id) {
     if (this.state !== 'picking' || !this.pick.options.includes(id)) return false;
     const k = this.kaiju;
     const before = completedSets(this.held).map((s) => s.id);
+    if (id === 'voidRevert') {
+      this.leaveVoid();
+      this.picksMade++;
+      this.pendingPicks = Math.max(0, this.pendingPicks - 1);
+      this.pick = null;
+      this.state = 'playing';
+      this.emit('picked', { id, level: 1, name: AUGMENT_BY_ID[id].name });
+      return true;
+    }
     const level = applyPick(this.held, id);
+    if (id === 'voidShard' && level >= 3) this.schedule(0.45, () => this.becomeVoid());
     if (id === 'growthSpurt' && k.stage !== MAX_STAGE) k.biomass = Math.min(this.stage.biomassToNext, k.biomass + this.stage.biomassToNext * 0.15);
     if (id === 'scrapPile') {
       this.stats.scrap += 25 * k.stage * k.stage;
@@ -3080,20 +3210,23 @@ export class Game {
   }
 
   // Damage everything along a segment (beams, lasers, fault lines).
-  lineDamage(x1, y1, x2, y2, width, dmg) {
+  // `hit`: a set of what has already been hit (for things that pierce through, like a void charge
+  // or a javelin, so each thing takes one hit however many frames it spans); left out, every call hits.
+  lineDamage(x1, y1, x2, y2, width, dmg, hit = null) {
     const pad = width + 200;
     const dir = norm(x2 - x1, y2 - y1);
+    const fresh = (t) => !hit || (!hit.has(t) && hit.add(t));
     for (const o of this.grid.query(Math.min(x1, x2) - pad, Math.min(y1, y2) - pad, Math.max(x1, x2) + pad, Math.max(y1, y2) + pad)) {
       if (o.state !== 'intact') continue;
       if (distToSegment(o.x, o.y, x1, y1, x2, y2) > width / 2 + Math.min(o.w, o.h) / 2) continue;
-      this.damageObject(o, dmg, dir, 'hit', closestPoint(x1, y1, o));
+      if (fresh(o)) this.damageObject(o, dmg, dir, 'hit', closestPoint(x1, y1, o));
     }
-    for (const u of this.units) if (!u.dead && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, dmg);
-    for (const p of this.people) if (!p.taken && distToSegment(p.x, p.y, x1, y1, x2, y2) < width / 2) this.flingPerson(p, false);
-    for (const c of this.traffic) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + 4) this.damageCar(c, dmg);
-    for (const c of this.boats) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + c.r) this.damageBoat(c, dmg);
+    for (const u of this.units) if (!u.dead && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r && fresh(u)) this.damageUnit(u, dmg);
+    for (const p of this.people) if (!p.taken && distToSegment(p.x, p.y, x1, y1, x2, y2) < width / 2 && fresh(p)) this.flingPerson(p, false);
+    for (const c of this.traffic) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + 4 && fresh(c)) this.damageCar(c, dmg);
+    for (const c of this.boats) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + c.r && fresh(c)) this.damageBoat(c, dmg);
     const b = this.boss;
-    if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(dmg);
+    if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r && fresh(b)) this.damageBoss(dmg);
   }
 
   callMeteor() {
@@ -3130,6 +3263,8 @@ export class Game {
         for (const o of this.objectsNear(f.x, f.y, f.r)) this.damageObject(o, dmg, null, 'hit', { x: f.x, y: f.y });
         for (const u of this.units) if (!u.dead && !u.flying && Math.hypot(u.x - f.x, u.y - f.y) < f.r + u.r) this.damageUnit(u, dmg);
         for (const p of this.people) if (!p.taken && Math.hypot(p.x - f.x, p.y - f.y) < f.r) this.flingPerson(p, false, f);
+        // (and whatever drives into it)
+        for (const c of this.traffic) if (!c.dead && Math.hypot(c.x - f.x, c.y - f.y) < f.r + 3) this.damageCar(c, dmg);
         const b = this.boss;
         if (b && !b.dead && b.state !== 'enter' && Math.hypot(b.x - f.x, b.y - f.y) < f.r + b.r) this.damageBoss(dmg);
         // Wildfire creeps to a neighbouring building now and then.
@@ -4436,6 +4571,25 @@ export class Game {
     const k = this.kaiju;
     for (const p of this.projectiles) {
       p.life -= dt;
+      // Things that fly straight through everything in their way (a thrown tower): each thing
+      // in the path takes one hit, and they land where they run out.
+      if (p.friendly && p.pierce) {
+        p.age = (p.age || 0) + dt;
+        const nx = p.x + p.vx * dt;
+        const ny = p.y + p.vy * dt;
+        this.lineDamage(p.x, p.y, nx, ny, p.w, p.dmg, p.hit);
+        if (p.trench) {
+          p.trenchT -= Math.hypot(nx - p.x, ny - p.y);
+          if (p.trenchT <= 0) {
+            p.trenchT = p.trench;
+            this.fires.push({ x: nx, y: ny, r: p.trench * 0.8, t: 4, max: 4, tick: 0 });
+          }
+        }
+        p.x = nx;
+        p.y = ny;
+        if (p.life <= 0 && p.onHit) p.onHit(p);
+        continue;
+      }
       if (p.friendly) {
         const t = p.target;
         const alive = t && !t.dead && !GONE.has(t.state);
@@ -4584,7 +4738,8 @@ export class Game {
     for (const r of rings) r.life -= dt;
     for (const b of beams) b.life -= dt;
     for (const b of bolts) b.life -= dt;
-    for (const list of [this.fx.slashes, this.fx.swirls, this.fx.cracks]) for (const e of list) e.life -= dt;
+    for (const list of [this.fx.slashes, this.fx.swirls, this.fx.cracks, this.fx.wells]) for (const e of list) e.life -= dt;
+    this.fx.wells = this.fx.wells.filter((e) => e.life > 0);
     this.fx.slashes = this.fx.slashes.filter((e) => e.life > 0);
     this.fx.swirls = this.fx.swirls.filter((e) => e.life > 0);
     this.fx.cracks = this.fx.cracks.filter((e) => e.life > 0);

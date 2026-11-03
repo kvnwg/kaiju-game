@@ -55,6 +55,16 @@ export const AUGMENTS = [
     levels: [up({ count: 1 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ count: 1 }), up({ crit: true }, 'Last bite crits'), up({ dmg: 0.4 }), up({ count: 2 })] },
   { id: 'broodCall', kind: 'move', name: 'Brood Call', tier: 'prismatic', text: 'Hatchlings swarm your enemies', cd: 12, count: 3, unit: 'hatchlings',
     levels: [up({ count: 1 }), up({ dmg: 0.3 }), up({ duration: 0.4 }), up({ count: 1 }), up({ cd: -0.2 }), up({ boom: true }, 'Hatchlings burst on death'), up({ count: 2 })] },
+  // Rips up the tallest thing in reach (a skyscraper if there is one, anything breakable if not)
+  // and spears it through everything in a line.
+  { id: 'skyscraperJavelin', kind: 'move', name: 'Skyscraper Javelin', tier: 'gold', text: 'Rip up a tower, spear a line', cd: 7, count: 1, unit: 'towers',
+    levels: [up({ dmg: 0.3 }), up({ length: 0.4 }, 'Flies much further'), up({ blast: true }, 'Explodes where it lands'), up({ cd: -0.2 }), up({ count: 1 }, 'Throws two towers'), up({ width: 0.5 }, 'Wider skewer'), up({ dmg: 0.5, trench: true }, 'Leaves a burning trench')] },
+  // Belches a black hole that swallows what is near, then spits it all back out.
+  { id: 'gravityBelch', kind: 'move', name: 'Gravity Belch', tier: 'prismatic', text: 'Black hole in, barrage out', cd: 11, count: 6, unit: 'shots',
+    levels: [up({ area: 0.3 }), up({ count: 2 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ crush: true }, 'The hole crushes what it holds'), up({ duration: 0.4 }, 'Pulls for longer'), up({ count: 4, dmg: 0.4 })] },
+  // Always on while you walk: every step leaves a pool of lava.
+  { id: 'magmaFootprints', kind: 'move', name: 'Magma Footprints', tier: 'silver', text: 'Your steps leave burning lava', cd: 0.3,
+    levels: [up({ dmg: 0.3 }), up({ area: 0.3 }, 'Wider footprints'), up({ river: true }, 'Charging pours a lava river'), up({ duration: 0.5 }), up({ dmg: 0.4 }), up({ erupt: true }, 'Every step erupts'), up({ area: 0.3, dmg: 0.5 })] },
 
   // ---- stat passives
   { id: 'might', kind: 'passive', name: 'Might', tier: 'silver', max: 5, text: '+10% damage', stat: true },
@@ -92,7 +102,18 @@ export const AUGMENTS = [
   { id: 'earthbreaker', kind: 'evolution', name: 'Earthbreaker', tier: 'prismatic', max: 1, move: 'seismicSlam', passive: 'toughness', text: 'Slams split squad-eating chasms' },
   { id: 'junkyardStorm', kind: 'evolution', name: 'Junkyard Storm', tier: 'prismatic', max: 1, move: 'carToss', passive: 'magneticHide', text: 'Cars orbit you, then fire out' },
   { id: 'doomRoar', kind: 'evolution', name: 'Doom Roar', tier: 'prismatic', max: 1, move: 'roar', passive: 'adrenaline', text: 'Roar flattens everything smaller' },
+
+  // ---- the void: a glossy black shard that turns up about once in a hundred level-ups (far more
+  // often once you hold one). Three of them, and the kaiju becomes the void (see Game.becomeVoid).
+  { id: 'voidShard', kind: 'void', name: 'Void Shard', tier: 'void', max: 3, text: 'Ancient. Hungry. Collect three',
+    levelTexts: ['One of three. Cold to the touch', 'Two of three. It is waking up', 'Become the void'] },
+  // In void form, every level-up also offers the way back.
+  { id: 'voidRevert', kind: 'void', name: 'Return to the Light', tier: 'void', max: 1, text: 'Get back all the void took' },
 ];
+// Moves that are always on instead of firing on a cooldown.
+export const ALWAYS_ON = new Set(['orbitingSpines', 'magmaFootprints']);
+// The void's odds: per level-up offer, before you hold a shard and after.
+export const VOID_ODDS = { first: 0.01, more: 0.2 };
 
 export const AUGMENT_BY_ID = Object.fromEntries(AUGMENTS.map((a) => [a.id, a]));
 export const MOVES = AUGMENTS.filter((a) => a.kind === 'move');
@@ -135,6 +156,7 @@ export function levelText(id, level) {
   const a = AUGMENT_BY_ID[id];
   if (!level) return a.text;
   if (a.kind === 'evolution') return a.text;
+  if (a.kind === 'void') return (a.levelTexts && a.levelTexts[level]) || a.text;
   if (a.kind === 'passive') return a.stat ? a.text : a.levelText;
   const u = a.levels[level - 1];
   if (!u) return '';
@@ -190,6 +212,7 @@ export function passivesHeld(held) {
 }
 
 function isOfferable(a, held) {
+  if (a.kind === 'void') return false; // (offered only by its own roll, see offerAugments)
   if (a.kind === 'evolution') return readyEvolutions(held).includes(a);
   const lvl = held.get(a.id) || 0;
   if (lvl >= maxLevel(a)) return false;
@@ -211,7 +234,19 @@ function weightedPick(pool, held, rng) {
 
 // Offers `count` options. With no move yet, the offer leans on moves (at least two) so the
 // first pick gives you an attack. Falls back to fillers when everything is maxed.
-export function offerAugments({ held, rng, count = 3, exclude = [], guarantee = null }) {
+// `voidRng`: the Void Shard may turn up in this offer, rolled on this generator at VOID_ODDS (its
+// own, so the roll never changes anything else). In void form (`dark`), offers are moves only,
+// plus the way back.
+export function offerAugments({ held, rng, count = 3, exclude = [], guarantee = null, voidRng = null, dark = false }) {
+  if (dark) {
+    const offer = [];
+    while (offer.length < count - 1) {
+      const pool = MOVES.filter((a) => isOfferable(a, held) && !offer.includes(a.id) && !exclude.includes(a.id));
+      if (!pool.length) break;
+      offer.push(weightedPick(pool, held, rng).id);
+    }
+    return [...rng.shuffle(offer), 'voidRevert'];
+  }
   const offer = [];
   const take = (filter, upTo) => {
     while (offer.length < upTo) {
@@ -233,7 +268,11 @@ export function offerAugments({ held, rng, count = 3, exclude = [], guarantee = 
     exclude = ex;
   }
   for (const f of FILLERS) if (offer.length < count) offer.push(f.id);
-  return rng.shuffle(offer);
+  const shuffled = rng.shuffle(offer);
+  // The rare one, in place of one of the three.
+  const shards = held.get('voidShard') || 0;
+  if (voidRng && shards < 3 && voidRng.next() < (shards ? VOID_ODDS.more : VOID_ODDS.first)) shuffled[Math.floor(voidRng.next() * shuffled.length)] = 'voidShard';
+  return shuffled;
 }
 
 // Returns the new level of the augment.

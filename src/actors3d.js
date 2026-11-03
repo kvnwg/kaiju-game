@@ -37,10 +37,15 @@ function applySkin(model, skinId) {
       const l = (0.3 * r + 0.59 * gr + 0.11 * b) / 255;
       const k = Math.min(1.25, l * 1.5 + 0.15);
       const m = sk.mix;
-      const nr = Math.min(255, Math.round(r * (1 - m) + tr * 255 * k * m));
-      const ng = Math.min(255, Math.round(gr * (1 - m) + tg * 255 * k * m));
-      const nb = Math.min(255, Math.round(b * (1 - m) + tb * 255 * k * m));
+      let nr = Math.min(255, Math.round(r * (1 - m) + tr * 255 * k * m));
+      let ng = Math.min(255, Math.round(gr * (1 - m) + tg * 255 * k * m));
+      let nb = Math.min(255, Math.round(b * (1 - m) + tb * 255 * k * m));
       if (sk.glow && l > 0.72) f |= 1;
+      // (the void burns its brightest voxels a colour of their own)
+      if (sk.glowColor && l > 0.66) {
+        [nr, ng, nb] = sk.glowColor.map((c) => Math.round(c * 255));
+        f |= 1;
+      }
       g.data[i] = (((nr << 16) | (ng << 8) | nb || 0x010101) | (f << 24)) >>> 0;
     }
     return { ...p, grid: g };
@@ -176,7 +181,8 @@ export class Actors {
 
   setKaiju(id, skin = null) {
     if (this.kaiju) this.scene.remove(this.kaiju.root);
-    const kmat = this.makeMat(skin && SKINS[skin] && SKINS[skin].metal ? 0.55 : 0.3);
+    const sk = skin && SKINS[skin];
+    const kmat = this.makeMat(sk && sk.metal ? 0.55 : 0.3, Boolean(sk && sk.glossy));
     const rig = partsGroup(applySkin(KAIJU_MODELS[id](), skin), kmat);
     rig.mat = kmat;
     rig.yaw = null;

@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, distToRect } from '../src/game.js';
+import { Game, distToRect, VOID_FORM } from '../src/game.js';
 import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, AD_PRESSURE, TRAITS, DASH, BOSS_FIGHT } from '../src/config.js';
-import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
+import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, moveStats } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
+import { createRng } from '../src/rng.js';
 import { waterField } from '../src/world.js';
 import { DOCTOR } from '../src/models.js';
 
@@ -87,12 +88,13 @@ test('every move fires, hits things and shows its effect', () => {
     g.kaiju.r = 14;
     const hp0 = g.objects.filter((o) => o.state === 'intact').length;
     for (let i = 0; i < 30 * 12; i++) {
+      if (m.id === 'magmaFootprints') g.setInput(Math.cos(i / 40), Math.sin(i / 40)); // (it needs walking)
       g.update(1 / 30);
       g.drainEvents();
       g.drainVfx();
     }
-    // Orbiting Spines are always on rather than firing on a cooldown.
-    assert.ok(g.stats.moves > 0 || m.id === 'orbitingSpines', `${m.id} fired`);
+    // Orbiting Spines and Magma Footprints are always on rather than firing on a cooldown.
+    assert.ok(g.stats.moves > 0 || ALWAYS_ON.has(m.id), `${m.id} fired`);
     assert.ok(g.objects.filter((o) => o.state === 'intact').length < hp0 || g.stats.people > 0, `${m.id} did damage`);
   }
 });
@@ -781,4 +783,143 @@ test('neighbours shout in speech bubbles that follow them, a few at a time', () 
   assert.equal(bubbles.length, 3, 'no more than three at once');
   assert.ok(bubbles.every((b) => b.follow && b.text));
   assert.ok(k.stage === 1);
+});
+
+test('Skyscraper Javelin rips up something nearby and spears it through a line, each thing hit once', () => {
+  const g = new Game({ seed: 5 });
+  g.kaiju.invuln = 999;
+  g.kaiju.level = 200;
+  g.kaiju.stage = 3;
+  g.kaiju.r = 14;
+  g.held.set('skyscraperJavelin', 1);
+  let javelin = null;
+  for (let i = 0; i < 30 * 10 && !javelin; i++) {
+    g.update(1 / 30);
+    javelin = g.projectiles.find((p) => p.kind === 'javelin');
+  }
+  assert.ok(javelin, 'a tower was thrown');
+  assert.ok(javelin.pierce && javelin.len > 0);
+  for (let i = 0; i < 30 * 3 && g.projectiles.includes(javelin); i++) g.update(1 / 30);
+  assert.ok(javelin.hit.size > 0, 'it hit things on the way');
+  assert.ok(!g.projectiles.includes(javelin), 'and landed');
+});
+
+test('Gravity Belch opens a black hole that swallows things, then spits a bigger barrage', () => {
+  const g = new Game({ seed: 5 });
+  g.kaiju.invuln = 999;
+  g.kaiju.level = 200;
+  g.kaiju.stage = 3;
+  g.kaiju.r = 14;
+  g.held.set('gravityBelch', 1);
+  let shots = 0;
+  let wells = 0;
+  for (let i = 0; i < 30 * 8; i++) {
+    g.update(1 / 30);
+    wells += g.fx.wells.filter((w) => !w._c && (w._c = 1)).length;
+    shots += g.projectiles.filter((p) => p.kind === 'gravShot' && !p._c && (p._c = 1)).length;
+  }
+  assert.ok(wells >= 1, 'a black hole opened');
+  assert.ok(shots >= 6, `a barrage came back out: ${shots}`);
+});
+
+test('Magma Footprints leave lava where you walk, and it burns cars driving into it', () => {
+  const g = new Game({ seed: 5 });
+  g.kaiju.invuln = 999;
+  g.kaiju.level = 200;
+  g.held.set('magmaFootprints', 1);
+  for (let i = 0; i < 30 * 2; i++) {
+    g.setInput(1, 0);
+    g.update(1 / 30);
+  }
+  const lava = g.fires.filter((f) => f.lava);
+  assert.ok(lava.length >= 3, `footprints: ${lava.length}`);
+  // A car parked in a pool takes damage.
+  const f = lava[lava.length - 1];
+  const car = g.traffic.find((c) => !c.dead);
+  if (car) {
+    car.x = f.x;
+    car.y = f.y;
+    const hp = car.hp;
+    f.tick = 0;
+    g.updateFires(0.01);
+    assert.ok(car.hp < hp || car.dead, 'the car burns');
+  }
+});
+
+test('the Void Shard turns up about 1% of the time, far more once you hold one, never after', async () => {
+  const { offerAugments, VOID_ODDS } = await import('../src/augments.js');
+  const held = new Map([['clawStrike', 1]]);
+  const rng = createRng(1);
+  const vr = createRng(2);
+  const rate = () => {
+    let n = 0;
+    for (let i = 0; i < 6000; i++) if (offerAugments({ held, rng, voidRng: vr }).includes('voidShard')) n++;
+    return n / 6000;
+  };
+  const first = rate();
+  assert.ok(Math.abs(first - VOID_ODDS.first) < 0.006, `first: ${first}`);
+  held.set('voidShard', 1);
+  assert.ok(Math.abs(rate() - VOID_ODDS.more) < 0.03);
+  held.set('voidShard', 3);
+  assert.equal(rate(), 0);
+  // Without its own generator (e.g. once spent), never.
+  held.set('voidShard', 1);
+  for (let i = 0; i < 500; i++) assert.ok(!offerAugments({ held, rng }).includes('voidShard'));
+});
+
+test('three Void Shards: pitch black, everything else sealed, double damage and health, a burning second-long charge', () => {
+  const g = new Game({ seed: 5 });
+  const k = g.kaiju;
+  k.level = 500;
+  k.stage = 3;
+  k.r = 14;
+  g.held.set('laserEyes', 3);
+  g.held.set('toughness', 2);
+  g.held.set('voidShard', 2);
+  k.maxHp = g.maxHpFor();
+  k.hp = k.maxHp;
+  const dmg0 = g.stage.damage * g.meta.atkMul;
+  g.pick = { level: 5, options: ['voidShard', 'clawStrike', 'roar'] };
+  g.state = 'picking';
+  g.choose('voidShard');
+  for (let i = 0; i < 30; i++) {
+    g.update(1 / 30);
+    while (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  assert.ok(g.dark, 'transformed');
+  assert.deepEqual([...g.held.keys()].filter((id) => id !== 'voidShard'), [], 'every other augment sealed away');
+  assert.ok(Math.abs(g.baseDamage() - dmg0 * VOID_FORM.dmg) < 1e-6);
+  assert.ok(Math.abs(k.maxHp - g.stage.maxHp * g.def.hpMult * g.meta.hpMul * VOID_FORM.hp) < 1e-6);
+  // The charge: a whole second, untouchable, burning a trail.
+  k.dashCd = 0;
+  k.facing = { x: 1, y: 0 };
+  assert.ok(g.tryDash());
+  assert.equal(k.dashT, VOID_FORM.dashTime);
+  let t = 0;
+  while (k.dashT > 0 && t < 3) {
+    g.update(1 / 30);
+    t += 1 / 30;
+    while (g.state === 'picking') g.choose(g.pick.options[0]);
+  }
+  assert.ok(g.fires.some((f) => f.hell), 'fire behind it');
+  // Level-ups: moves only, and the way back.
+  g.debugLevel();
+  g.update(1 / 60);
+  assert.ok(g.pick.options.includes('voidRevert'));
+  assert.ok(g.pick.options.filter((id) => id !== 'voidRevert').every((id) => AUGMENT_BY_ID[id].kind === 'move'));
+  g.choose('voidRevert');
+  assert.equal(g.dark, null);
+  assert.equal(g.held.get('laserEyes'), 3, 'the sealed build comes back');
+  assert.equal(g.held.get('toughness'), 2);
+  assert.ok(!g.held.has('voidShard'), 'the shards are spent');
+  g.debugLevel();
+  g.update(1 / 60);
+  assert.ok(!g.pick.options.includes('voidRevert'));
+});
+
+test('a void charge hits as hard as a full second of maxed Laser Eyes', () => {
+  const lvl = AUGMENT_BY_ID.laserEyes.levels.length + 1;
+  const s = moveStats('laserEyes', lvl);
+  // Both eyes' main beams on the target, ten ticks a second, at 0.55 x damage each (moves.js).
+  assert.ok(Math.abs(VOID_FORM.dashHit - s.dmg * 0.55 * 2 * 10) < 1e-9);
 });

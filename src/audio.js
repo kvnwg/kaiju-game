@@ -315,6 +315,18 @@ export class Sfx {
       case 'meteorCall':
         this.tone({ type: 'sawtooth', f0: 1200, f1: 120, dur: 1.3, vol: 0.08 });
         break;
+      case 'skyscraperJavelin':
+        // The groan of a tower torn out of the ground, then the whoosh of the throw.
+        this.tone({ type: 'sawtooth', f0: 70, f1: 45, dur: 0.35, vol: 0.12 });
+        this.noise({ dur: 0.3, vol: 0.16, f0: 600, f1: 200, type: 'lowpass', q: 1 });
+        this.noise({ dur: 0.45, vol: 0.18, f0: 400, f1: 3200, type: 'bandpass', q: 1.6, delay: 0.32 });
+        break;
+      case 'gravityBelch':
+        // A deep belch that bends down into a black hole's hum.
+        this.tone({ type: 'sawtooth', f0: 140, f1: 60, dur: 0.4, vol: 0.14 });
+        this.tone({ type: 'sine', f0: 55, f1: 38, dur: 2.2, vol: 0.18, attack: 0.3, delay: 0.2 });
+        this.noise({ dur: 2, vol: 0.08, f0: 300, f1: 1400, type: 'bandpass', q: 3, attack: 0.5, delay: 0.2 });
+        break;
       default:
         break;
     }
@@ -440,6 +452,20 @@ export class Sfx {
         case 'splash':
           this.splash();
           break;
+        case 'magma':
+          // a quiet sizzle per footprint
+          if (this.ok('magma', 0.18)) this.noise({ dur: 0.22, vol: 0.05, f0: 5200, f1: 2600, type: 'highpass', q: 0.7 });
+          break;
+        case 'belchOut':
+          for (let i = 0; i < 4; i++) this.tone({ type: 'square', f0: 300 + i * 60, f1: 900, dur: 0.1, vol: 0.05, delay: i * 0.06 });
+          break;
+        case 'voidOn':
+          this.voidOn();
+          break;
+        case 'voidOff':
+          this.tone({ type: 'triangle', f0: 440, f1: 880, dur: 0.6, vol: 0.12 });
+          this.tone({ type: 'sine', f0: 660, f1: 1320, dur: 0.7, vol: 0.08, delay: 0.1 });
+          break;
         case 'crater':
           this.crunch(e.bite ? 0.55 : 0.85);
           break;
@@ -467,6 +493,24 @@ export class Sfx {
       this.cash();
       this.comboTier(e.big ? 3 : 1);
     } else if (e.type === 'launch') this.launch(e.nuke);
+  }
+
+  // Becoming the void: a sub-bass drop under a long, dark, swelling chord.
+  voidOn() {
+    if (!this.ok('voidOn', 1)) return;
+    this.tone({ type: 'sine', f0: 90, f1: 28, dur: 1.6, vol: 0.4 });
+    this.noise({ dur: 1.4, vol: 0.18, f0: 200, f1: 80, type: 'lowpass', q: 1 });
+    for (const [f, d] of [[110, 0], [130.8, 0.08], [164.8, 0.16], [207.7, 0.24]]) this.tone({ type: 'sawtooth', f0: f, f1: f * 0.98, dur: 2.2, vol: 0.045, attack: 0.6, delay: d });
+    this.vibrate(120);
+  }
+
+  // The Void Shard turning up on a level-up card: a low, glassy, unsettling chime.
+  voidChime() {
+    if (!this.ok('voidChime', 0.5)) return;
+    for (const [f, d] of [[233, 0], [277, 0.12], [349, 0.24], [466, 0.36]]) {
+      this.tone({ type: 'triangle', f0: f, f1: f, dur: 0.9, vol: 0.09, delay: d });
+      this.tone({ type: 'sine', f0: f * 2.01, f1: f * 2.01, dur: 0.6, vol: 0.04, delay: d });
+    }
   }
 
   // A missile leaving its silo far off: a rising hiss; a nuke adds a two-tone siren.

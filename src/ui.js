@@ -18,8 +18,9 @@ function icon(a) {
   return `<i class="aug-ico ico-${iconFor(a)}"></i>`;
 }
 
-const RARITY_OF_TIER = { silver: 0, gold: 2, prismatic: 4 };
-const REEL_POOL = AUGMENTS.filter((a) => a.kind !== 'evolution');
+const RARITY_OF_TIER = { silver: 0, gold: 2, prismatic: 4, void: 5 };
+// (the void never spins past on another card's reel: when it shows, it's the real thing)
+const REEL_POOL = AUGMENTS.filter((a) => a.kind !== 'evolution' && a.kind !== 'void');
 
 // Evolution recipe strip: move (level/max) + partner passive = evolution, as it would stand
 // after taking `pickId`. Parts you have light up; a complete recipe glows.
@@ -41,7 +42,7 @@ function codex(held) {
 
 // A slot reel: the result on top, random augments below it; the strip rolls down to the result.
 // Card colours by kind: moves warm, passives cool, evolutions gold, bonuses green.
-const KIND_LOOK = { move: ['#ff8a9a', '#c8344a'], passive: ['#8ad4ff', '#2a74c8'], evolution: ['#ffe07a', '#c8901a'], filler: ['#9ee88a', '#3a9a3a'] };
+const KIND_LOOK = { move: ['#ff8a9a', '#c8344a'], passive: ['#8ad4ff', '#2a74c8'], evolution: ['#ffe07a', '#c8901a'], filler: ['#9ee88a', '#3a9a3a'], void: ['#2a2238', '#0a0810'] };
 
 function reel(a, i) {
   const syms = Array.from({ length: 10 + i * 5 }, () => REEL_POOL[Math.floor(Math.random() * REEL_POOL.length)]);
@@ -458,7 +459,7 @@ export class UI {
         const level = game.level(id);
         const max = a.kind === 'filler' ? 0 : maxLevel(a);
         const next = level + 1;
-        const tag = a.kind === 'filler' ? 'Bonus' : level ? `Lv ${level} → ${next}${next === max ? ' · Max' : ''}` : 'New';
+        const tag = a.kind === 'filler' ? 'Bonus' : id === 'voidShard' ? `Shard ${next} of 3` : id === 'voidRevert' ? 'The way back' : level ? `Lv ${level} → ${next}${next === max ? ' · Max' : ''}` : 'New';
         const sets = setsFor(id)
           .map((st) => {
             const have = st.augments.filter((x) => game.has(x) || x === id).length;
@@ -469,11 +470,11 @@ export class UI {
         const evo = evolutionFor(id);
         const st = evo && recipeState(game.held, evo, id);
         const evoLine = !evo ? '' : a.kind === 'evolution' ? 'Evolution!' : st.ready ? `Unlocks ${evo.name}!` : st.done ? `Evolved: ${evo.name}` : `Evolves into ${evo.name}`;
-        // An evolution doesn't roll like the others: it slams down into its slot (see spinReels).
-        const slam = a.kind === 'evolution';
+        // An evolution (or the void) doesn't roll like the others: it slams down into its slot (see spinReels).
+        const slam = a.kind === 'evolution' || a.kind === 'void';
         const [kc, kc2] = KIND_LOOK[a.kind] || KIND_LOOK.filler;
         return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}${slam ? ' evo-slam' : ''}" data-id="${id}" style="--i:${i};--kc:${kc};--kc2:${kc2}">
-          ${slam ? '<span class="slam-ring"></span><span class="slam-sparks"></span><span class="slam-stamp">Evolution!</span>' : ''}
+          ${slam ? `<span class="slam-ring"></span><span class="slam-sparks"></span><span class="slam-stamp">${a.kind === 'void' ? (id === 'voidRevert' ? 'Light' : 'Void') : 'Evolution!'}</span>` : ''}
           <span class="card-shine"></span>
           <div class="card-top"><span class="tier">${a.kind === 'filler' ? 'Bonus' : a.kind}</span><span class="cat">${tag}</span></div>
           <div class="card-main"><span class="medal"><span class="medal-rays"></span>${slam ? `<div class="reel"><div class="strip">${icon(a)}</div></div>` : reel(a, i)}</span><div class="name">${a.name}</div></div>
@@ -530,7 +531,10 @@ export class UI {
         s.landed = true;
         card.classList.remove('spinning');
         card.classList.add('landed');
-        if (!quiet && sfx) sfx.ding(RARITY_OF_TIER[s.tier] ?? 0);
+        if (!quiet && sfx) {
+          if (s.tier === 'void' && sfx.voidChime) sfx.voidChime();
+          else sfx.ding(RARITY_OF_TIER[s.tier] ?? 0);
+        }
       };
       if (reduce || !strip.animate) {
         s.land(true);

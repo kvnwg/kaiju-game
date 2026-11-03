@@ -98,7 +98,7 @@ function defaultQuality() {
 }
 
 // A chapter run: costs energy (the very first run is free), carries the meta loadout in.
-function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, startStage = 0 }) {
+function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, startStage = 0, voidStart = false }) {
   if (!firstRun && !spendEnergy(save, ECONOMY.energyPerRun, now())) {
     showHub();
     hub.openEnergy();
@@ -112,6 +112,11 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, sta
   game = new Game({ kaijuId, difficulty: mode, firstRun, chapter, meta: loadout(save, kaijuId), seed: Number(params.get('seed')) || Date.now() });
   // Admin mode can start a run at a later size (see the hub's settings).
   if (startStage > 1 && save.settings.admin) game.debugJump(startStage);
+  // ...or holding two Void Shards, the third on the first level-up.
+  if (voidStart && save.settings.admin) {
+    game.held.set('voidShard', 2);
+    game.voidGuarantee = true;
+  }
   renderer.startRun(game);
   paused = false;
   ui.hideModals();
@@ -215,6 +220,15 @@ function handleEvents(events) {
         break;
       case 'picked':
         ui.show('pick', false);
+        if (e.id === 'voidShard' && e.level < 3) ui.banner(`Void Shard ${e.level} of 3`, e.level === 1 ? 'Something ancient stirs. It will find you again' : 'One more, and it wakes', 'void');
+        break;
+      case 'voidOn':
+        ui.banner('The Void Awakens', 'Twice the strength. A long, burning charge. Everything else, sealed away', 'void');
+        ui.flash(0.8);
+        flashClass('void-pulse', 1600);
+        break;
+      case 'voidOff':
+        ui.banner('Back in the light', 'Your old build returns, with what the dark taught you', 'grow');
         break;
       case 'altar':
         ui.showAltar(game, (c) => game.altarChoose(c));
