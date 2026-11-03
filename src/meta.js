@@ -317,8 +317,9 @@ export function rollover(s, now = Date.now()) {
 // ---------------------------------------------------------------- admin
 // The owner's admin mode: a code only they have turns it on for their save (the build holds the
 // code's salted SHA-256, never the code), and from then on gems, scrap, DNA, gene cores and energy
-// stay topped up. Turning it off keeps what's there.
+// stay topped up, and everything is unlocked (see adminTopUp). Turning it off keeps what's there.
 export const ADMIN = {
+  shards: 999, keys: 99,
   salt: 'kaiju-rampage:admin:',
   hash: 'e624f4cd7aa06a31dcd7289fa09bdd0d4b9da54ec725b003edf9a287a911cb58',
   gems: 999999, scrap: 99999999, dna: 99999, geneCores: 999,
@@ -340,6 +341,31 @@ export function adminTopUp(s) {
   for (const sl of GEAR_SLOTS) c.dna[sl.id] = Math.max(c.dna[sl.id] || 0, ADMIN.dna);
   c.geneCores = Math.max(c.geneCores || 0, ADMIN.geneCores);
   c.energy = Math.max(c.energy, ECONOMY.energyCap);
+  // Everything unlocked: every feature and Mutation row, every kaiju (with shards to star them
+  // up), every skin, every chapter and every mode in it, crates to open, and, once, a Mythic of
+  // every piece of gear.
+  s.settings.unlockAll = true;
+  for (const id of Object.keys(KAIJU_META)) {
+    s.unlocked[id] = true;
+    c.shards[id] = Math.max(c.shards[id] || 0, ADMIN.shards);
+  }
+  for (const [id, sk] of Object.entries(SKINS)) if (!sk.hidden) s.skins.owned[id] = true;
+  s.chapter.unlocked = CHAPTERS.length;
+  c.keys.supply = Math.max(c.keys.supply || 0, ADMIN.keys);
+  c.keys.egg = Math.max(c.keys.egg || 0, ADMIN.keys);
+  if (!s.settings.adminGear) {
+    s.settings.adminGear = true;
+    const top = RARITY.length - 1;
+    for (const id of GEAR_IDS) if (!s.gear.items.some((i) => i.id === id && i.rarity === top)) addItem(s, id, top);
+  }
+}
+
+// Whether a mode can be played in chapter n: Normal always; Hard once Normal is cleared there (and
+// the feature is open); Nightmare once Hard is. Everything, with everything unlocked.
+export function modeOpen(s, n, mode) {
+  if (mode === 'normal' || s.settings.unlockAll) return true;
+  if (!s.chapter.cleared[`${n}:normal`] || !featureOpen(s, 'hard')) return false;
+  return mode === 'hard' || Boolean(s.chapter.cleared[`${n}:hard`]);
 }
 
 // ---------------------------------------------------------------- energy

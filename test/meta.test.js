@@ -337,3 +337,24 @@ test('an admin code is checked against its salted hash, in any capitals; nothing
     ADMIN.hash = real;
   }
 });
+
+test('admin mode unlocks everything: features, kaiju, skins, chapters, every mode, a Mythic of each piece of gear (once)', async () => {
+  const M = await import('../src/meta.js');
+  const s = M.newSave(0);
+  s.settings.admin = true;
+  M.adminTopUp(s);
+  for (const f of Object.keys(M.FEATURES)) assert.ok(M.featureOpen(s, f), f);
+  for (const id of Object.keys(M.KAIJU_META)) assert.ok(s.unlocked[id], id);
+  for (const [id, sk] of Object.entries(M.SKINS)) assert.equal(Boolean(s.skins.owned[id]), !sk.hidden, id);
+  assert.equal(s.chapter.unlocked, M.CHAPTERS.length);
+  for (const ch of M.CHAPTERS) for (const mode of Object.keys(M.MODES)) assert.ok(M.modeOpen(s, ch.n, mode), `${ch.n}:${mode}`);
+  const top = M.RARITY.length - 1;
+  for (const id of M.GEAR_IDS) assert.equal(s.gear.items.filter((i) => i.id === id && i.rarity === top).length, 1, id);
+  const n = s.gear.items.length;
+  M.adminTopUp(s);
+  assert.equal(s.gear.items.length, n, 'the gear is handed out once');
+  // Without admin, modes still open the usual way.
+  const t = M.newSave(0);
+  assert.ok(M.modeOpen(t, 1, 'normal'));
+  assert.ok(!M.modeOpen(t, 1, 'hard'));
+});

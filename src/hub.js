@@ -14,7 +14,7 @@ import {
   mutationLevel, mutationCost, mutationOpen, buyMutation, power, recommendedPower, loadout, openCrate, pityLeft, crateOdds,
   questState, claimQuest, claimQuestBonus, loginReady, claimLogin, passTier, claimPass, passReward, passEndsIn, patrolPending,
   patrolRate, claimPatrol, quickPatrol, adsLeft, adWait, adEnergy, adGems, buyEnergy, spinWheel, buyDeal, buySkin, notifications, canAfford,
-  adminCodeOk, adminTopUp,
+  adminCodeOk, adminTopUp, modeOpen,
 } from './meta.js';
 
 import { MONEY_NAMES, moneyScale, shortMoney } from './prices.js';
@@ -311,7 +311,7 @@ export class Hub {
     const ms = [3, 5, 6].map((st) => `<i class="star ${s.chapter.milestones[`${n}:${st}`] ? 'on' : ''}" title="${st === 6 ? 'Reach Apex' : `Reach size ${st}`}"></i>`).join('');
     const cleared = s.chapter.cleared[`${n}:normal`];
     const modes = Object.values(MODES).map((m) => {
-      const ok = m.id === 'normal' || (cleared && featureOpen(s, 'hard') && (m.id === 'hard' || s.chapter.cleared[`${n}:hard`]));
+      const ok = modeOpen(s, n, m.id);
       return `<button class="seg ${m.id === mode ? 'on' : ''}" data-act="mode" data-mode="${m.id}" ${ok ? '' : 'disabled'}>${m.name}</button>`;
     }).join('');
     const kd = KAIJU[s.lastKaiju];
@@ -940,7 +940,7 @@ export class Hub {
       <p>Level ${s.account.level} · ${s.runs} runs · ${s.wins} wins</p>
       <p class="tiny muted">Best damage: ${hmoney(s.stats.bestDamage)}</p>
       ${s.settings.admin
-        ? `<p class="tiny">Admin mode is on: gems, scrap, DNA and energy never run out.</p>`
+        ? `<p class="tiny">Admin mode is on: everything is unlocked, and gems, scrap, DNA and energy never run out.</p>`
         : `<div class="row"><input id="redeemCode" class="code-input" maxlength="24" placeholder="Have a code?" autocomplete="off" spellcheck="false"><button class="btn ghost" data-act="redeem">Redeem</button></div>`}
       <div class="col">
         ${s.settings.admin ? `<button class="btn ghost" data-act="adminjump" data-stage="7">Admin: start a run on the globe</button>
@@ -1381,7 +1381,7 @@ export class Hub {
           s.settings.admin = true;
           this.closeModal();
           this.commit();
-          this.toast('Admin mode on: unlimited gems, scrap, DNA and energy.');
+          this.toast('Admin mode on: everything unlocked, unlimited gems, scrap, DNA and energy.');
         });
         break;
       }
