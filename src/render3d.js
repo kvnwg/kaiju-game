@@ -32,6 +32,7 @@ export const QUALITY_ORDER = ['high', 'medium', 'low', 'lowest'];
 const SLOW_FRAME = 40;
 const VERY_SLOW_FRAME = 80;
 const YAW = 0.62;
+const VOID_GLINT = 0xc89aff; // every strike glints violet in void form
 const PITCH = 0.92; // ~53 degrees down
 
 // Lighting keyframes: golden afternoon -> sunset -> neon night.
@@ -1269,8 +1270,8 @@ export class Renderer3D {
           this.fx.dustCloud(e.x, 0, e.y, e.r * 1.2, 12, 0xf2efe6);
           break;
         case 'attack':
-          // (drawn once the kaiju is posed this frame, so it lands on the snapping jaws)
-          if (e.kind === 'bite') this.glintQueued = true;
+          // (drawn once the kaiju is posed this frame, so it lands where the blow does)
+          this.glintQueued = e.kind;
           break;
         case 'destroy':
           this.destroyed(e);
@@ -1510,18 +1511,51 @@ export class Renderer3D {
   biteGlint(game, span) {
     const k = game.kaiju;
     const m = this.actors.mouthWorld();
-    const hot = game.def.element === 'Fire';
-    const core = hot ? 0xffc46a : 0xfff6dc;
+    const hot = game.def.element === 'Fire' && !game.dark;
+    const core = game.dark ? VOID_GLINT : hot ? 0xffc46a : 0xfff6dc;
     const r = k.r;
     // (a twinkle big enough to catch the eye at any size: never less than a sliver of the view)
     const star = Math.max(r * 1.3, span * 0.05);
-    this.fx.twinkle(m.x, m.y, m.z, star, hot ? 0xffd08a : 0xffffff, 0.22);
+    this.fx.twinkle(m.x, m.y, m.z, star, game.dark ? VOID_GLINT : hot ? 0xffd08a : 0xffffff, 0.22);
     const c = new THREE.Color(core);
     for (const [size, grow, life, a] of [[0.26, 1.6, 0.15, 0.85], [0.16, 3, 0.2, 0.5]]) {
       this.fx.glow.add({ x: m.x, y: m.y, z: m.z, vx: 0, vy: 0, vz: 0, drag: 0, size: star * size, grow, life, max: life, a, r: c.r, g: c.g, b: c.b });
     }
     this.fx.sparks(m.x, m.y, m.z, hot ? 0xffa040 : 0xffffff, Math.max(0.12, r * 0.07), 6);
     this.fx.flash(m.x, m.y, m.z, hot ? 0xff9a3c : 0xfff0c8, 0.9, Math.min(r * 2.4, 260), 0.14);
+  }
+
+  // Gorilla Grunt's ground pound: both fists land in a burst of light (a twinkle at each set of
+  // knuckles, grit and sparks thrown up, a ring of light where each hits, a warm flash between them).
+  poundGlint(game, span) {
+    const k = game.kaiju;
+    const star = Math.max(k.r * 1.1, span * 0.045);
+    const col = game.dark ? VOID_GLINT : 0xfff0c8;
+    const pts = ['armL', 'armR'].map((n) => this.actors.tipWorld(n)).filter(Boolean);
+    if (!pts.length) pts.push(new THREE.Vector3(k.x + k.facing.x * k.r, 0, k.y + k.facing.y * k.r));
+    for (const p of pts) {
+      const y = Math.max(0.3, p.y);
+      this.fx.twinkle(p.x, y, p.z, star, col, 0.24);
+      this.fx.sparks(p.x, y, p.z, game.dark ? VOID_GLINT : 0xffe0a0, Math.max(0.15, k.r * 0.08), 6);
+      this.fx.dustCloud(p.x, 0, p.z, k.r * 0.45, 3);
+      this.fx.ring(p.x, p.z, k.r * 0.1, k.r * 0.9, game.dark ? VOID_GLINT : 0xffe8b8, 0.25, 0.12);
+    }
+    const c = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length);
+    this.fx.flash(c.x, k.r * 0.4, c.z, game.dark ? 0x9a5cff : 0xffd8a0, 1.1, Math.min(k.r * 3, 300), 0.16);
+  }
+
+  // Volt Beetle's zap: the horn tip crackles white-blue (a twinkle inside a bigger one, a spray of
+  // sparks, a flicker of blue light on whatever is near).
+  zapGlint(game, span) {
+    const k = game.kaiju;
+    const m = this.actors.tipWorld('horn') || this.actors.mouthWorld();
+    const star = Math.max(k.r * 1.2, span * 0.05);
+    this.fx.twinkle(m.x, m.y, m.z, star, game.dark ? VOID_GLINT : 0xbff4ff, 0.2);
+    this.fx.twinkle(m.x, m.y, m.z, star * 0.55, 0xffffff, 0.12);
+    this.fx.sparks(m.x, m.y, m.z, game.dark ? VOID_GLINT : 0x8fe8ff, Math.max(0.12, k.r * 0.07), 9);
+    const c = new THREE.Color(game.dark ? VOID_GLINT : 0x7fdcff);
+    this.fx.glow.add({ x: m.x, y: m.y, z: m.z, vx: 0, vy: 0, vz: 0, drag: 0, size: star * 0.3, grow: 2, life: 0.14, max: 0.14, a: 0.9, r: c.r, g: c.g, b: c.b });
+    this.fx.flash(m.x, m.y, m.z, game.dark ? 0x9a5cff : 0x8fd8ff, 1.2, Math.min(k.r * 3, 280), 0.12);
   }
 
   // The kaiju's footprint on screen: a circle round its body, in pixels.
@@ -1748,8 +1782,11 @@ export class Renderer3D {
     }
     this.actors.update(game, dt, this.t, elev);
     if (this.glintQueued) {
-      this.glintQueued = false;
-      this.biteGlint(game, span);
+      const kind = this.glintQueued;
+      this.glintQueued = null;
+      if (kind === 'pound') this.poundGlint(game, span);
+      else if (kind === 'zap') this.zapGlint(game, span);
+      else this.biteGlint(game, span);
     }
     this.updateHospitalMarks(k.stage);
     this.updateVaultMark(game);

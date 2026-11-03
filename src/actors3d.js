@@ -186,6 +186,28 @@ export class Actors {
     const rig = partsGroup(applySkin(KAIJU_MODELS[id](), skin), kmat);
     rig.mat = kmat;
     rig.yaw = null;
+    // Tips of the parts that strike (fists at the end of the arms, the beetle's horn): the filled
+    // voxel furthest from where the part hinges, in the part's own space.
+    rig.tips = {};
+    for (const pp of rig.model.parts) {
+      if (!/^arm|^horn/.test(pp.name)) continue;
+      const g = pp.grid;
+      let best = -1;
+      const tip = new THREE.Vector3();
+      for (let z = 0; z < g.nz; z++) {
+        for (let y = 0; y < g.ny; y++) {
+          for (let x = 0; x < g.nx; x++) {
+            if (!g.get(x, y, z)) continue;
+            const d = (x + 0.5 - pp.pivot.x) ** 2 + (y + 0.5 - pp.pivot.y) ** 2 + (z + 0.5 - pp.pivot.z) ** 2;
+            if (d > best) {
+              best = d;
+              tip.set(x + 0.5 - pp.pivot.x, y + 0.5 - pp.pivot.y, z + 0.5 - pp.pivot.z);
+            }
+          }
+        }
+      }
+      if (best >= 0) rig.tips[pp.name] = tip;
+    }
     // Mouth: near the tip of the jaw, in the jaw part's own space.
     const jp = rig.model.parts.find((pp) => pp.name === 'jaw');
     rig.mouthLocal = jp ? new THREE.Vector3(jp.grid.nx * 0.65 - jp.pivot.x, jp.grid.ny - jp.pivot.y + 0.5, jp.grid.nz / 2 - jp.pivot.z) : new THREE.Vector3(6, 6, 0);
@@ -681,6 +703,16 @@ export class Actors {
   }
 
   // World position of the kaiju's mouth this frame.
+  // Where a striking part's tip is in the world (see setKaiju), or null if the kaiju has none.
+  tipWorld(name, out = new THREE.Vector3()) {
+    const rig = this.kaiju;
+    const node = rig && rig.nodes[name];
+    const tip = rig && rig.tips && rig.tips[name];
+    if (!node || !tip) return null;
+    rig.root.updateMatrixWorld(true);
+    return node.localToWorld(out.copy(tip));
+  }
+
   mouthWorld(out = this._mouth) {
     const rig = this.kaiju;
     const jaw = rig && (rig.nodes.jaw || rig.nodes.head);

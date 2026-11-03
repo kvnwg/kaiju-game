@@ -228,11 +228,21 @@ export class Sfx {
       this.noise({ dur: 0.016, vol: 0.18, f0: 4600 * deep * j, f1: 3300 * deep, type: 'bandpass', q: 6, delay: 0.055 });
       this.tone({ type: 'sine', f0: 140 * deep, f1: 52, dur: 0.1, vol: 0.2 });
     } else if (kind === 'pound') {
-      this.tone({ type: 'sine', f0: 120 * deep, f1: 38, dur: 0.22, vol: 0.4 });
-      this.noise({ dur: 0.16, vol: 0.2, f0: 1200, f1: 150, q: 0.7 });
+      // WHUMP: a knuckle slap, a heavy thud you feel, a hollow "thock" and the ground crumbling.
+      const j = 0.92 + Math.random() * 0.16;
+      this.noise({ dur: 0.02, vol: 0.26, f0: 2200 * deep * j, f1: 1200 * deep, type: 'bandpass', q: 3 });
+      this.tone({ type: 'sine', f0: 115 * deep * j, f1: 34, dur: 0.26, vol: 0.44 });
+      this.tone({ type: 'triangle', f0: 230 * deep * j, f1: 90 * deep, dur: 0.09, vol: 0.14, delay: 0.005 });
+      this.noise({ dur: 0.28, vol: 0.16, f0: 900 * deep, f1: 160, type: 'lowpass', q: 0.8, delay: 0.03 });
+      this.vibrate(18);
     } else {
-      this.noise({ dur: 0.12, vol: 0.14, f0: 7000, f1: 2500, type: 'highpass', q: 0.8 });
-      this.tone({ type: 'sawtooth', f0: 1800, f1: 300, dur: 0.1, vol: 0.05 });
+      // BZZT-CRACK: a spark snapping, a short electric buzz, a bright zing and a sizzle.
+      const j = 0.92 + Math.random() * 0.16;
+      this.noise({ dur: 0.02, vol: 0.24, f0: 7000, f1: 4000, type: 'highpass', q: 1 });
+      this.tone({ type: 'square', f0: 150 * j, f1: 120 * j, dur: 0.12, vol: 0.05 });
+      this.tone({ type: 'square', f0: 157 * j, f1: 126 * j, dur: 0.12, vol: 0.05 });
+      this.tone({ type: 'sine', f0: 2600 * j, f1: 700, dur: 0.1, vol: 0.06, delay: 0.01 });
+      this.noise({ dur: 0.16, vol: 0.08, f0: 6000, f1: 3000, type: 'highpass', q: 0.7, delay: 0.04 });
     }
   }
 
