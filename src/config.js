@@ -121,7 +121,7 @@ export function lootFor(tier, stage, value = 1) {
 }
 
 export const DIFFICULTIES = {
-  normal: { id: 'normal', name: 'Normal', enemyHp: 1, enemyDmg: 1, loot: 1 },
+  normal: { id: 'normal', name: 'Normal', enemyHp: 1.25, enemyDmg: 1.4, loot: 1 },
   hard: { id: 'hard', name: 'Hard', enemyHp: 1.6, enemyDmg: 1.4, loot: 1.5 },
   nightmare: { id: 'nightmare', name: 'Nightmare', enemyHp: 2.4, enemyDmg: 1.9, loot: 2.2 },
 };
@@ -269,7 +269,7 @@ export const THREAT = {
 };
 // The military keeps pace with your build: every level-up makes new units tougher and
 // harder-hitting.
-export const ENEMY_SCALING = { hpPerLevel: 0.05, dmgPerLevel: 0.032 };
+export const ENEMY_SCALING = { hpPerLevel: 0.07, dmgPerLevel: 0.05 };
 // One named elite per size, with a big reward.
 export const ELITES = [
   null,
@@ -331,11 +331,11 @@ export const BOSS = {
 // - rage: from `rageAfter` s into a fight the kaiju's damage on the boss climbs `rage` a second, up
 //   to +`rageMax`.
 export const BOSS_FIGHT = {
-  whiff: 0.12, whiffGap: 1.2, perfect: 0.25, dmgShare: 0.3, staggerT: 5, staggerMul: 3, needGrow: 0.25,
-  phases: [0.66, 0.33], tanky: 10, phaseStagger: 3, furyT: 8, furyMul: 1.5, rageAfter: 45, rage: 0.03, rageMax: 3,
+  whiff: 0.12, whiffGap: 1.2, perfect: 0.25, dmgShare: 0.3, staggerT: 2.5, staggerMul: 1.75, needGrow: 0.5,
+  phases: [0.66, 0.33], tanky: 10, phaseStagger: 1.5, furyT: 8, furyMul: 1.5, rageAfter: 45, rage: 0.03, rageMax: 3,
 };
 
-export const GATE = { warn: 2.5, hits: 46, hitsPerLevel: 0.6, interval: 3.1, furious: 0.7, heal: 0.15, secondWind: 0.5 };
+export const GATE = { warn: 2.5, hits: 120, hitsPerLevel: 0.6, interval: 3.1, furious: 0.7, heal: 0.15, secondWind: 0.5 };
 export const GATE_BOSSES = [
   null,
   {
@@ -412,6 +412,8 @@ export const LOSS_SCRAP_KEEP = 0.5;
 
 // Ambient life: civilians and traffic near the kaiju.
 export const CROWD = { people: 55, traffic: 22, personHp: 4, carHp: 30 };
+// Boats out on the water are drawn (and hit) a size up from the ones moored at the docks.
+export const BOAT_SCALE = 1.3;
 
 // How long eating one person takes: snatch, toss, chomp, gulp (seconds).
 export const EAT_TIME = 0.8;

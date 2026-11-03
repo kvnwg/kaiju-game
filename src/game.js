@@ -1,6 +1,6 @@
 import {
   WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
-  UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  BOAT_SCALE, UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -11,7 +11,7 @@ import { MoveSystem } from './moves.js';
 import { PERSON_VARIANTS, DOCTOR, ANT, ANT_LOOKS, DOG, CAT, BIRD } from './models.js';
 import { HOME_BANG } from './homes.js';
 import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
-import { propDims } from './props.js';
+import { propDims, PROP_BY_ID } from './props.js';
 import { objectPrice, vehiclePrice, unitPrice, bossPrice, shortMoney, TRAIN_PRICE, VAULT_PRICE } from './prices.js';
 import { CHAPTER_MUL } from './meta.js';
 
@@ -47,6 +47,14 @@ const NEUTRAL_META = {
 // already telegraph with ground markers.
 const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6, net: 0.8, volley: 1 };
 const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
+// How long an attack winds up (neck back, then the lunge) before the hit lands, in seconds.
+const ATTACK_WINDUP = 0.16;
+// What a thing of each size is worth to the damage counter when it's priced by how big it looks
+// to the kaiju (the back garden: see worth): street clutter, a car, a house, an apartment block, a
+// tower, a skyline landmark.
+const TIER_WORTH = [0, 400, 30000, 700000, 25e6, 250e6, 3e9];
+// Boats out on the water (see updateBoats).
+const BOAT_FLEET = { boat: 3, sailboat: 2, jetski: 1.2, yacht: 0.8, cargo_ship: 0.25 };
 // Where dogs, cats and pigeons turn up among the people.
 const LIVELY = new Set(['suburb', 'park', 'garden', 'pastel']);
 // What the neighbours shout as they run from a kaiju not much bigger than they are.
@@ -140,7 +148,7 @@ export class Game {
       maxHp: s1.maxHp * this.def.hpMult, hp: s1.maxHp * this.def.hpMult, xp: 0, level: 1,
       biomass: 0, facing: { x: -1, y: 0 }, vx: 0, vy: 0, moving: false, stillTime: 0,
       attackCd: 0.5, attackCount: 0, shield: 0, hitFlash: 0, invuln: 0, trailT: 0, stompT: 0,
-      walkPhase: 0, lastAttack: null, inWater: false, contactT: 0, hopT: 0, hopMax: 0.5, hopH: 0, z: 0,
+      walkPhase: 0, lastAttack: null, windup: null, inWater: false, contactT: 0, hopT: 0, hopMax: 0.5, hopH: 0, z: 0,
       healRecent: 0, sedated: 0, netted: 0, dashT: 0, dashCd: 0, dashDir: null, dodging: 0, perfect: false,
     };
     this.multi = { n: 0, last: -9, tier: 0 };
@@ -152,6 +160,7 @@ export class Game {
     this.allies = []; // hatchlings from Brood Call
     this.people = [];
     this.traffic = [];
+    this.boats = [];
     this.roadVehicles = []; // everything on the streets this frame (see listRoadVehicles)
     this.junctions = new Map(); // junction key -> claims on it: [{ v, route, until }]
     this.trains = [];
@@ -263,6 +272,18 @@ export class Game {
   // The city size this one looks and plays like (people, footsteps, crowd rules): realms past the
   // city start their sizes over in their own units, so size 7 out in space plays like a Titan and
   // the ant-sized kaiju in the garden like a Prowler.
+  // What the damage counter adds for wrecking something priced `price`, of size `tier`. In the
+  // city and out in space, its real price. In the back garden, by how big it is to the kaiju:
+  // a sunflower is a skyscraper to something ant-sized, so it's priced like one, never in cents.
+  // And each loop back round to the start multiplies everything by a thousand (the world that
+  // rebuilt itself from a swallowed multiverse is worth that much more), so the count only climbs.
+  worth(price, tier) {
+    if (!price) return 0; // (what isn't priced at all, like people, stays unpriced)
+    let v = price;
+    if (this.realm === 'garden') v = TIER_WORTH[Math.max(1, Math.min(TIER_WORTH.length - 1, this.look + tier - this.kaiju.stage))];
+    return v * Math.pow(1000, this.loop - 1);
+  }
+
   get look() {
     const k = this.kaiju;
     if (this.inCity) return k.stage;
@@ -344,7 +365,7 @@ export class Game {
     const loot = lootFor(3, k.stage, 3);
     this.addBiomass(derailed ? 0 : loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
-    this.stats.damage += TRAIN_PRICE;
+    this.stats.damage += this.worth(TRAIN_PRICE, 3);
     this.stats.destroyed++;
     this.fxEvent({ t: 'trainDie', train: t, dir: norm(t.x - k.x, t.y - k.y) });
     this.spawnExplosion(t.x, t.y, 30);
@@ -496,7 +517,7 @@ export class Game {
       if (now <= 0.3) continue;
       const before = boxDepth(x, y, Math.cos(heading), Math.sin(heading), a, o.x, o.y, oc, os, b);
       // (Pulling away from a vehicle it is grazing is fine, as long as it doesn't swing into it.)
-      if (now > before + 0.01 && (now > 1 || Math.hypot(o.x - v.x, o.y - v.y) < Math.hypot(o.x - x, o.y - y))) return true;
+      if (now > before + 0.01 && (now > 0.8 || Math.hypot(o.x - v.x, o.y - v.y) < Math.hypot(o.x - x, o.y - y))) return true;
     }
     return false;
   }
@@ -796,6 +817,7 @@ export class Game {
     this.updatePeople(dt);
     this.updatePools(dt);
     this.updateTraffic(dt);
+    this.updateBoats(dt);
     this.updateTrains(dt);
     this.updateBoss(dt);
     this.updateProjectiles(dt);
@@ -981,6 +1003,9 @@ export class Game {
     for (const c of this.traffic) {
       if (!c.dead && k.stage >= 2 && Math.hypot(c.x - k.x, c.y - k.y) < k.r + 4) this.killCar(c);
     }
+    for (const b of this.boats) {
+      if (!b.dead && k.stage >= b.tier && Math.hypot(b.x - k.x, b.y - k.y) < k.r + b.r * 0.7) this.killBoat(b);
+    }
     if (this.boss && !this.boss.dead) {
       const b = this.boss;
       const d = Math.hypot(k.x - b.x, k.y - b.y);
@@ -991,12 +1016,25 @@ export class Game {
       }
     }
 
+    // Each attack winds up first: the neck draws back, then the head lunges, and the hit lands at
+    // full stretch (actors3d draws it). The rhythm is the same, from one wind-up to the next.
     k.attackCd -= dt;
-    if (k.attackCd <= 0) {
+    if (k.windup) {
+      k.windup.t -= dt;
+      if (k.windup.t <= 0) {
+        const w = k.windup.target;
+        k.windup = null;
+        const target = this.stillThere(w) ? w : this.findTarget();
+        if (target) this.performAttack(target);
+      }
+    } else if (k.attackCd <= 0) {
       const target = this.findTarget();
       if (target) {
-        this.performAttack(target);
-        k.attackCd = this.def.attack.cooldown * (this.frenzy > 0 ? 0.5 : 1);
+        const cd = this.def.attack.cooldown * (this.frenzy > 0 ? 0.5 : 1);
+        const wind = Math.min(ATTACK_WINDUP, cd * 0.4);
+        k.windup = { target, t: wind, max: wind };
+        if (!k.moving) k.facing = norm(target.x - k.x, target.y - k.y);
+        k.attackCd = cd;
       } else k.attackCd = 0.1;
     }
 
@@ -1045,6 +1083,14 @@ export class Game {
     k.y += (dy / d) * push;
   }
 
+  // A wound-up attack's target is still worth hitting when it lands: alive, intact, within reach.
+  stillThere(t) {
+    const k = this.kaiju;
+    if (t.dead || t.taken || (t.state && t.kind && t.state !== 'intact')) return false;
+    const reach = k.r * this.def.attack.range * 1.5;
+    return (t.w ? distToRect(k.x, k.y, t) : Math.hypot(t.x - k.x, t.y - k.y) - (t.r || 0)) <= reach;
+  }
+
   findTarget() {
     const k = this.kaiju;
     const reach = k.r * this.def.attack.range;
@@ -1064,6 +1110,7 @@ export class Game {
     if (k.stage === 1 || (this.realm === 'garden' && this.look <= 2)) for (const p of this.people) if (!p.taken) consider(p, Math.hypot(p.x - k.x, p.y - k.y) - 0.8);
     if (best) return best;
     if (k.stage <= 2) for (const c of this.traffic) if (!c.dead) consider(c, Math.hypot(c.x - k.x, c.y - k.y) - 4);
+    for (const b of this.boats) if (!b.dead && canDamage(b.tier, k.stage)) consider(b, Math.hypot(b.x - k.x, b.y - k.y) - b.r);
     if (best) return best;
     for (const o of this.objectsNear(k.x, k.y, reach)) {
       if (!canDamage(o.tier, k.stage, o.landmark)) continue;
@@ -1079,6 +1126,7 @@ export class Game {
     if (t.isUnit) return this.damageUnit(t, amount);
     if (t.isPerson) return this.look <= 2 && cause === 'bite' ? this.eatPerson(t) : this.flingPerson(t, false);
     if (t.isCar) return this.damageCar(t, amount);
+    if (t.isBoat) return this.damageBoat(t, amount);
     const k = this.kaiju;
     return this.damageObject(t, amount, dir, cause, closestPoint(k.x, k.y, t));
   }
@@ -1144,7 +1192,7 @@ export class Game {
   // Fangs poison units, and Magma Claws leave burning ground.
   fangHit(t, dmg, dir, cause = 'hit') {
     const f = this.meta.fangs;
-    const isObj = !t.isUnit && !t.isPerson && !t.isCar && !t.isBoss;
+    const isObj = !t.isUnit && !t.isPerson && !t.isCar && !t.isBoat && !t.isBoss;
     if (f && f.id === 'ironJaw' && isObj) dmg *= f.up ? 1.8 : 1.4;
     this.damageTarget(t, dmg, dir, cause);
     if (f && f.id === 'venomFangs' && t.isUnit && !t.dead) t.poison = { dps: dmg * 0.3, t: 3, spread: f.up };
@@ -1171,6 +1219,7 @@ export class Game {
       const hits = [];
       for (const u of this.units) if (!u.dead && u !== target && u.type !== 'jet' && inArc(u)) hits.push(u);
       for (const c of this.traffic) if (!c.dead && c !== target && inArc(c)) hits.push(c);
+      for (const c of this.boats) if (!c.dead && c !== target && canDamage(c.tier, k.stage) && inArc(c)) hits.push(c);
       for (const o of this.objectsNear(k.x, k.y, reach)) if (o !== target && canDamage(o.tier, k.stage, o.landmark) && inArc(o)) hits.push(o);
       for (const t of hits.slice(0, 8)) this.fangHit(t, dmg * 0.6, norm(t.x - k.x, t.y - k.y), 'hit');
       this.fx.slashes.push({ x: k.x, y: k.y, ang: Math.atan2(dir.y, dir.x), arc: half * 2, r: reach, side: 1, life: 0.2, max: 0.2, color: 0xffffff, h: k.r * 0.6 });
@@ -1364,7 +1413,7 @@ export class Game {
     this.stats.vaults++;
     this.stats.vaultGems += gems;
     this.stats.scrap += lootFor(o.tier, k.stage).scrap * 5;
-    this.stats.damage += VAULT_PRICE;
+    this.stats.damage += this.worth(VAULT_PRICE, o.tier);
     this.fx.floaters.push({ x: o.x, y: o.y, h: o.height, text: `VAULT! +${gems} GEMS`, color: '#ffd84a', life: 2, max: 2 });
     this.fx.rings.push({ x: o.x, y: o.y, r0: k.r, r1: k.r * 4, life: 0.7, max: 0.7, color: 0xffd84a, width: k.r * 0.4 });
     this.spawnOrbs(o.x, o.y, 12, false);
@@ -1437,6 +1486,7 @@ export class Game {
     for (const u of this.units) if (!u.dead && Math.hypot(u.x - x, u.y - y) < radius + u.r) this.damageUnit(u, amount);
     for (const p of this.people) if (!p.taken && Math.hypot(p.x - x, p.y - y) < radius) this.flingPerson(p, false, { x, y });
     for (const c of this.traffic) if (!c.dead && Math.hypot(c.x - x, c.y - y) < radius + 4) this.damageCar(c, amount);
+    for (const c of this.boats) if (!c.dead && Math.hypot(c.x - x, c.y - y) < radius + c.r) this.damageBoat(c, amount);
     const b = this.boss;
     if (hitsBoss && b && !b.dead && b.state !== 'enter' && Math.hypot(b.x - x, b.y - y) < radius + b.r) this.damageBoss(amount);
   }
@@ -1906,9 +1956,11 @@ export class Game {
     k.facing = { x: -1, y: 0 };
     k.anim = null;
     k.lastAttack = null;
+    k.windup = null;
     this.units = [];
     this.people = [];
     this.traffic = [];
+    this.boats = [];
     this.trains = [];
     this.allies = [];
     this.projectiles = [];
@@ -2071,7 +2123,7 @@ export class Game {
       }
       this.addBiomass(biomass);
       this.stats.scrap += scrap;
-      const price = objectPrice(o);
+      const price = this.worth(objectPrice(o), o.tier);
       this.stats.damage += price;
       this.stats.destroyed++;
       if (o.structure) this.stats.buildings++;
@@ -2673,12 +2725,105 @@ export class Game {
     const loot = lootFor(2, k.stage, 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot;
-    this.stats.damage += vehiclePrice(c.model);
+    this.stats.damage += this.worth(vehiclePrice(c.model), 2);
     this.stats.destroyed++;
     this.stats.cars++;
     if (this.has('magneticHide')) this.addShield(0.01 + 0.01 * this.level('magneticHide'));
     this.fxEvent({ t: 'carDie', car: c, dir: norm(c.x - k.x, c.y - k.y) });
     this.spawnOrbs(c.x, c.y, 3, true);
+  }
+
+  // ---------------------------------------------------------------- boats
+  // Boats out on whatever water is near: motorboats, sailboats, jet skis, the odd yacht or cargo
+  // ship, cruising and turning back at the shore, opening the throttle when the kaiju comes near.
+  // They put out beyond the edge of the view, on their own random stream, and they're there to be
+  // sunk: a sunk one rolls over and goes down (actors3d) before it's gone.
+  updateBoats(dt) {
+    const k = this.kaiju;
+    if (!this.inCity) {
+      if (this.boats.length) this.boats = [];
+      return;
+    }
+    const span = this.viewSpan();
+    const R = Math.max(260, span * 1.3);
+    this.boats = this.boats.filter((b) => (b.dead ? (b.sinkT -= dt) > 0 : Math.hypot(b.x - k.x, b.y - k.y) < R * 1.7));
+    const r = this.lifeRng;
+    this.boatT = (this.boatT ?? 0) - dt;
+    if (this.boatT <= 0 && k.stage <= 5) {
+      this.boatT = 0.6;
+      let afloat = 0;
+      for (const b of this.boats) if (!b.dead) afloat++;
+      for (let tries = 0; tries < 4 && afloat < 8; tries++) {
+        const a = r.range(0, Math.PI * 2);
+        const d = r.range(R * 0.55, R);
+        const x = k.x + Math.cos(a) * d;
+        const y = k.y + Math.sin(a) * d;
+        const model = r.weighted(BOAT_FLEET);
+        const pd = propDims(model);
+        const len = Math.max(pd.w, pd.h) * BOAT_SCALE;
+        if (![[0, 0], [len, 0], [-len, 0], [0, len], [0, -len]].every(([dx, dy]) => isWater(x + dx, y + dy))) continue;
+        const tier = PROP_BY_ID[model].tier;
+        this.boats.push({
+          isBoat: true, model, variant: r.int(0, 2), x, y, heading: r.range(0, Math.PI * 2), speed: r.range(14, 28), cruise: 0,
+          tier, hp: TIER_HP[tier] * 1.5, maxHp: TIER_HP[tier] * 1.5, r: len * 0.42, len, dead: false, flash: 0, sinkT: 0,
+        });
+        afloat++;
+        break;
+      }
+    }
+    for (const b of this.boats) {
+      if (b.dead) continue;
+      if (b.flash > 0) b.flash -= dt;
+      // Too close to the kaiju: full throttle, steering away.
+      const dx = b.x - k.x;
+      const dy = b.y - k.y;
+      const fast = Math.hypot(dx, dy) < k.r * 5 + 40;
+      if (fast) {
+        const away = Math.atan2(dy, dx);
+        const turn = Math.atan2(Math.sin(away - b.heading), Math.cos(away - b.heading));
+        b.heading += Math.max(-1.6 * dt, Math.min(1.6 * dt, turn));
+      }
+      const sp = b.speed * (fast ? 1.7 : 1);
+      const nx = b.x + Math.cos(b.heading) * sp * dt;
+      const ny = b.y + Math.sin(b.heading) * sp * dt;
+      const ahead = b.len * 0.6 + 8;
+      if (isWater(nx + Math.cos(b.heading) * ahead, ny + Math.sin(b.heading) * ahead)) {
+        b.x = nx;
+        b.y = ny;
+      } else b.heading += Math.PI * r.range(0.6, 1.4);
+    }
+  }
+
+  damageBoat(b, amount) {
+    if (b.dead) return false;
+    if (b.tier < this.kaiju.stage) amount = b.hp;
+    b.hp -= amount;
+    b.flash = 0.13;
+    if (b.hp <= 0) this.killBoat(b);
+    return true;
+  }
+
+  killBoat(b) {
+    if (b.dead) return;
+    b.dead = true;
+    b.sinkT = 1.8;
+    b.sinkMax = 1.8;
+    const k = this.kaiju;
+    const rel = b.tier - k.stage;
+    this.shake = Math.max(this.shake, rel >= 0 ? 0.25 : 0.12);
+    if (rel >= 0) this.impact(0.04, 0.25);
+    this.bumpCombo();
+    this.onKill();
+    this.addThreat(rel >= 0 ? 1.5 : 0.3);
+    const loot = lootFor(b.tier, k.stage, PROP_BY_ID[b.model].value ?? 1);
+    this.addBiomass(loot.biomass);
+    this.stats.scrap += loot.scrap * this.diff.loot;
+    const price = this.worth(vehiclePrice(b.model), b.tier);
+    this.stats.damage += price;
+    this.stats.destroyed++;
+    if (rel >= 0) this.fx.floaters.push({ x: b.x, y: b.y, h: b.len * 0.5, text: `+${shortMoney(price)}`, color: '#ffd84a', life: 1.1, max: 1.1 });
+    this.fxEvent({ t: 'boatDie', boat: b, dir: norm(b.x - k.x, b.y - k.y) });
+    this.spawnOrbs(b.x, b.y, 2 + b.tier, true);
   }
 
   // ---------------------------------------------------------------- augments
@@ -2720,6 +2865,7 @@ export class Game {
     for (const u of this.units) if (!u.dead && distToSegment(u.x, u.y, x1, y1, x2, y2) < width / 2 + u.r) this.damageUnit(u, dmg);
     for (const p of this.people) if (!p.taken && distToSegment(p.x, p.y, x1, y1, x2, y2) < width / 2) this.flingPerson(p, false);
     for (const c of this.traffic) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + 4) this.damageCar(c, dmg);
+    for (const c of this.boats) if (!c.dead && distToSegment(c.x, c.y, x1, y1, x2, y2) < width / 2 + c.r) this.damageBoat(c, dmg);
     const b = this.boss;
     if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r) this.damageBoss(dmg);
   }
@@ -3367,7 +3513,7 @@ export class Game {
     const loot = lootFor(u.tier, k.stage, u.def.mob ? SWARM.loot * 0.5 : 1);
     this.addBiomass(loot.biomass);
     this.stats.scrap += loot.scrap * this.diff.loot * this.scrapMult();
-    this.stats.damage += unitPrice(u);
+    this.stats.damage += this.worth(unitPrice(u), u.tier);
     this.stats.units++;
     this.countMulti();
     this.onKill();
@@ -3663,7 +3809,7 @@ export class Game {
     const dmgMul = 1 + (this.enemyScale().dmg - 1) * 0.5;
     this.boss = {
       isBoss: true, gate: k.stage, def, model: def.id, name: def.name, title: def.title,
-      x, y, r: def.r * unit, unit, hp, maxHp: hp, D: this.stage.maxHp * dmgMul * 0.6, dmgMul,
+      x, y, r: def.r * unit, unit, hp, maxHp: hp, D: this.stage.maxHp * dmgMul * 1.1, dmgMul,
       state: 'enter', targetX: k.x + (x - k.x) * 0.45, targetY: k.y + (y - k.y) * 0.45,
       phase: 1, next: 1.5, patterns: def.patterns, patternIndex: 0, strafe: 1,
       aim: 0, flash: 0, walk: 0, dead: false, start: this.time, shield: false, quip: '', quipUntil: 0, ...fightState((def.hpMul || 1) >= BOSS_FIGHT.tanky),
@@ -3993,7 +4139,7 @@ export class Game {
     this.stats.gateBosses = (this.stats.gateBosses || 0) + 1;
     const scrap = 60 * b.gate * b.gate * this.diff.loot * this.scrapMult();
     this.stats.scrap += scrap;
-    this.stats.damage += bossPrice(b);
+    this.stats.damage += this.worth(bossPrice(b), b.gate + 1);
     k.hp = Math.min(k.maxHp, k.hp + k.maxHp * GATE.heal);
     this.slowmo = 0.8;
     this.shake = Math.max(this.shake, 0.9);
@@ -4042,7 +4188,7 @@ export class Game {
       b.hp = 0;
       b.dead = true;
       this.stats.bossDefeated = true;
-      this.stats.damage += bossPrice(b);
+      this.stats.damage += this.worth(bossPrice(b), this.kaiju.stage + 1);
       this.stats.bossTime = this.time - b.start;
       this.stats.rareMaterials += 1;
       this.slowmo = 1.2;

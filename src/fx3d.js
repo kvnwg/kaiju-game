@@ -257,23 +257,27 @@ export class FX {
     }
   }
 
+  // An explosion: a tight, quick fireball, plenty of sparks flung far, a shockwave ring, a puff
+  // of smoke. The punch is in the sparks, the ring and the light, so the fireball itself can stay
+  // small and leave the screen readable.
   fireBurst(x, y, z, r, n = 10) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const up = Math.random();
-      const sp = r * (1 + Math.random() * 1.5);
-      const l = 0.35 + Math.random() * 0.4;
+      const sp = r * (0.6 + Math.random() * 0.9);
+      const l = 0.22 + Math.random() * 0.23;
       const c = rgb([0xffd166, 0xff7a1a, 0xff4a1a, 0xfff2b0][i % 4]);
-      this.glow.add({ x, y: y + r * 0.2, z, vx: Math.cos(a) * sp, vy: up * sp, vz: Math.sin(a) * sp, drag: 3, size: r * (0.6 + Math.random() * 0.6), grow: 0.5, life: l, max: l, a: 0.9, ...c });
+      this.glow.add({ x, y: y + r * 0.2, z, vx: Math.cos(a) * sp, vy: up * sp, vz: Math.sin(a) * sp, drag: 4, size: r * (0.3 + Math.random() * 0.3), grow: 0.4, life: l, max: l, a: 0.85, ...c });
     }
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < Math.round(n * 1.6); i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = r * (2 + Math.random() * 3);
-      const l = 0.4 + Math.random() * 0.5;
-      this.bits.add({ x, y: y + r * 0.3, z, vx: Math.cos(a) * sp, vy: r * (1 + Math.random() * 3), vz: Math.sin(a) * sp, drag: 1, lift: -r * 8, size: Math.max(0.3, r * 0.12), life: l, max: l, a: 1, ...rgb(0xffc04a) });
+      const sp = r * (2 + Math.random() * 3.5);
+      const l = 0.35 + Math.random() * 0.45;
+      this.bits.add({ x, y: y + r * 0.3, z, vx: Math.cos(a) * sp, vy: r * (1 + Math.random() * 3), vz: Math.sin(a) * sp, drag: 1, lift: -r * 8, size: Math.max(0.3, r * 0.1), life: l, max: l, a: 1, ...rgb(i % 3 ? 0xffc04a : 0xfff2c8) });
     }
-    this.dustCloud(x, y, z, r * 0.9, 5, 0x5a5552);
-    this.flash(x, y + r * 0.5, z, 0xff9a3c, 1.1, Math.min(r * 3, 400), 0.35);
+    this.ring(x, z, r * 0.25, r * 1.4, 0xffc070, 0.3, 0.1);
+    this.dustCloud(x, y, z, r * 0.5, 3, 0x5a5552);
+    this.flash(x, y + r * 0.5, z, 0xff9a3c, 1, Math.min(r * 2.2, 300), 0.3);
   }
 
   sparks(x, y, z, color, size, n = 5) {

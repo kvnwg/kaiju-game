@@ -1,7 +1,8 @@
 // What things cost in real dollars, for the damage counter, the results and the newspaper: a
 // garden shed is about $15,000, a house $700,000, a skyscraper a couple of hundred million.
-// Past the city the figures go astronomical (a moon, a star, a universe) and then, in the back
-// garden, tiny again: a mushroom is worth about $2.
+// Past the city the figures go astronomical (a moon, a star, a universe). In the back garden the
+// game prices things by how big they are to the kaiju instead (see Game.worth), and each loop
+// back round multiplies it all by a thousand.
 // Buildings are priced by floor area (the world is about 2.7 units to the metre, a floor 3.5 m);
 // props, vehicles, military hardware and bosses each have a sticker price. People aren't priced.
 import { CLUTTER_PRICE } from './clutter.js';
@@ -112,7 +113,9 @@ export function bossPrice(b) {
 export const MONEY_NAMES = [
   ['', ''], ['K', 'thousand'], ['M', 'million'], ['B', 'billion'], ['T', 'trillion'], ['Qa', 'quadrillion'], ['Qi', 'quintillion'],
   ['Sx', 'sextillion'], ['Sp', 'septillion'], ['Oc', 'octillion'], ['No', 'nonillion'], ['Dc', 'decillion'], ['Ud', 'undecillion'],
-  ['Dd', 'duodecillion'], ['Td', 'tredecillion'],
+  ['Dd', 'duodecillion'], ['Td', 'tredecillion'], ['Qd', 'quattuordecillion'], ['Qn', 'quindecillion'],
+  ['Sd', 'sexdecillion'], ['St', 'septendecillion'], ['Od', 'octodecillion'], ['Nd', 'novemdecillion'],
+  ['Vg', 'vigintillion'],
 ];
 
 // Splits n into a figure under 1000 and a name: 4.2e21 -> [4.2, 7] (sextillion).
@@ -125,8 +128,7 @@ export function moneyScale(n) {
   return [n, i];
 }
 
-// Short dollars for floating text: $900, $15K, $2.1M, $204M, $1.5B, $3Qi; and, in the garden,
-// small change: $2, $0.25, $0.001.
+// Short dollars for floating text: $900, $15K, $2.1M, $204M, $1.5B, $3Qi.
 export function shortMoney(n) {
   if (n < 1) return n <= 0 ? '$0' : `$${n < 0.01 ? n.toPrecision(1) : n.toFixed(2)}`;
   if (n < 1000) return `$${Math.round(n)}`;

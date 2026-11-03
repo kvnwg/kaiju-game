@@ -311,6 +311,34 @@ export function rollover(s, now = Date.now()) {
   syncEnergy(s, now);
 }
 
+// ---------------------------------------------------------------- admin
+// The owner's admin mode: a code only they have turns it on for their save (the build holds the
+// code's salted SHA-256, never the code), and from then on gems, scrap, DNA, gene cores and energy
+// stay topped up. Turning it off keeps what's there.
+export const ADMIN = {
+  salt: 'kaiju-rampage:admin:',
+  hash: '5edffb1e9dbc96243b7506f46eedc84fd9dda4837ee28df0fa71b6c3f00e65a5',
+  gems: 999999, scrap: 99999999, dna: 99999, geneCores: 999,
+};
+
+export async function adminCodeOk(code) {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  if (!subtle || !code) return false;
+  const bytes = new TextEncoder().encode(ADMIN.salt + String(code).trim().toUpperCase());
+  const hex = [...new Uint8Array(await subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hex === ADMIN.hash;
+}
+
+export function adminTopUp(s) {
+  if (!s.settings.admin) return;
+  const c = s.cur;
+  c.gems = Math.max(c.gems, ADMIN.gems);
+  c.scrap = Math.max(c.scrap, ADMIN.scrap);
+  for (const sl of GEAR_SLOTS) c.dna[sl.id] = Math.max(c.dna[sl.id] || 0, ADMIN.dna);
+  c.geneCores = Math.max(c.geneCores || 0, ADMIN.geneCores);
+  c.energy = Math.max(c.energy, ECONOMY.energyCap);
+}
+
 // ---------------------------------------------------------------- energy
 export function energyCap() {
   return ECONOMY.energyCap;

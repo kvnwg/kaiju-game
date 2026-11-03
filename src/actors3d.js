@@ -5,7 +5,7 @@ import { VoxelGrid } from './voxel.js';
 import { KAIJU_MODELS, UNIT_MODELS, bossModel, GATE_BOSS_MODELS, personModel, personLook, PERSON_LOOKS, DOCTOR } from './models.js';
 import { buildProp } from './props.js';
 import { arcHeight } from './fx3d.js';
-import { EAT_TIME } from './config.js';
+import { EAT_TIME, BOAT_SCALE } from './config.js';
 import { SKINS } from './meta.js';
 
 export function toGeometry(m) {
@@ -70,21 +70,61 @@ function partsGroup(model, mat) {
 // Breath glow per element (rgb at full charge).
 const BREATH_TINT = { atomic: [0.02, 0.2, 0.26], lightning: [0.24, 0.28, 0.36], acid: [0.1, 0.32, 0.02], ice: [0.14, 0.24, 0.32] };
 
+// `attack`: where a bite is (see attackPose), or a plain true for a quick snap (the boss).
 function animateRig(rig, phase, moving, t, attack, extra = {}) {
   const swingAmt = moving ? 0.7 : 0.05;
+  const a = attack === true ? { pull: 0, reach: 0.6, jaw: -0.6 } : attack;
+  const pull = a ? a.pull : 0;
+  const reach = a ? a.reach : 0;
   for (const g of Object.values(rig.nodes)) {
     const p = g.userData.part;
     if (p.swing) g.rotation.z = Math.sin(phase) * swingAmt * p.swing;
-    if (p.arm) g.rotation.z = Math.sin(phase + Math.PI) * swingAmt * 0.6 * p.arm - (attack ? 0.9 : 0);
-    if (p.punch && attack) g.rotation.z = -1.4;
+    // Claws cock back with the neck, then rake forward with the lunge.
+    if (p.arm) g.rotation.z = Math.sin(phase + Math.PI) * swingAmt * 0.6 * p.arm + 0.5 * pull - 1.1 * reach;
+    // Fists go up overhead, then hammer down in front.
+    if (p.punch && a) g.rotation.z = -2.6 * pull - 0.5 * reach;
     if (p.tail !== undefined) g.rotation.y = Math.sin(t * 3 + p.tail * 0.9) * (0.18 + p.tail * 0.08);
-    if (p.name === 'jaw') g.rotation.z = attack ? -0.6 : -0.05 - Math.max(0, Math.sin(t * 1.3)) * 0.08;
-    if (p.name === 'head') g.rotation.z = Math.sin(phase * 2) * 0.04 + (attack ? -0.15 : 0);
+    if (p.name === 'jaw') g.rotation.z = a ? a.jaw : -0.05 - Math.max(0, Math.sin(t * 1.3)) * 0.08;
+    if (p.name === 'head') {
+      // The neck: drawn back and up, then thrust out and down into the bite.
+      g.rotation.z = Math.sin(phase * 2) * 0.04 + 0.5 * pull - 0.42 * reach + (a?.shake || 0);
+      const b = g.userData.base;
+      const nk = rig.model.neck ?? 1;
+      g.position.set(b.x + nk * (1.7 * reach - 1.6 * pull), b.y + nk * (0.8 * pull - 0.5 * reach), b.z);
+    }
     if (p.name === 'body') {
       g.position.y = g.userData.base.y + Math.abs(Math.sin(phase)) * (moving ? 0.6 : 0.1);
-      g.rotation.z = -(p.lean || 0) + (extra.recoil || 0);
+      // Rear back for the wind-up, pitch forward into the strike.
+      g.rotation.z = -(p.lean || 0) + (extra.recoil || 0) + 0.14 * pull - 0.16 * reach;
     }
   }
+}
+
+const easeInOut = (x) => x * x * (3 - 2 * x);
+
+// Where the kaiju is in an attack. The wind-up (game.js) draws the neck back with the jaw parting,
+// then whips the head forward with the jaw wide; the hit lands at full stretch, the jaw snaps shut
+// with a shake, and it all eases back. pull/reach run 0-1; jaw is the jaw's angle.
+function attackPose(k) {
+  if (k.windup) {
+    const w = 1 - k.windup.t / k.windup.max;
+    if (w < 0.62) {
+      const u = easeInOut(w / 0.62);
+      return { pull: u, reach: 0, jaw: -0.3 * u };
+    }
+    const u = (w - 0.62) / 0.38;
+    const e = u * u;
+    return { pull: 1 - e, reach: e, jaw: -0.3 - 0.85 * u };
+  }
+  const la = k.lastAttack;
+  if (!la) return null;
+  const f = 1 - la.t / 0.25;
+  if (f < 0.22) {
+    const u = f / 0.22;
+    return { pull: 0, reach: 1, jaw: -1.15 * (1 - u) * (1 - u), shake: Math.sin(u * Math.PI * 3) * 0.06 };
+  }
+  const u = easeInOut((f - 0.22) / 0.78);
+  return { pull: 0, reach: 1 - u, jaw: 0 };
 }
 
 export class Actors {
@@ -206,6 +246,7 @@ export class Actors {
     this.updateAllies(game);
     this.updatePeople(game, t);
     this.updateTraffic(game);
+    this.updateBoats(game, t);
   }
 
   updateKaiju(game, t, elev) {
@@ -226,7 +267,14 @@ export class Actors {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     rig.yaw += d * (k.anim && k.anim.kind === 'laser' ? 0.6 : 0.25);
     rig.root.rotation.y = rig.yaw;
-    animateRig(rig, k.walkPhase, k.moving, t, Boolean(k.lastAttack));
+    const atk = attackPose(k);
+    animateRig(rig, k.walkPhase, k.moving, t, atk);
+    // The whole body lurches into the lunge, after rocking back for the wind-up.
+    if (atk) {
+      const lurch = k.r * (0.16 * atk.reach - 0.07 * atk.pull);
+      rig.root.position.x += k.facing.x * lurch;
+      rig.root.position.z += k.facing.y * lurch;
+    }
     const glow = this.movePose(rig, k, t);
     const fl = k.hitFlash > 0 ? 0.6 : k.invuln > 0 && Math.floor(t * 12) % 2 ? 0.35 : 0;
     rig.mat.emissive.setRGB(fl + glow[0], fl * 0.3 + glow[1], fl * 0.3 + glow[2]);
@@ -728,6 +776,41 @@ export class Actors {
     for (let v = 0; v < PERSON_LOOKS; v++) {
       const im = this.peopleMeshes[v];
       im.count = Math.min(160, counts[v]);
+      im.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  // Boats out on the water (game.js updateBoats): bobbing on the swell, swelling white when hit,
+  // and a sunk one rolls over and goes down by the bow.
+  updateBoats(game, t) {
+    this.boatMeshes = this.boatMeshes || new Map();
+    for (const im of this.boatMeshes.values()) im.count = 0;
+    let i = 0;
+    for (const b of game.boats) {
+      const key = `${b.model}:${b.variant}`;
+      let im = this.boatMeshes.get(key);
+      if (!im) {
+        const p = buildProp(b.model, b.variant);
+        im = new THREE.InstancedMesh(toGeometry(meshGrid(p.grid, { v: p.v, ox: p.origin.x, oz: p.origin.z })), this.mat, 16);
+        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        im.frustumCulled = false;
+        im.castShadow = true;
+        im.count = 0;
+        this.scene.add(im);
+        this.boatMeshes.set(key, im);
+      }
+      if (im.count >= 16) continue;
+      i++;
+      const sink = b.dead ? 1 - b.sinkT / b.sinkMax : 0;
+      this._v.set(b.x, 0.4 + Math.sin(t * 2 + i) * 0.25 - sink * b.len * 0.4, b.y);
+      this._e.set(sink * 0.5, -b.heading, Math.sin(t * 1.5 + i) * 0.04 + sink * 1.3);
+      this._q.setFromEuler(this._e);
+      this._s.setScalar(BOAT_SCALE * (b.flash > 0 ? 1.12 : 1));
+      this._m.compose(this._v, this._q, this._s);
+      im.setMatrixAt(im.count++, this._m);
+    }
+    for (const im of this.boatMeshes.values()) {
+      im.visible = im.count > 0;
       im.instanceMatrix.needsUpdate = true;
     }
   }

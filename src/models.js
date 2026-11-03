@@ -113,6 +113,8 @@ function gorilla() {
   };
   return {
     radius: 7, height: 19,
+    // (a short, thick neck: the head barely leaves the shoulders when it lunges; see actors3d)
+    neck: 0.3,
     parts: [
       part('body', torso, { x: 5, y: 4, z: 6 }, { x: 0, y: 6, z: 0 }, null, { lean: 0.35 }),
       part('head', head, { x: 1, y: 1, z: 3 }, { x: 4, y: 8, z: 0 }, 'body'),
@@ -211,6 +213,7 @@ function volt() {
   };
   return {
     radius: 7, height: 11,
+    neck: 0.7,
     parts: [
       part('body', belly, { x: 6, y: 1, z: 5 }, { x: 0, y: 6, z: 0 }),
       part('shell', shell, { x: 7, y: 0, z: 6 }, { x: 0, y: 1, z: 0 }, 'body'),

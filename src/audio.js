@@ -386,6 +386,10 @@ export class Sfx {
         case 'carDie':
           this.crunch(0.35);
           break;
+        case 'boatDie':
+          this.crunch(0.4);
+          this.splash();
+          break;
         case 'trainDie':
         case 'bossDie':
           this.boom(1.5);

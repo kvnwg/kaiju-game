@@ -118,6 +118,7 @@ export class MoveSystem {
     for (const u of g.units) if (!u.dead && u.type !== 'jet') add(u, Math.hypot(u.x - k.x, u.y - k.y) - u.r);
     const threats = out.length;
     for (const c of g.traffic) if (!c.dead) add(c, Math.hypot(c.x - k.x, c.y - k.y) + reach * 0.15);
+    for (const c of g.boats) if (!c.dead && canDamage(c.tier, k.stage)) add(c, Math.hypot(c.x - k.x, c.y - k.y) - c.r + reach * 0.15);
     if (k.stage <= 2) for (const p of g.people) if (!p.taken) add(p, Math.hypot(p.x - k.x, p.y - k.y) + reach * 0.2);
     if (out.length < max || threats === 0) {
       for (const o of g.objectsNear(k.x, k.y, reach)) {
@@ -148,6 +149,7 @@ export class MoveSystem {
     for (const u of g.units) if (!u.dead && !u.flying && inArc(u.x, u.y, u.r)) g.damageUnit(u, dmg);
     for (const p of g.people) if (!p.taken && inArc(p.x, p.y)) g.flingPerson(p, false, { x, y });
     for (const c of g.traffic) if (!c.dead && inArc(c.x, c.y, 4)) g.damageCar(c, dmg);
+    for (const c of g.boats) if (!c.dead && inArc(c.x, c.y, c.r)) g.damageBoat(c, dmg);
     const b = g.boss;
     if (b && !b.dead && b.state !== 'enter' && inArc(b.x, b.y, b.r)) g.damageBoss(dmg);
   }
@@ -672,6 +674,7 @@ export class MoveSystem {
     };
     for (const u of g.units) if (!u.dead && u.type !== 'jet') consider(u, Math.hypot(u.x - from.x, u.y - from.y) - u.r);
     for (const c of g.traffic) if (!c.dead) consider(c, Math.hypot(c.x - from.x, c.y - from.y));
+    for (const c of g.boats) if (!c.dead && canDamage(c.tier, k.stage)) consider(c, Math.hypot(c.x - from.x, c.y - from.y) - c.r);
     const b = g.boss;
     if (b && !b.dead && b.state !== 'enter') consider(b, Math.hypot(b.x - from.x, b.y - from.y) - b.r);
     if (!best) {
@@ -885,6 +888,7 @@ export class MoveSystem {
           for (const u of g.units) if (!u.dead && !u.road && u.type !== 'jet' && !(u.tier > k.stage)) pull(u, 0.9, u.flying ? 0 : u.r * 0.6, u.def.mob ? u.tier : 0);
           for (const p of g.people) if (!p.taken) pull(p, 1.2);
           for (const c of g.traffic) if (!c.dead && Math.hypot(c.x - v.x, c.y - v.y) < v.r * 0.8) g.killCar(c);
+          for (const c of g.boats) if (!c.dead && canDamage(c.tier, k.stage) && Math.hypot(c.x - v.x, c.y - v.y) < v.r * 0.8) g.killBoat(c);
           tick -= dt;
           if (tick <= 0) {
             tick = 0.35;
@@ -936,6 +940,7 @@ export class MoveSystem {
       };
       for (const u of g.units) if (!u.dead && !u.flying && Math.hypot(u.x - x, u.y - y) < hr + u.r) once(u, () => g.damageUnit(u, D));
       for (const c of g.traffic) if (!c.dead && Math.hypot(c.x - x, c.y - y) < hr + 3) once(c, () => g.damageCar(c, D));
+      for (const c of g.boats) if (!c.dead && Math.hypot(c.x - x, c.y - y) < hr + c.r) once(c, () => g.damageBoat(c, D));
       for (const p of g.people) if (!p.taken && Math.hypot(p.x - x, p.y - y) < hr) g.flingPerson(p, false, k);
       for (const o of g.objectsNear(x, y, hr)) if (!o.walkable && canDamage(o.tier, k.stage, o.landmark)) once(o, () => g.damageObject(o, D, norm(o.x - k.x, o.y - k.y), 'hit', { x, y }));
     }

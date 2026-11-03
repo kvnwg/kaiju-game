@@ -610,7 +610,9 @@ export class UI {
   showPause({ held = new Map(), quality, pixelArt, sound, musicOn, onQuality, onPixelArt, onSound, onMusic, onResume, onQuit, onCashOut = null }) {
     const el = this.modals.pause;
     const opts = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low'], ['lowest', 'Lowest']];
-    el.innerHTML = `<div class="panel small">
+    // Two columns on a wide, short screen (a phone on its side), one on anything taller.
+    el.innerHTML = `<div class="panel small pause-panel">
+        <div class="pause-main">
         <h2>Paused</h2>
         <div class="col">
           <button class="btn primary" id="resume">Resume</button>
@@ -618,6 +620,8 @@ export class UI {
           <button class="btn ghost" id="quit">Quit run</button>
         </div>
         <details class="recipes-help"><summary>Evolution recipes</summary>${codex(held)}</details>
+        </div>
+        <div class="pause-settings">
         <div class="settings-grid">
           <h3>Sound</h3>
           <div class="segs" id="soundSegs"><button class="seg ${sound ? 'on' : ''}" data-s="1">On</button><button class="seg ${sound ? '' : 'on'}" data-s="0">Off</button></div>
@@ -628,7 +632,8 @@ export class UI {
           <h3>Graphics</h3>
           <div class="segs" id="qualSegs">${opts.map(([id, name]) => `<button class="seg ${id === quality ? 'on' : ''}" data-q="${id}">${name}</button>`).join('')}</div>
         </div>
-        <p class="tiny">Low turns off shadows, bloom and tilt-shift. Lowest also halves the resolution and draws less detail and debris, for devices that really struggle. The game lowers these on its own if it runs slowly.</p>
+        <p class="tiny">Low drops shadows, bloom and tilt-shift; Lowest also halves the resolution. The game lowers these by itself if it runs slowly.</p>
+        </div>
       </div>`;
     el.querySelector('#resume').addEventListener('click', onResume);
     el.querySelector('#quit').addEventListener('click', onQuit);

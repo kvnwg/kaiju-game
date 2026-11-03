@@ -176,12 +176,16 @@ test('death offers one ad revive, more only if paid for; giving up ends the run 
 
 test('Thick Hide reduces bullet and shell damage only', () => {
   const g = new Game({ seed: 4 });
+  // What a 10-damage hit costs with no armour (after the difficulty's damage multiplier).
+  g.takeDamage(10, 'bullet');
+  const bare = g.kaiju.maxHp - g.kaiju.hp;
+  g.kaiju.hp = g.kaiju.maxHp;
   g.held.set('thickHide', 2);
   g.takeDamage(10, 'bullet');
-  assert.ok(Math.abs(g.kaiju.maxHp - g.kaiju.hp - 8.4) < 1e-9);
+  assert.ok(Math.abs(g.kaiju.maxHp - g.kaiju.hp - bare * 0.84) < 1e-9);
   g.kaiju.hp = g.kaiju.maxHp;
   g.takeDamage(10, 'explosive');
-  assert.equal(g.kaiju.maxHp - g.kaiju.hp, 10);
+  assert.ok(Math.abs(g.kaiju.maxHp - g.kaiju.hp - bare) < 1e-9);
 });
 
 test('hits on buildings report an impact point for the voxel chipping', () => {
@@ -226,38 +230,49 @@ test('military vehicles and soldiers never drive or walk through intact building
   assert.ok(samples > 500);
 });
 
-test('autopiloted first runs grow through all six stages, fight the boss and at least half win', () => {
+test('a first run with no upgrades gets a good way into the city, but the city mostly holds', () => {
   // (These check the city's balance, so beating the final boss ends the run here.) A run replays
-  // the same way for the same seed, but any change to the simulation reshuffles which seeds win;
-  // across 16 seeds about three in four first runs do.
-  const runs = [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true, ascend: false }), { maxTime: 2400 }));
-  checkRuns(runs, 4);
+  // the same way for the same seed, but any change to the simulation reshuffles the seeds.
+  const runs = [1, 2, 3, 4, 5, 6].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', firstRun: true, ascend: false }), { maxTime: 2400 }));
+  checkRuns(runs);
+  const stages = runs.map((g) => g.kaiju.stage).sort((a, b) => a - b);
+  assert.ok(stages.every((st) => st >= 3), `every first run outgrows the backyard and the houses: ${stages}`);
+  assert.ok(stages[Math.floor(stages.length / 2)] >= 4, `most get to apartment size: ${stages}`);
+  assert.ok(runs.filter((g) => g.state === 'won').length <= 2, 'but without gear the city mostly holds');
 });
 
-test('later runs push back: the military can win, but a decent run still beats the boss', () => {
-  // As above, this only asks that some of them win; across 16 seeds a little under half do.
-  const runs = [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => simulate(new Game({ seed, kaijuId: 'rex', ascend: false }), { maxTime: 2400 }));
-  checkRuns(runs, 2);
-  assert.ok(runs.some((g) => g.state === 'lost' || g.reviveAvailable === false), 'somebody got knocked down');
+test('upgrades are what win the city: with gear most runs beat the boss, without it hardly any', () => {
+  const run = (seed, mul) => {
+    const g = new Game({ seed, kaijuId: 'rex', ascend: false });
+    if (mul !== 1) {
+      g.meta.atkMul = mul;
+      g.meta.hpMul = mul;
+      g.kaiju.maxHp = g.maxHpFor();
+      g.kaiju.hp = g.kaiju.maxHp;
+    }
+    return simulate(g, { maxTime: 2400 });
+  };
+  const bare = [1, 2, 3, 4, 5, 6].map((seed) => run(seed, 1));
+  const geared = [1, 2, 3, 4, 5, 6].map((seed) => run(seed, 2.2));
+  checkRuns([...bare, ...geared]);
+  assert.ok(bare.filter((g) => g.state === 'won').length <= 1, 'no gear: the military wins');
+  const wins = geared.filter((g) => g.state === 'won');
+  assert.ok(wins.length >= 4, `geared: won ${wins.length}/${geared.length}`);
+  for (const g of wins) {
+    assert.equal(g.kaiju.stage, MAX_STAGE);
+    assert.ok(g.stats.bossDefeated);
+  }
+  // Pacing guard: a geared run reaches the final boss within about 25 minutes.
+  const times = wins.map((g) => g.stats.stageTimes[MAX_STAGE]).sort((a, b) => a - b);
+  assert.ok(times[Math.floor(times.length / 2)] < 28 * 60, `median boss arrival ${times}`);
 });
 
-function checkRuns(runs, minWins) {
+function checkRuns(runs) {
   for (const g of runs) {
     assert.ok(g.state === 'won' || g.state === 'lost', `run ended (state ${g.state})`);
     assert.ok(g.results.buildings > 30);
     assert.ok(g.stats.people > 10, 'ate people early on');
   }
-  const wins = runs.filter((g) => g.state === 'won');
-  assert.ok(wins.length >= minWins, `won ${wins.length}/${runs.length}`);
-  for (const g of wins) {
-    assert.equal(g.kaiju.stage, MAX_STAGE);
-    assert.ok(g.stats.bossDefeated);
-  }
-  // Pacing guard: the final boss typically arrives within 25 minutes, give or take the luck of
-  // the seeds. (The size 4 and 5 bosses carry 30x health, so with no gear those two fights alone
-  // run several minutes.)
-  const times = wins.map((g) => g.stats.stageTimes[MAX_STAGE]).sort((a, b) => a - b);
-  assert.ok(times[Math.floor(times.length / 2)] < 28 * 60, `median boss arrival ${times}`);
 }
 
 test('chained kills build a combo that pays a scrap bonus when it lapses', () => {

@@ -14,6 +14,7 @@ import {
   mutationLevel, mutationCost, mutationOpen, buyMutation, power, recommendedPower, loadout, openCrate, pityLeft, crateOdds,
   questState, claimQuest, claimQuestBonus, loginReady, claimLogin, passTier, claimPass, passReward, passEndsIn, patrolPending,
   patrolRate, claimPatrol, quickPatrol, adsLeft, adWait, adEnergy, adGems, buyEnergy, spinWheel, buyDeal, buySkin, notifications, canAfford,
+  adminCodeOk, adminTopUp,
 } from './meta.js';
 
 import { MONEY_NAMES, moneyScale, shortMoney } from './prices.js';
@@ -223,6 +224,7 @@ export class Hub {
   render() {
     const s = this.save;
     syncEnergy(s, this.now());
+    adminTopUp(s);
     this.renderTop();
     this.renderSides();
     this.renderNav();
@@ -937,7 +939,11 @@ export class Hub {
     this.openModal('settings', `<div class="panel small"><h2>Account</h2>
       <p>Level ${s.account.level} · ${s.runs} runs · ${s.wins} wins</p>
       <p class="tiny muted">Best damage: ${hmoney(s.stats.bestDamage)}</p>
+      ${s.settings.admin
+        ? `<p class="tiny">Admin mode is on: gems, scrap, DNA and energy never run out.</p>`
+        : `<div class="row"><input id="redeemCode" class="code-input" maxlength="24" placeholder="Have a code?" autocomplete="off" spellcheck="false"><button class="btn ghost" data-act="redeem">Redeem</button></div>`}
       <div class="col">
+        ${s.settings.admin ? `<button class="btn ghost" data-act="adminoff">Turn admin mode off</button>` : ''}
         ${this.debug ? `<button class="btn ghost" data-act="dev" data-what="rich">Dev: +10,000 gems, +1M scrap, +500 DNA</button>
         <button class="btn ghost" data-act="dev" data-what="level">Dev: +5 account levels</button>
         <button class="btn ghost" data-act="dev" data-what="unlock">Dev: unlock every feature</button>
@@ -1360,6 +1366,26 @@ export class Hub {
       }
       case 'dev':
         this.dev(d.what);
+        break;
+      case 'redeem': {
+        const input = this.modal.querySelector('#redeemCode');
+        const code = input ? input.value : '';
+        adminCodeOk(code).then((ok) => {
+          if (!ok) {
+            this.toast('That code doesn’t work.');
+            return;
+          }
+          s.settings.admin = true;
+          this.closeModal();
+          this.commit();
+          this.toast('Admin mode on: unlimited gems, scrap, DNA and energy.');
+        });
+        break;
+      }
+      case 'adminoff':
+        s.settings.admin = false;
+        this.closeModal();
+        this.commit();
         break;
       default:
         break;

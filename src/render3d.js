@@ -1254,7 +1254,8 @@ export class Renderer3D {
           break;
         }
         case 'explode':
-          this.fx.fireBurst(e.x, 0, e.y, e.r, 8);
+          // (however wide the blast, the fireball stays a few kaiju widths: the ring shows the reach)
+          this.fx.fireBurst(e.x, 0, e.y, Math.min(e.r, game.kaiju.r * 2.5), 8);
           break;
         case 'sparks':
           this.fx.sparks(e.x, e.h, e.y, e.color, Math.max(0.3, game.kaiju.r * 0.1), 3);
@@ -1310,6 +1311,23 @@ export class Renderer3D {
           if (u.eaten) break;
           this.fx.fireBurst(u.x, u.flying ? game.kaiju.r * 2 : 0, u.y, u.r * 1.5, 6);
           for (let i = 0; i < 6; i++) this.fx.addDebris({ x: u.x, y: u.r, z: u.y, vx: e.dir.x * u.r * 6 + (Math.random() - 0.5) * u.r * 6, vy: u.r * (3 + Math.random() * 4), vz: e.dir.y * u.r * 6 + (Math.random() - 0.5) * u.r * 6, sx: u.r * 0.4, sy: u.r * 0.3, sz: u.r * 0.4, size: u.r * 0.4, color: 0x3a3d42, life: 5 });
+          break;
+        }
+        case 'boatDie': {
+          // Holed: a burst of spray and splinters, a ring across the water, and down it goes.
+          const b = e.boat;
+          this.fx.dustCloud(b.x, 0.5, b.y, b.len * 0.4, 8, 0xd8f4ff);
+          this.fx.fireBurst(b.x, 1, b.y, b.len * 0.22, 4);
+          game.fx.rings.push({ x: b.x, y: b.y, r0: b.len * 0.2, r1: b.len * 0.75, life: 0.6, max: 0.6, color: 0xe0f6ff, width: b.len * 0.05 });
+          for (let i = 0; i < 8; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sz = b.len * (0.04 + Math.random() * 0.05);
+            this.fx.addDebris({
+              x: b.x, y: b.len * 0.15, z: b.y,
+              vx: Math.cos(a) * b.len * 0.8 + e.dir.x * b.len * 0.5, vy: b.len * (0.8 + Math.random()), vz: Math.sin(a) * b.len * 0.8 + e.dir.y * b.len * 0.5,
+              sx: sz, sy: sz * 0.5, sz, size: sz, color: i % 3 ? 0xf2f2f2 : 0x8a6440, life: 2,
+            });
+          }
           break;
         }
         case 'carDie': {

@@ -1,11 +1,10 @@
 /* global THREE */
 // City ambience that doesn't affect gameplay: power cables between poles, metro trains,
-// bird flocks that scatter, boats on the water, and an advertising blimp.
+// bird flocks that scatter, and an advertising blimp. (Boats are game objects: see game.js.)
 import { meshGrid } from './mesher.js';
 import { trainCarModel, birdModel, blimpModel } from './models.js';
-import { buildProp } from './props.js';
 import { toGeometry } from './actors3d.js';
-import { isWater, METRO } from './world.js';
+import { METRO } from './world.js';
 
 const BIRDS_PER_FLOCK = 16;
 const MAX_FLOCKS = 6;
@@ -46,14 +45,6 @@ export class Ambient {
     this.birdMesh.count = 0;
     this.scene.add(this.birdMesh);
     this.flocks = [];
-    // Boats cruising whatever water is near
-    const boat = buildProp('boat', 1);
-    this.boatMesh = new THREE.InstancedMesh(toGeometry(meshGrid(boat.grid, { v: boat.v * 1.6, ox: boat.origin.x, oz: boat.origin.z })), this.mat, 14);
-    this.boatMesh.frustumCulled = false;
-    this.boatMesh.castShadow = true;
-    this.boatMesh.count = 0;
-    this.scene.add(this.boatMesh);
-    this.boats = [];
     // An advertising blimp drifting after the action
     const blm = blimpModel();
     this.blimp = new THREE.Mesh(toGeometry(meshGrid(blm.grid, { v: blm.v, ox: blm.origin.x, oz: blm.origin.z, oy: 5 })), this.mat);
@@ -64,7 +55,6 @@ export class Ambient {
 
   clear() {
     this.reset();
-    this.boats = [];
     this.blimpAt = null;
     if (this.wires) {
       this.wires.geometry.dispose();
@@ -138,7 +128,6 @@ export class Ambient {
     }
     this.updateTrains(game);
     this.updateBirds(game, dt, t, view);
-    this.updateBoats(dt, t, view);
     // Blimp: a slow loop high above the towers, drifting after the kaiju.
     const k = game.kaiju;
     if (!this.blimpAt) this.blimpAt = { x: k.x + 400, y: k.y - 300 };
@@ -246,39 +235,5 @@ export class Ambient {
     }
     this.birdMesh.count = n;
     this.birdMesh.instanceMatrix.needsUpdate = true;
-  }
-
-  // A handful of boats on whatever water is in view: they cruise straight and turn back at
-  // the shore, and new ones put out as the camera moves on.
-  updateBoats(dt, t, view) {
-    const R = view.span * 1.2;
-    this.boats = this.boats.filter((b) => Math.hypot(b.x - view.x, b.y - view.z) < R * 1.5);
-    if (this.boats.length < 10 && view.span < 3000) {
-      for (let tries = 0; tries < 4; tries++) {
-        const x = view.x + (Math.random() * 2 - 1) * R;
-        const y = view.z + (Math.random() * 2 - 1) * R;
-        if (!isWater(x, y) || !isWater(x + 30, y) || !isWater(x - 30, y)) continue;
-        this.boats.push({ x, y, heading: Math.random() * Math.PI * 2, speed: 18 + Math.random() * 16 });
-        break;
-      }
-    }
-    let n = 0;
-    for (const b of this.boats) {
-      const nx = b.x + Math.cos(b.heading) * b.speed * dt;
-      const ny = b.y + Math.sin(b.heading) * b.speed * dt;
-      if (isWater(nx + Math.cos(b.heading) * 20, ny + Math.sin(b.heading) * 20)) {
-        b.x = nx;
-        b.y = ny;
-      } else b.heading += Math.PI * (0.6 + Math.random() * 0.8);
-      if (n >= 14) continue;
-      this._v.set(b.x, 0.6 + Math.sin(t * 2 + n) * 0.3, b.y);
-      this._e.set(0, -b.heading, Math.sin(t * 1.5 + n) * 0.04);
-      this._q.setFromEuler(this._e);
-      this._s.set(1, 1, 1);
-      this._m.compose(this._v, this._q, this._s);
-      this.boatMesh.setMatrixAt(n++, this._m);
-    }
-    this.boatMesh.count = n;
-    this.boatMesh.instanceMatrix.needsUpdate = true;
   }
 }
