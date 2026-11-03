@@ -2576,11 +2576,14 @@ export class Game {
     seen.forEach((p, i) => this.schedule(0.5 + i * 0.35, () => this.shout(p, i === 0 ? 'AAAH!' : null)));
   }
 
-  // A neighbour shouting as they run (now and then while the kaiju is small).
+  // A neighbour shouting as they run (now and then while the kaiju is small): a speech bubble
+  // that follows them over their head (see render3d.js updateFloaters). A few at a time at most.
   shout(p, text = null) {
     if (p.taken) return;
+    // (The line is picked first either way, so the cap never changes what happens next.)
     const line = text ?? SHOUTS[this.lifeRng.int(0, SHOUTS.length - 1)];
-    this.fx.floaters.push({ x: p.x, y: p.y, h: 6.5, text: line, color: '#ffffff', life: 1.2, max: 1.2 });
+    if (this.fx.floaters.filter((f) => f.bubble).length >= 3) return;
+    this.fx.floaters.push({ x: p.x, y: p.y, h: 2.6, text: line, life: 1.8, max: 1.8, bubble: true, follow: p });
   }
 
   // One step along a person's heading, turning aside at walls and water.

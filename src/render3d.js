@@ -1417,16 +1417,26 @@ export class Renderer3D {
     if (!this.floaterLayer) return;
     const live = new Set();
     const v = new THREE.Vector3();
+    let clear = null; // the kaiju on screen, which speech bubbles keep out of
     for (const f of game.fx.floaters) {
       live.add(f);
       let entry = this.floaters.get(f);
       if (!entry) {
         const el = document.createElement('div');
-        el.className = 'floater';
-        el.textContent = f.text;
+        el.className = f.bubble ? 'floater bubble' : 'floater';
+        if (f.bubble) {
+          const span = document.createElement('span');
+          span.textContent = f.text;
+          el.appendChild(span);
+        } else el.textContent = f.text;
         this.floaterLayer.appendChild(el);
         entry = { el };
         this.floaters.set(f, entry);
+      }
+      if (f.bubble) {
+        if (!clear) clear = this.kaijuOnScreen(game, v);
+        this.placeBubble(f, entry, clear, v);
+        continue;
       }
       const p = 1 - f.life / f.max;
       v.set(f.x, f.h + p * f.h * 0.4, f.y).project(this.camera);
@@ -1442,6 +1452,62 @@ export class Renderer3D {
       entry.el.remove();
       this.floaters.delete(f);
     }
+  }
+
+  // The kaiju's footprint on screen: a circle round its body, in pixels.
+  kaijuOnScreen(game, v) {
+    const k = game.kaiju;
+    const y = this.kaijuElevation(game) + (k.z || 0);
+    v.set(k.x, y + k.r * 0.9, k.y).project(this.camera);
+    const x = ((v.x + 1) / 2) * this.w;
+    const cy = ((1 - v.y) / 2) * this.h;
+    v.set(k.x, y + k.r * 2.3, k.y).project(this.camera);
+    const top = ((1 - v.y) / 2) * this.h;
+    return { x, y: cy, r: Math.abs(cy - top) * 1.25 + 8 };
+  }
+
+  // A speech bubble over a shouting neighbour's head, following them as they run. It is see-through,
+  // and never sits on the kaiju: if it would, it is pushed clear (and loses its tail).
+  placeBubble(f, entry, clear, v) {
+    const who = f.follow;
+    if (who && !who.taken && who.state !== 'gone') {
+      f.x = who.x;
+      f.y = who.y;
+    }
+    v.set(f.x, f.h + ((who && who.z) || 0), f.y).project(this.camera);
+    const el = entry.el;
+    if (!entry.w) {
+      entry.w = el.offsetWidth;
+      entry.h = el.offsetHeight;
+    }
+    const ax = ((v.x + 1) / 2) * this.w;
+    const ay = ((1 - v.y) / 2) * this.h;
+    let cx = ax;
+    let cy = ay - entry.h / 2 - 7; // sitting on its tail, just over the head
+    let dx = cx - clear.x;
+    let dy = cy - clear.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-3) {
+      dx = 0;
+      dy = -1;
+    } else {
+      dx /= d;
+      dy /= d;
+    }
+    const need = clear.r + Math.abs(dx) * (entry.w / 2) + Math.abs(dy) * (entry.h / 2) + 4;
+    const pushed = d < need;
+    if (pushed) {
+      cx = clear.x + dx * need;
+      cy = clear.y + dy * need;
+    }
+    if (pushed !== entry.pushed) {
+      entry.pushed = pushed;
+      el.classList.toggle('pushed', pushed);
+    }
+    cx = Math.max(entry.w / 2 + 4, Math.min(this.w - entry.w / 2 - 4, cx));
+    cy = Math.max(entry.h / 2 + 4, Math.min(this.h - entry.h / 2 - 4, cy));
+    el.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%)`;
+    el.style.opacity = String(Math.min(1, (f.life / f.max) * 4));
   }
 
   // A still of the frame just drawn, w x h pixels, framing a subject at screen point (cx, cy)

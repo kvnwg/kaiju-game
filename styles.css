@@ -627,6 +627,30 @@ html, body {
   text-shadow: var(--outline);
   white-space: nowrap;
 }
+/* Neighbours shouting: a see-through speech bubble with a tail pointing at whoever is yelling. */
+.floater.bubble {
+  padding: 4px 7px 3px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 2px solid rgba(42, 23, 54, 0.65);
+  border-radius: 7px;
+  color: #2a1736;
+  font-size: 9px;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9);
+}
+.floater.bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-top: 6px solid rgba(42, 23, 54, 0.65);
+  border-bottom: 0;
+}
+.floater.bubble.pushed::after { display: none; }
+.floater.bubble span { display: inline-block; animation: bubble-pop 0.16s steps(3) both, bubble-shout 0.28s steps(2) 0.16s 3; }
+@keyframes bubble-pop { from { transform: scale(0.3); } to { transform: scale(1); } }
+@keyframes bubble-shout { 50% { transform: translate(1px, -1px) rotate(-2deg); } }
 /* Loading: the title art behind the logo while the city is built. */
 #loading { background: #140604 url(art/title-wide.jpg) center 55% / cover no-repeat; }
 #loading .loading-card { padding: 20px 28px; background: radial-gradient(ellipse at center, rgba(16, 4, 2, 0.72), transparent 75%); }

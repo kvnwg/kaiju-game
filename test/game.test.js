@@ -56,6 +56,7 @@ test('levels come quickly: many picks in the first five minutes, size grows slow
 test('each level costs more than the last: picks thin out late in a run, a big blast never chains them', () => {
   for (let l = 2; l < 40; l++) assert.ok(xpToNext(l) > xpToNext(l - 1) * 1.1);
   const g = new Game({ seed: 2 });
+  g.takeDamage = () => {}; // (this checks the pacing of picks over a long run, not survival)
   const ups = [];
   simulate(g, { maxTime: 900, onTick: () => { if (g.kaiju.level > ups.length + 1) ups.push(g.time); } });
   const early = ups.filter((t) => t < 180).length;
@@ -768,4 +769,16 @@ test('tanky bosses stagger when their meter fills, break at phase lines and give
   assert.ok(g.bossRage(b) > 1.5, 'a long fight brings rage');
   b.fight = 1e6;
   assert.equal(g.bossRage(b), 1 + BOSS_FIGHT.rageMax);
+});
+
+test('neighbours shout in speech bubbles that follow them, a few at a time', () => {
+  const g = new Game({ seed: 12, firstRun: true });
+  const k = g.kaiju;
+  const people = g.people.filter((p) => !p.pet && !p.taken).slice(0, 5);
+  g.fx.floaters = [];
+  for (const p of people) g.shout(p);
+  const bubbles = g.fx.floaters.filter((f) => f.bubble);
+  assert.equal(bubbles.length, 3, 'no more than three at once');
+  assert.ok(bubbles.every((b) => b.follow && b.text));
+  assert.ok(k.stage === 1);
 });
