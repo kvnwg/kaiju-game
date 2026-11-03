@@ -218,9 +218,15 @@ export class Sfx {
     if (!this.ok('attack', 0.07)) return;
     const deep = 1 - Math.min(0.6, (this.stage - 1) * 0.12);
     if (kind === 'bite') {
-      this.noise({ dur: 0.03, vol: 0.28, f0: 5000 * deep, f1: 3000 * deep, type: 'bandpass', q: 5 });
-      this.noise({ dur: 0.08, vol: 0.18, f0: 2200 * deep, f1: 600, type: 'bandpass', q: 1.4, delay: 0.015 });
-      this.tone({ type: 'sine', f0: 130 * deep, f1: 50, dur: 0.1, vol: 0.22 });
+      // Chomp! Two quick teeth clacks round a little cartoon blip that drops in pitch, a crunch
+      // and a soft thump; a touch different every time so a run of bites never drones.
+      const j = 0.92 + Math.random() * 0.16;
+      this.noise({ dur: 0.018, vol: 0.24, f0: 5400 * deep * j, f1: 3800 * deep, type: 'bandpass', q: 6 });
+      this.tone({ type: 'square', f0: 560 * deep * j, f1: 200 * deep, dur: 0.07, vol: 0.07, delay: 0.012 });
+      this.tone({ type: 'triangle', f0: 320 * deep * j, f1: 120 * deep, dur: 0.09, vol: 0.13, delay: 0.012 });
+      this.noise({ dur: 0.06, vol: 0.13, f0: 2000 * deep, f1: 500, type: 'bandpass', q: 1.5, delay: 0.02 });
+      this.noise({ dur: 0.016, vol: 0.18, f0: 4600 * deep * j, f1: 3300 * deep, type: 'bandpass', q: 6, delay: 0.055 });
+      this.tone({ type: 'sine', f0: 140 * deep, f1: 52, dur: 0.1, vol: 0.2 });
     } else if (kind === 'pound') {
       this.tone({ type: 'sine', f0: 120 * deep, f1: 38, dur: 0.22, vol: 0.4 });
       this.noise({ dur: 0.16, vol: 0.2, f0: 1200, f1: 150, q: 0.7 });

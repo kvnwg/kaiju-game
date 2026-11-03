@@ -139,6 +139,38 @@ function rgb(c) {
   return { r: ((c >> 16) & 255) / 255, g: ((c >> 8) & 255) / 255, b: (c & 255) / 255 };
 }
 
+// A pixel twinkle: a four-point star of light, long rays up-down and left-right, short ones on the
+// diagonals, a hot square in the middle.
+function twinkleTexture() {
+  const n = 15; // chunky pixels, so the rays survive the game's pixel-art render
+  const c = document.createElement('canvas');
+  c.width = n;
+  c.height = n;
+  const x = c.getContext('2d');
+  const m = (n - 1) / 2;
+  const dot = (px, py, a) => {
+    x.fillStyle = `rgba(255,255,255,${a})`;
+    x.fillRect(px, py, 1, 1);
+  };
+  for (let i = 1; i <= m; i++) {
+    const a = Math.max(0, 1 - i / (m + 1)) ** 1.4;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      dot(m + dx * i, m + dy * i, a);
+      if (i <= 2) {
+        dot(m + dx * i + dy, m + dy * i + dx, a * 0.55);
+        dot(m + dx * i - dy, m + dy * i - dx, a * 0.55);
+      }
+    }
+    if (i <= 2) for (const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) dot(m + dx * i, m + dy * i, a * 0.7);
+  }
+  x.fillStyle = '#ffffff';
+  x.fillRect(m - 1, m - 1, 3, 3);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  return t;
+}
+
 export class FX {
   constructor(scene) {
     this.scene = scene;
@@ -187,6 +219,7 @@ export class FX {
     this.crackMeshes = new Map();
     this.beamCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     this.ringPool = [];
+    this.twinkles = [];
     this.beamPool = [];
     this.hazardMeshes = new Map();
     this.boltLines = [];
@@ -294,6 +327,24 @@ export class FX {
     this.lights.push({ x, y, z, color, intensity, radius, life, max: life });
   }
 
+  // A twinkle of light at (x, y, z), `size` world units across, drawn over everything.
+  twinkle(x, y, z, size, color = 0xffffff, life = 0.22) {
+    if (!this.twinkleTex) this.twinkleTex = twinkleTexture();
+    let s = this.twinkles.find((t) => !t.visible);
+    if (!s) {
+      s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.twinkleTex, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+      s.renderOrder = 9;
+      this.scene.add(s);
+      this.twinkles.push(s);
+    }
+    s.visible = true;
+    s.position.set(x, y, z);
+    s.material.color.setHex(color);
+    s.userData = { life, max: life, size, spin: Math.random() * 0.6 - 0.3 };
+    s.scale.setScalar(size * 0.35);
+    return s;
+  }
+
   ring(x, z, r0, r1, color, life, width = 0.15) {
     let m = this.ringPool.find((p) => !p.visible);
     if (!m) {
@@ -316,6 +367,20 @@ export class FX {
     this.dust.update(dt);
     this.glow.update(dt);
     this.bits.update(dt);
+    for (const s of this.twinkles) {
+      if (!s.visible) continue;
+      const u = s.userData;
+      u.life -= dt;
+      if (u.life <= 0) {
+        s.visible = false;
+        continue;
+      }
+      // Pops open fast, then shrinks a little as it fades, turning as it goes.
+      const p = 1 - u.life / u.max;
+      s.scale.setScalar(u.size * (p < 0.3 ? 0.35 + (p / 0.3) * 0.65 : 1 - (p - 0.3) * 0.55));
+      s.material.opacity = Math.min(1, (u.life / u.max) * 1.6);
+      s.material.rotation = u.spin + p * 0.9;
+    }
     for (const m of this.ringPool) {
       if (!m.visible) continue;
       const u = m.userData;
@@ -859,6 +924,7 @@ export class FX {
     this.glow.items = [];
     this.bits.items = [];
     for (const m of this.ringPool) m.visible = false;
+    for (const s of this.twinkles) s.visible = false;
     for (const [, entry] of this.hazardMeshes) for (const o of entry.parts) this.scene.remove(o);
     this.hazardMeshes.clear();
     this.lights = [];

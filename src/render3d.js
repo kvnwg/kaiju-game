@@ -1221,6 +1221,10 @@ export class Renderer3D {
         case 'hit':
           this.chip(e);
           break;
+        case 'attack':
+          // (drawn once the kaiju is posed this frame, so it lands on the snapping jaws)
+          if (e.kind === 'bite') this.glintQueued = true;
+          break;
         case 'destroy':
           this.destroyed(e);
           break;
@@ -1454,6 +1458,25 @@ export class Renderer3D {
     }
   }
 
+  // Chomp: the jaws snap shut in a quick glint of light round the mouth (a soft flare, a few
+  // sparkles flung out, a brief warm light on whatever is close), fiery for Ember Lizard.
+  biteGlint(game, span) {
+    const k = game.kaiju;
+    const m = this.actors.mouthWorld();
+    const hot = game.def.element === 'Fire';
+    const core = hot ? 0xffc46a : 0xfff6dc;
+    const r = k.r;
+    // (a twinkle big enough to catch the eye at any size: never less than a sliver of the view)
+    const star = Math.max(r * 1.3, span * 0.05);
+    this.fx.twinkle(m.x, m.y, m.z, star, hot ? 0xffd08a : 0xffffff, 0.22);
+    const c = new THREE.Color(core);
+    for (const [size, grow, life, a] of [[0.26, 1.6, 0.15, 0.85], [0.16, 3, 0.2, 0.5]]) {
+      this.fx.glow.add({ x: m.x, y: m.y, z: m.z, vx: 0, vy: 0, vz: 0, drag: 0, size: star * size, grow, life, max: life, a, r: c.r, g: c.g, b: c.b });
+    }
+    this.fx.sparks(m.x, m.y, m.z, hot ? 0xffa040 : 0xffffff, Math.max(0.12, r * 0.07), 6);
+    this.fx.flash(m.x, m.y, m.z, hot ? 0xff9a3c : 0xfff0c8, 0.9, Math.min(r * 2.4, 260), 0.14);
+  }
+
   // The kaiju's footprint on screen: a circle round its body, in pixels.
   kaijuOnScreen(game, v) {
     const k = game.kaiju;
@@ -1664,6 +1687,10 @@ export class Renderer3D {
     this.updateCollapses(dt);
     this.refreshProps(game, half);
     this.actors.update(game, dt, this.t, elev);
+    if (this.glintQueued) {
+      this.glintQueued = false;
+      this.biteGlint(game, span);
+    }
     this.updateHospitalMarks(k.stage);
     this.updateVaultMark(game);
     if (realm === 'city') this.ambient.update(game, dt, this.t, { span, x: this.target.x, z: this.target.z });
