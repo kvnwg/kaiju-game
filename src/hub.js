@@ -943,7 +943,8 @@ export class Hub {
         ? `<p class="tiny">Admin mode is on: gems, scrap, DNA and energy never run out.</p>`
         : `<div class="row"><input id="redeemCode" class="code-input" maxlength="24" placeholder="Have a code?" autocomplete="off" spellcheck="false"><button class="btn ghost" data-act="redeem">Redeem</button></div>`}
       <div class="col">
-        ${s.settings.admin ? `<button class="btn ghost" data-act="adminoff">Turn admin mode off</button>` : ''}
+        ${s.settings.admin ? `<button class="btn ghost" data-act="adminjump" data-stage="7">Admin: start a run on the globe</button>
+        <button class="btn ghost" data-act="adminoff">Turn admin mode off</button>` : ''}
         ${this.debug ? `<button class="btn ghost" data-act="dev" data-what="rich">Dev: +10,000 gems, +1M scrap, +500 DNA</button>
         <button class="btn ghost" data-act="dev" data-what="level">Dev: +5 account levels</button>
         <button class="btn ghost" data-act="dev" data-what="unlock">Dev: unlock every feature</button>
@@ -977,7 +978,8 @@ export class Hub {
     if (rewards.firstBosses) notes.push(`${rewards.firstBosses} new boss kill${rewards.firstBosses > 1 ? 's' : ''}`);
     // How far past the city it got: the furthest realm, and how many times round.
     const far = (results.peak || results.stage || 1) > 6;
-    if (far) notes.push(results.loop > 1 ? `Went round ${results.loop - 1} full loop${results.loop > 2 ? 's' : ''}: city, space, the multiverse, the garden and back` : `Got as far as ${results.realmName}`);
+    if (far) notes.push(results.loop > 1 ? `Went round ${results.loop - 1} full loop${results.loop > 2 ? 's' : ''}: city, the Earth, space, the multiverse, the garden and back` : `Got as far as ${results.realmName}`);
+    if (results.countries) notes.push(`Ate ${results.countries} countr${results.countries === 1 ? 'y' : 'ies'} whole`);
     this.openModal('results', `<div class="panel results2 ${won ? 'won' : 'lost'}">
       <h1>${won ? (far ? 'Universe claimed!' : 'City claimed!') : 'Rampage over'}</h1>
       <p class="muted">Chapter ${ctx.chapter} · ${ch.name} · ${MODES[ctx.mode].name}</p>
@@ -1382,6 +1384,12 @@ export class Hub {
         });
         break;
       }
+      // The owner's shortcut for trying the later sizes: a run that starts there.
+      case 'adminjump':
+        if (!s.settings.admin) break;
+        this.closeModal();
+        this.onPlay({ kaijuId: s.lastKaiju, chapter: s.chapter.selected, mode: s.chapter.mode, startStage: Number(d.stage) || 7 });
+        break;
       case 'adminoff':
         s.settings.admin = false;
         this.closeModal();

@@ -267,3 +267,10 @@ export class RealmWorld {
     return missing.length - n;
   }
 }
+
+// A world with nothing in it: the globe size, where the Earth itself is the level (see earth.js).
+export class EmptyWorld extends RealmWorld {
+  update() {
+    return 0;
+  }
+}

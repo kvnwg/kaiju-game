@@ -67,7 +67,7 @@ function musicState() {
   if (game.threat > 60) level++;
   if (boss) level = 4;
   if (game.frenzy > 0) level = Math.max(level, 3);
-  const bpm = boss ? 160 : home === 'space' ? 112 + (k.stage - 7) * 4 : home === 'garden' ? 148 + (k.stage - 10) * 6 : 136 + k.stage * 3;
+  const bpm = boss ? 160 : home === 'space' ? 112 + (k.stage - 8) * 4 : home === 'garden' ? 148 + (k.stage - 11) * 6 : 136 + k.stage * 3;
   return { theme: boss ? 'boss' : home, level: Math.min(4, level), bpm, paused: paused || game.state === 'picking' || game.state === 'altar' };
 }
 // Audio can only start from a user gesture; any tap or key unlocks (and resumes) it.
@@ -98,7 +98,7 @@ function defaultQuality() {
 }
 
 // A chapter run: costs energy (the very first run is free), carries the meta loadout in.
-function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
+function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, startStage = 0 }) {
   if (!firstRun && !spendEnergy(save, ECONOMY.energyPerRun, now())) {
     showHub();
     hub.openEnergy();
@@ -110,6 +110,8 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false }) {
   titleActive = false;
   hub.hide();
   game = new Game({ kaijuId, difficulty: mode, firstRun, chapter, meta: loadout(save, kaijuId), seed: Number(params.get('seed')) || Date.now() });
+  // Admin mode can start a run at a later size (see the hub's settings).
+  if (startStage > 1 && save.settings.admin) game.debugJump(startStage);
   renderer.startRun(game);
   paused = false;
   ui.hideModals();
@@ -272,7 +274,10 @@ function handleEvents(events) {
         ui.banner('Warning', `${e.name} approaching from the harbor`, 'warning');
         break;
       case 'banner':
-        ui.banner(e.text, '', 'warning');
+        ui.banner(e.text, e.sub || '', e.kind || 'warning');
+        break;
+      case 'countryEaten':
+        ui.callout(`Ate ${e.name}!`, e.big ? 4 : 2);
         break;
       case 'landmark':
         ui.banner(`${e.name} destroyed`, '+1 rare material', 'synergy');

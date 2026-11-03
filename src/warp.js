@@ -5,6 +5,7 @@
 import { STAGES, REALMS } from './config.js';
 
 const TAGLINE = {
+  earth: 'You outgrew the city. Every country on the map is on the menu.',
   solar: 'You outgrew the Earth. Out here, everything is food.',
   galaxy: 'You outgrew the Solar System. Stars are snacks now.',
   cosmos: 'You outgrew the galaxy. Whole universes, for dessert.',
@@ -12,6 +13,7 @@ const TAGLINE = {
   city: 'Back where it all began. Every universe is a speck in somebody’s garden.',
 };
 const STREAK = {
+  earth: ['#ffffff', '#bfe6ff', '#9fe0a8'],
   solar: ['#ffffff', '#bfe6ff', '#ffe9b8'],
   galaxy: ['#ffffff', '#ffb8e8', '#bfe6ff', '#fff2b0'],
   cosmos: ['#ffffff', '#9fd8ff', '#ffb8e8', '#d6b8ff'],

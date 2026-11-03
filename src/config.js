@@ -31,8 +31,9 @@ WORLD.height = WORLD.rows * WORLD.cell;
 export const FOV = 32; // the camera's vertical field of view, in degrees
 
 // Growth stages. The city takes six, from human-sized to skyline-sized, size roughly doubling
-// each time. Beating the city's last boss doesn't end the run: the kaiju outgrows the planet and
-// keeps going, through the solar system, the galaxy and the multiverse, until the camera pulls
+// each time. Beating the city's last boss doesn't end the run: the kaiju outgrows the city and
+// walks the globe eating countries, then outgrows the planet and keeps going, through the solar
+// system, the galaxy and the multiverse, until the camera pulls
 // back far enough to show the whole multiverse was a speck in a back garden, where it is suddenly
 // ant-sized. Outgrow the garden and it is back where it started, human-sized in the home
 // neighbourhood: the next loop.
@@ -48,19 +49,26 @@ export const STAGES = [
   { n: 5, name: 'Colossus', size: 'Office tower', realm: 'city', radius: 64, maxHp: 1600, damage: 1280, speed: 320, biomassToNext: 48000 },
   // The top city size grows by beating the final boss, not by biomass.
   { n: 6, name: 'Apex', size: 'Skyline', realm: 'city', radius: 135, maxHp: 3200, damage: 5120, speed: 520, biomassToNext: Infinity },
-  { n: 7, name: 'Worldbreaker', size: 'Planet', realm: 'solar', radius: 30, maxHp: 6400, damage: 20480, speed: 190, biomassToNext: 900000 },
-  { n: 8, name: 'Star Eater', size: 'Galaxy', realm: 'galaxy', radius: 30, maxHp: 12800, damage: 81920, speed: 190, biomassToNext: 3600000 },
-  { n: 9, name: 'Omnivore', size: 'Universe', realm: 'cosmos', radius: 30, maxHp: 25600, damage: 327680, speed: 190, biomassToNext: 14400000 },
-  { n: 10, name: 'Speck', size: 'Ant', realm: 'garden', radius: 6, maxHp: 51200, damage: 1310720, speed: 52, biomassToNext: 6.6e7 },
-  { n: 11, name: 'Critter', size: 'Shrub', realm: 'garden', radius: 14, maxHp: 102400, damage: 5242880, speed: 105, biomassToNext: 2.7e8 },
+  // The globe: the real Earth, country by country (see earth.js). The growth bar fills with the
+  // land eaten, not with biomass from things (there are none), so `biomassToNext` only sets how
+  // much experience the planet is worth.
+  { n: 7, name: 'Globetrotter', size: 'Continent', realm: 'earth', radius: 30, maxHp: 6400, damage: 20480, speed: 190, biomassToNext: 900000 },
+  { n: 8, name: 'Worldbreaker', size: 'Planet', realm: 'solar', radius: 30, maxHp: 12800, damage: 81920, speed: 190, biomassToNext: 3600000 },
+  { n: 9, name: 'Star Eater', size: 'Galaxy', realm: 'galaxy', radius: 30, maxHp: 25600, damage: 327680, speed: 190, biomassToNext: 14400000 },
+  { n: 10, name: 'Omnivore', size: 'Universe', realm: 'cosmos', radius: 30, maxHp: 51200, damage: 1310720, speed: 190, biomassToNext: 57600000 },
+  { n: 11, name: 'Speck', size: 'Ant', realm: 'garden', radius: 6, maxHp: 102400, damage: 5242880, speed: 52, biomassToNext: 2.64e8 },
+  { n: 12, name: 'Critter', size: 'Shrub', realm: 'garden', radius: 14, maxHp: 204800, damage: 20971520, speed: 105, biomassToNext: 1.08e9 },
 ];
 // The city's top size (the final boss fights you there) and the very last size before the loop.
 export const MAX_STAGE = 6;
-export const LAST_STAGE = 11;
+export const LAST_STAGE = 12;
+// The globe size: no streaming world, no objects, no military (see earth.js and Game.updateEarth).
+export const EARTH_STAGE = 7;
 
 // The worlds the kaiju passes through. `cell` is the streaming chunk size in that world's units.
 export const REALMS = {
   city: { id: 'city', name: 'The City', cell: 420 },
+  earth: { id: 'earth', name: 'The Earth', cell: 560, globe: true, outgrew: 'You outgrew the city' },
   solar: { id: 'solar', name: 'The Solar System', cell: 560, space: true, outgrew: 'You outgrew the Earth' },
   galaxy: { id: 'galaxy', name: 'The Milky Way', cell: 560, space: true, outgrew: 'You outgrew the Solar System' },
   cosmos: { id: 'cosmos', name: 'The Multiverse', cell: 560, space: true, outgrew: 'You outgrew the galaxy' },
@@ -77,6 +85,7 @@ export const STAGE_INFO = [
   { destroys: 'Apartments, garages, factories', military: 'Tanks, rocket teams, gunship drones' },
   { destroys: 'Skyscrapers, stadiums, power plants', military: 'Jets, artillery, mini-mechs' },
   { destroys: 'Everything, including the landmark', military: 'The boss arrives' },
+  { destroys: 'Countries. Whole countries', military: 'Missiles from every country still standing' },
   { destroys: 'Satellites, moons, space stations, planets', military: 'The Galactic Federation' },
   { destroys: 'Stars, black holes, whole solar systems', military: 'Federation battle fleets' },
   { destroys: 'Galaxies, quasars, entire universes', military: 'The Cosmic Guard' },
@@ -85,7 +94,7 @@ export const STAGE_INFO = [
 ];
 
 // Destructible size classes. A tier-N object is "your size" at stage N.
-export const TIER_HP = [0, 10, 40, 160, 640, 2560, 10240, 40960, 163840, 655360, 2621440, 10485760, 41943040, 167772160];
+export const TIER_HP = [0, 10, 40, 160, 640, 2560, 10240, 40960, 163840, 655360, 2621440, 10485760, 41943040, 167772160, 671088640];
 export const LANDMARK_HP = TIER_HP[6] * 8;
 
 // A player's very first run: the sheds near home are rickety (within this many units), and the
@@ -111,12 +120,13 @@ export function isSnack(tier, stage) {
 }
 
 // A bigger-than-you object already holds 4x the biomass of one your size; the
-// "much more loot" bonus for out-sizing yourself is paid in scrap.
+// "much more loot" bonus for out-sizing yourself is paid in scrap. (The globe has no objects of
+// its own, so the scrap curve skips its size: things past it pay what they did before it existed.)
 export function lootFor(tier, stage, value = 1) {
   const bonus = tier > stage ? 3 : 1;
   return {
     biomass: Math.pow(4, tier - 1) * value,
-    scrap: Math.round(5 * Math.pow(3, tier - 1) * bonus * value),
+    scrap: Math.round(5 * Math.pow(3, (tier > EARTH_STAGE ? tier - 1 : tier) - 1) * bonus * value),
   };
 }
 
@@ -212,19 +222,19 @@ export const ENEMIES = {
   // Past the city, units are built for a size (`base`) and keep coming back at later sizes in the
   // same realm, tougher (see Game.scaledDef); `rel` is their size class relative to the kaiju's.
   // Space: the Galactic Federation, then the Cosmic Guard.
-  interceptor: { name: 'Star Interceptor', base: 7, rel: 0, r: 18, hp: 28800, speed: 160, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 120, mob: true },
-  frigate: { name: 'Laser Frigate', base: 7, rel: 0, r: 15, hp: 80000, speed: 60, standoff: 230, range: 480, cd: 3.4, attack: 'laser', dmg: 320, aoe: 16 },
-  cruiser: { name: 'Plasma Cruiser', base: 7, rel: 0, r: 22, hp: 143000, speed: 35, standoff: 300, range: 600, cd: 3.8, attack: 'shell', dmg: 320, aoe: 30 },
-  saucer: { name: 'Saucer', base: 7, rel: 0, r: 13, hp: 76800, speed: 140, standoff: 260, range: 450, cd: 3.2, attack: 'missile', dmg: 64, proj: 260, flying: true, hover: 1.6 },
-  mothership: { name: 'Mothership', base: 7, rel: 1, r: 30, hp: 160000, speed: 0, standoff: 0, range: 560, cd: 6.5, attack: 'volley', dmg: 136, proj: 260, flying: true, hover: 1.2 },
-  starjet: { name: 'Star Fighter', base: 7, rel: 1, r: 18, hp: 128000, speed: 700, standoff: 0, range: 0, cd: 0, attack: 'strafe', dmg: 380, aoe: 26, flying: true },
-  sentinel: { name: 'Cosmic Sentinel', base: 9, rel: 0, r: 18, hp: 460000, speed: 170, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 480, mob: true, hover: 0.8 },
-  warden: { name: 'Void Warden', base: 9, rel: 0, r: 16, hp: 1280000, speed: 55, standoff: 240, range: 500, cd: 3, attack: 'laser', dmg: 1280, aoe: 18, flying: true, hover: 1.4 },
+  interceptor: { name: 'Star Interceptor', base: 8, rel: 0, r: 18, hp: 115200, speed: 160, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 240, mob: true },
+  frigate: { name: 'Laser Frigate', base: 8, rel: 0, r: 15, hp: 320000, speed: 60, standoff: 230, range: 480, cd: 3.4, attack: 'laser', dmg: 640, aoe: 16 },
+  cruiser: { name: 'Plasma Cruiser', base: 8, rel: 0, r: 22, hp: 572000, speed: 35, standoff: 300, range: 600, cd: 3.8, attack: 'shell', dmg: 640, aoe: 30 },
+  saucer: { name: 'Saucer', base: 8, rel: 0, r: 13, hp: 307200, speed: 140, standoff: 260, range: 450, cd: 3.2, attack: 'missile', dmg: 128, proj: 260, flying: true, hover: 1.6 },
+  mothership: { name: 'Mothership', base: 8, rel: 1, r: 30, hp: 640000, speed: 0, standoff: 0, range: 560, cd: 6.5, attack: 'volley', dmg: 272, proj: 260, flying: true, hover: 1.2 },
+  starjet: { name: 'Star Fighter', base: 8, rel: 1, r: 18, hp: 512000, speed: 700, standoff: 0, range: 0, cd: 0, attack: 'strafe', dmg: 760, aoe: 26, flying: true },
+  sentinel: { name: 'Cosmic Sentinel', base: 10, rel: 0, r: 18, hp: 1840000, speed: 170, standoff: 0, range: 0, cd: 1.3, attack: 'melee', dmg: 960, mob: true, hover: 0.8 },
+  warden: { name: 'Void Warden', base: 10, rel: 0, r: 16, hp: 5120000, speed: 55, standoff: 240, range: 500, cd: 3, attack: 'laser', dmg: 2560, aoe: 18, flying: true, hover: 1.4 },
   // The back garden.
-  soldier_ant: { name: 'Soldier ant', base: 10, rel: 0, r: 3.2, hp: 1970000, speed: 44, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 512, mob: true },
-  wasp: { name: 'Wasp', base: 10, rel: 0, r: 3, hp: 2100000, speed: 60, standoff: 45, range: 120, cd: 1.6, attack: 'burst', dmg: 512, proj: 150, flying: true, hover: 2.2, skittish: true },
-  spider: { name: 'Garden spider', base: 10, rel: 0, r: 4.2, hp: 2600000, speed: 40, standoff: 70, range: 150, cd: 5, attack: 'net', dmg: 512, proj: 110 },
-  beetle: { name: 'Stag beetle', base: 10, rel: 0, r: 5.5, hp: 6000000, speed: 22, standoff: 80, range: 190, cd: 3.4, attack: 'shell', dmg: 2560, aoe: 7 },
+  soldier_ant: { name: 'Soldier ant', base: 11, rel: 0, r: 3.2, hp: 7880000, speed: 44, standoff: 0, range: 0, cd: 1, attack: 'melee', dmg: 1024, mob: true },
+  wasp: { name: 'Wasp', base: 11, rel: 0, r: 3, hp: 8400000, speed: 60, standoff: 45, range: 120, cd: 1.6, attack: 'burst', dmg: 1024, proj: 150, flying: true, hover: 2.2, skittish: true },
+  spider: { name: 'Garden spider', base: 11, rel: 0, r: 4.2, hp: 10400000, speed: 40, standoff: 70, range: 150, cd: 5, attack: 'net', dmg: 1024, proj: 110 },
+  beetle: { name: 'Stag beetle', base: 11, rel: 0, r: 5.5, hp: 24000000, speed: 22, standoff: 80, range: 190, cd: 3.4, attack: 'shell', dmg: 5120, aoe: 7 },
 };
 
 // How the military responds at each stage: spawn weights, cap and interval.
@@ -236,6 +246,8 @@ export const ESCALATION = [
   { weights: { tank: 1.5, infantry: 1, heli: 1, crusher: 3 }, maxAlive: 7, interval: 3.2 },
   { weights: { mech: 1, artillery: 1, battery: 0.5, warframe: 3 }, maxAlive: 9, interval: 3, jetEvery: 7 },
   { weights: { titan: 3, warframe: 1.5, artillery: 1, battery: 0.5 }, maxAlive: 10, interval: 3, jetEvery: 7 },
+  // The globe: countries fire missiles instead (see earth.js).
+  { weights: {}, maxAlive: 0, interval: 99 },
   // `jet`: what makes the strafing runs there.
   { weights: { interceptor: 3, frigate: 1, cruiser: 0.8, saucer: 1 }, maxAlive: 8, interval: 3.2, jetEvery: 9, jet: 'starjet' },
   { weights: { interceptor: 3, frigate: 1.2, cruiser: 1, saucer: 1, mothership: 0.4 }, maxAlive: 9, interval: 3, jetEvery: 8, jet: 'starjet' },
@@ -248,7 +260,7 @@ export const ESCALATION = [
 // that grows with size. Each size fields units built to that size, led by a melee mob that
 // charges in (drones, robo-hounds, exo walkers, spider crushers, warframes, titans).
 export const SWARM = {
-  maxAlive: [0, 6, 12, 18, 24, 30, 36, 28, 32, 36, 18, 24],
+  maxAlive: [0, 6, 12, 18, 24, 30, 36, 0, 28, 32, 36, 18, 24],
   squad: {
     cop: 3, police: 2, dog: 3, swat: 2, netter: 1, roadblock: 1, tank: 2, infantry: 2, heli: 1, artillery: 1, mech: 1, battery: 1, jet: 1, drone: 5, robodog: 4, walker: 3, crusher: 3, warframe: 2, titan: 2,
     interceptor: 3, frigate: 1, cruiser: 1, saucer: 2, mothership: 1, sentinel: 3, warden: 1, soldier_ant: 4, wasp: 2, spider: 1, beetle: 1,
@@ -264,7 +276,7 @@ export const THREAT = {
   drain: 3, // per second, always, plus 3% of the current threat
   decay: 8, // extra per second once idle
   idle: 3, // seconds without new threat before the extra drain starts
-  waveEvery: [0, 0, 55, 50, 45, 42, 40, 42, 40, 38, 50, 45],
+  waveEvery: [0, 0, 55, 50, 45, 42, 40, 0, 42, 40, 38, 50, 45],
   firstWave: 35, // seconds into a size before its first wave
 };
 // The military keeps pace with your build: every level-up makes new units tougher and
@@ -279,6 +291,7 @@ export const ELITES = [
   { type: 'tank', name: 'Mammoth Tank' },
   { type: 'warframe', name: 'Warframe Prime' },
   { type: 'titan', name: 'Omega Titan' },
+  null,
   { type: 'cruiser', name: 'Star Dreadnought' },
   { type: 'interceptor', name: 'Ace of the Federation' },
   { type: 'warden', name: 'The All-Seeing Eye' },
@@ -368,7 +381,9 @@ export const GATE_BOSSES = [
     quips: { taxLaser: ['Time to pay your fair share!', 'Audit beam, engage!'], budgetCuts: ['Budget cuts!', 'Slashing spending!'], speech: ['My fellow citizens...', 'Four more years!', 'I will now filibuster.'], blimps: ['Vote Mayor!', 'Campaign drop!'] },
     furious: 'The Mecha-Mayor has declared a state of emergency.', defeat: 'The Mecha-Mayor has been voted out.',
   },
-  // Size 6 has no gate: the city's final boss fights you there (see BOSS).
+  // Size 6 has no gate: the city's final boss fights you there (see BOSS). Nor does the globe:
+  // eat enough of it and you outgrow it.
+  null,
   null,
   {
     id: 'zorblax', name: 'Admiral Zorblax', title: 'Supreme commander of the Galactic Federation. Has a cape.',

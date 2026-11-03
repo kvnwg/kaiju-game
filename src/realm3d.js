@@ -16,6 +16,10 @@ const LOOKS = {
     sky: ['#010106', '#081632', '#180834'], blobs: ['#2a8ac8', '#8a3ac8', '#c83a8a', '#2ac8a8'], stars: [0xffffff, 0x9fd8ff, 0xffb8e8, 0xd6b8ff],
     sun: 0xe0f0ff, sunI: 1, elev: 0.85, az: 0.4, hemiS: 0x8ab8e8, hemiG: 0x0c0c28, hemiI: 0.72, fog: 0x060618, night: 0.85, bloom: 0.85,
   },
+  earth: {
+    sky: ['#02030c', '#081230', '#101a44'], blobs: ['#1a3a7a', '#24185a', '#123a5a'], stars: [0xffffff, 0xcfe8ff, 0xfff0c8],
+    sun: 0xfff6e8, sunI: 0.95, elev: 1.05, az: -0.75, hemiS: 0xc8d8ff, hemiG: 0x202848, hemiI: 0.55, fog: 0x060a1c, night: 0.4, bloom: 0.35,
+  },
   garden: {
     sun: 0xfff2c8, sunI: 0.85, elev: 0.95, az: -0.8, hemiS: 0xeaf6d0, hemiG: 0x4a6a2a, hemiI: 0.62, fog: 0xc6dc98, night: 0, bloom: 0.22,
   },

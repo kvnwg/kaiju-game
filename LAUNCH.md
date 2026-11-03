@@ -40,7 +40,8 @@ to wreck. Pick a new power every level (laser eyes, atomic breath, meteor shower
 building throws) and beat a ridiculous boss at every size: a cyborg hitman, an HOA president in
 power armour, an armoured ice-cream truck, a sentient demolition crane and City Hall itself.
 
-Then keep growing. Outgrow the planet, eat stars and galaxies, swallow the universe, and wake up
+Then keep growing. Stomp across a real map of the Earth eating whole countries while they fire
+missiles at you, outgrow the planet, eat stars and galaxies, swallow the universe, and wake up
 ant-sized in somebody's back garden.
 
 Four kaiju, four ways to play: Rex pounces and devours, Gorilla Grunt rips buildings out of the

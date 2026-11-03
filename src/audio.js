@@ -434,6 +434,12 @@ export class Sfx {
         case 'splash':
           this.splash();
           break;
+        case 'crater':
+          this.crunch(e.bite ? 0.55 : 0.85);
+          break;
+        case 'gBlast':
+          this.boom(e.near ? (e.nuke ? 1.5 : 0.7) : 0.25);
+          break;
         default:
           break;
       }
@@ -451,6 +457,22 @@ export class Sfx {
     else if (e.type === 'perfect') this.perfect();
     else if (e.type === 'multikill') this.comboTier(Math.min(3, e.tier));
     else if (e.type === 'warp') this.warp();
+    else if (e.type === 'countryEaten') {
+      this.cash();
+      this.comboTier(e.big ? 3 : 1);
+    } else if (e.type === 'launch') this.launch(e.nuke);
+  }
+
+  // A missile leaving its silo far off: a rising hiss; a nuke adds a two-tone siren.
+  launch(nuke) {
+    if (!this.ok('launch', 0.3)) return;
+    this.noise({ dur: 0.6, vol: 0.1, f0: 600, f1: 2600, q: 2, type: 'bandpass', attack: 0.15 });
+    if (nuke) {
+      for (const d of [0, 0.35, 0.7]) {
+        this.tone({ type: 'square', f0: 620, f1: 620, dur: 0.17, vol: 0.05, delay: d });
+        this.tone({ type: 'square', f0: 460, f1: 460, dur: 0.17, vol: 0.05, delay: d + 0.17 });
+      }
+    }
   }
 
   // A bell ding that climbs with rarity (0 common .. 5 mythic): crate reveals, augment reels.

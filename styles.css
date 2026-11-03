@@ -344,6 +344,23 @@ html, body {
 #bossbar .track::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 15px, rgba(42, 23, 54, 0.45) 15px 18px); }
 #bossbar .fill { height: 100%; background: #ff3b3b; box-shadow: inset 0 var(--p) 0 #ff8a7a, inset 0 calc(-1 * var(--p)) 0 #9a1515; transition: width 0.1s steps(3); }
 
+/* The globe: the country underfoot and how much of it is left, and the tally. */
+#countrybar {
+  margin: 10px auto 0;
+  max-width: 360px;
+  text-align: center;
+  font-family: var(--display);
+  font-size: 10px;
+  text-transform: uppercase;
+  text-shadow: var(--outline);
+  color: #ffe9a8;
+}
+#countrybar .track { position: relative; height: 12px; margin-top: 5px; background: #1c2a1a; overflow: hidden; border: var(--p) solid var(--ink); clip-path: var(--notch); }
+#countrybar .fill { height: 100%; background: #7ed957; box-shadow: inset 0 var(--p) 0 #b8f59a, inset 0 calc(-1 * var(--p)) 0 #3f8a2a; transition: width 0.1s steps(3); }
+#countrybar small { display: block; margin-top: 5px; font-family: var(--body, inherit); font-size: 12px; text-transform: none; color: #cfe8ff; }
+#countrybar.sea span { color: #9fd8ff; }
+#countrybar.sea .track { visibility: hidden; }
+
 #augbar {
   position: absolute;
   left: 12px;

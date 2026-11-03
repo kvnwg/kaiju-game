@@ -16,6 +16,7 @@ import { Ambient } from './ambient3d.js';
 import { personLook } from './models.js';
 import { HOSPITAL_TYPES, DECK_TYPES } from './buildings.js';
 import { RealmBackdrop } from './realm3d.js';
+import { GlobeView, GLOBE_LAND } from './globe3d.js';
 
 // lod: how much sooner buildings and props switch to coarser voxels; far: how far the city is
 // drawn before the haze; debris: share of the usual flying debris; breaks: share of the usual
@@ -192,6 +193,8 @@ export class Renderer3D {
     // Past the city: starfields, nebula skies and the back garden's lawn (see realm3d.js).
     this.realm = 'city';
     this.realmLook = new RealmBackdrop(this.scene);
+    // The globe size: the Earth under the kaiju's feet (see globe3d.js).
+    this.globe = new GlobeView(this.scene);
 
     this.fx = new FX(this.scene);
     this.actors = new Actors(this.scene, (selfLit = 0) => makeVoxelMaterial(this.uniforms, selfLit));
@@ -553,6 +556,7 @@ export class Renderer3D {
     this.fx.clear();
     this.realm = game.realm || 'city';
     this.realmLook.set(this.realm);
+    this.globe.attach(game.earth || null);
     this.terrain.under.visible = this.realm === 'city';
     if (this.realm === 'city') this.buildCity(game.city);
     else {
@@ -569,7 +573,7 @@ export class Renderer3D {
     this.lastPropAt = null;
     this.lastBldAt = null;
     // No shadows out in space: there is nothing for them to fall on.
-    const shadows = this.quality.shadows > 0 && !(game.inSpace);
+    const shadows = this.quality.shadows > 0 && !game.inSpace && !game.earth;
     if (this.sun.castShadow !== shadows) this.sun.castShadow = shadows;
   }
 
@@ -1253,6 +1257,28 @@ export class Renderer3D {
           this.fx.flash(e.x, e.kr * 0.6, e.y, e.echo ? 0xc58bff : 0xffc36b, 1.5, Math.min(e.r * 2.5, 600), 0.32);
           break;
         }
+        case 'crater': {
+          // A bite out of the globe: clods of the country flung up, dust, a ring where it went.
+          const k = game.kaiju;
+          const cols = [e.color ? GLOBE_LAND[1 + ((e.color - 1) % (GLOBE_LAND.length - 1))] : 0xeef4f8, 0x6a5040, 0x3b2a28, 0xff8a3a];
+          for (let i = 0; i < (e.bite ? 8 : 12); i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sz = k.r * (0.06 + Math.random() * 0.08);
+            const sp = e.r * (0.6 + Math.random() * 1.2);
+            this.fx.addDebris({
+              x: e.x, y: e.h + sz, z: e.y, vx: Math.cos(a) * sp, vy: k.r * (1.5 + Math.random() * 2.5), vz: Math.sin(a) * sp,
+              sx: sz, sy: sz * 0.7, sz, size: sz, color: cols[i % cols.length], life: 1.4 + Math.random(),
+            });
+          }
+          this.fx.dustCloud(e.x, e.h, e.y, e.r * 0.6, e.bite ? 3 : 5, 0x8a7060);
+          if (!e.bite) this.fx.fireBurst(e.x, e.h, e.y, e.r * 0.6, 5);
+          break;
+        }
+        case 'gBlast':
+          // A missile landing on the globe (anywhere in view, at its true height on the curve).
+          this.fx.fireBurst(e.x, e.y, e.z, Math.min(e.r * (e.nuke ? 1.1 : 0.7), game.kaiju.r * (e.nuke ? 4 : 2)), e.nuke ? 14 : 7);
+          if (e.nuke) this.fx.flash(e.x, e.y + e.r, e.z, 0xfff2c8, 2.5, e.r * 6, 0.5);
+          break;
         case 'explode':
           // (however wide the blast, the fireball stays a few kaiju widths: the ring shows the reach)
           this.fx.fireBurst(e.x, 0, e.y, Math.min(e.r, game.kaiju.r * 2.5), 8);
@@ -1530,12 +1556,13 @@ export class Renderer3D {
     this.camera.lookAt(this.target);
     // A tight near/far ratio keeps depth precision high on phones (no z-fighting stripes).
     this.camera.near = Math.max(1, d * 0.25);
-    const reach = space ? 1 : this.quality.far;
+    // (Space has no haze: what is out there stays sharp against the stars. Nor does the globe.)
+    const clear = space || Boolean(game.earth);
+    const reach = clear ? 1 : this.quality.far;
     this.camera.far = d * 4.5 * reach;
     this.camera.updateProjectionMatrix();
-    // (Space has no haze: what is out there stays sharp against the stars.)
-    this.scene.fog.near = d * (space ? 3.5 : 1.05 * reach);
-    this.scene.fog.far = d * (space ? 9 : 3.4 * reach);
+    this.scene.fog.near = d * (clear ? 3.5 : 1.05 * reach);
+    this.scene.fog.far = d * (clear ? 9 : 3.4 * reach);
     // A tool filming the game (tools/trailer.mjs) can take the camera over here.
     if (this.cameraRig) this.cameraRig(this.camera, game, this);
     if (this.camera.fov !== this.fxFov) {
@@ -1566,6 +1593,7 @@ export class Renderer3D {
     const half = span * 0.75;
     if (realm === 'city') this.terrain.update(k.stage, this.target.x, this.target.z, span, key.night, key.water, this.t);
     else this.realmLook.update(this.t, this.target.x, this.target.z, span);
+    if (game.earth) this.globe.update(game, dt, this.t);
     this.refreshBuildings(game, half);
     this.updateCollapses(dt);
     this.refreshProps(game, half);

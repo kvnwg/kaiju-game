@@ -505,7 +505,7 @@ test('vehicles on the streets never drive through each other', () => {
   }
 });
 
-test('past the city: space, the multiverse, the garden, then round to the start', () => {
+test('past the city: the globe, space, the multiverse, the garden, then round to the start', () => {
   const g = new Game({ seed: 41 });
   g.takeDamage = () => {}; // this checks the journey, not the balance
   g.debugJump(6);
@@ -528,8 +528,9 @@ test('past the city: space, the multiverse, the garden, then round to the start'
     const k = g.kaiju;
     assert.ok(Number.isFinite(k.x) && Number.isFinite(k.y), 'the kaiju stays somewhere real');
   }
-  assert.deepEqual(realms, ['solar', 'galaxy', 'cosmos', 'garden', 'city']);
-  assert.equal(warps, 5);
+  assert.deepEqual(realms, ['earth', 'solar', 'galaxy', 'cosmos', 'garden', 'city']);
+  assert.equal(warps, 6);
+  assert.ok(g.stats.countries > 5, `ate countries on the way: ${g.stats.countries}`);
   assert.equal(g.loop, 2);
   assert.equal(g.realm, 'city');
   assert.ok(g.stats.peak >= 13, `peak ${g.stats.peak}`);

@@ -4,9 +4,9 @@ import { STAGES, MAX_STAGE, LAST_STAGE, REALMS, canDamage, isSnack, lootFor, TIE
 import { World } from '../src/world.js';
 import { PROP_BY_ID } from '../src/props.js';
 
-test('six city sizes from human to skyline, each roughly doubling, then five more past the city', () => {
+test('six city sizes from human to skyline, each roughly doubling, then six more past the city', () => {
   assert.equal(MAX_STAGE, 6);
-  assert.equal(LAST_STAGE, 11);
+  assert.equal(LAST_STAGE, 12);
   assert.equal(STAGES.length - 1, LAST_STAGE);
   assert.equal(STAGES[1].size, 'Human');
   for (let s = 2; s <= LAST_STAGE; s++) {
@@ -15,7 +15,7 @@ test('six city sizes from human to skyline, each roughly doubling, then five mor
     const ratio = STAGES[s].radius / STAGES[s - 1].radius;
     assert.ok(ratio >= 2 && ratio <= 2.5, `stage ${s} ratio ${ratio}`);
   }
-  assert.deepEqual([...new Set(STAGES.slice(1).map((st) => st.realm))], ['city', 'solar', 'galaxy', 'cosmos', 'garden']);
+  assert.deepEqual([...new Set(STAGES.slice(1).map((st) => st.realm))], ['city', 'earth', 'solar', 'galaxy', 'cosmos', 'garden']);
   for (let s = 2; s <= LAST_STAGE; s++) {
     assert.ok(STAGES[s].maxHp > STAGES[s - 1].maxHp && STAGES[s].damage > STAGES[s - 1].damage, `size ${s} is stronger`);
     assert.ok(REALMS[STAGES[s].realm], `size ${s} has a realm`);

@@ -2,9 +2,10 @@ import {
   WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
   BOAT_SCALE, UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
-import { AUGMENT_BY_ID, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
+import { AUGMENT_BY_ID, MOVES, offerAugments, applyPick, completedSets, maxLevel } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
-import { RealmWorld } from './realm.js';
+import { RealmWorld, EmptyWorld } from './realm.js';
+import { EarthSim, EARTH } from './earth.js';
 import { createRng } from './rng.js';
 import { norm, distToRect, distToSegment, closestPoint } from './geom.js';
 import { MoveSystem } from './moves.js';
@@ -49,6 +50,9 @@ const WINDUP = { bullet: 0.45, burst: 0.55, rocket: 0.7, missile: 0.6, net: 0.8,
 const GONE = new Set(['collapsing', 'rubble', 'removed', 'flung', 'eaten', 'gone']);
 // How long an attack winds up (neck back, then the lunge) before the hit lands, in seconds.
 const ATTACK_WINDUP = 0.16;
+// Augment moves on the globe, where there is nothing but countries to hit: these carve one big
+// crater round the kaiju; the rest a run of craters ahead of it.
+const AROUND_MOVES = new Set(['seismicSlam', 'roar', 'magneticRoar', 'tailSpin', 'vortexBelch', 'frenzyBite', 'broodCall', 'clawStrike']);
 // What a thing of each size is worth to the damage counter when it's priced by how big it looks
 // to the kaiju (the back garden: see worth): street clutter, a car, a house, an apartment block, a
 // tower, a skyline landmark.
@@ -133,6 +137,7 @@ export class Game {
     this.firstRun = firstRun;
     this.ascend = ascend;
     this.realm = 'city';
+    this.earth = null; // the globe's simulation, while the kaiju is on it (see updateEarth)
     this.loop = 1; // how many times round: city, space, the multiverse, the garden, and home again
     this.warp = null; // the zoom-out between realms, while it plays (see beginWarp)
     this.active = new Set();
@@ -270,7 +275,7 @@ export class Game {
   }
 
   // The city size this one looks and plays like (people, footsteps, crowd rules): realms past the
-  // city start their sizes over in their own units, so size 7 out in space plays like a Titan and
+  // city start their sizes over in their own units, so size 8 out in space plays like a Titan and
   // the ant-sized kaiju in the garden like a Prowler.
   // What the damage counter adds for wrecking something priced `price`, of size `tier`. In the
   // city and out in space, its real price. In the back garden, by how big it is to the kaiju:
@@ -287,7 +292,7 @@ export class Game {
   get look() {
     const k = this.kaiju;
     if (this.inCity) return k.stage;
-    if (this.realm === 'garden') return k.stage - 8;
+    if (this.realm === 'garden') return k.stage - 9;
     return 4;
   }
 
@@ -805,6 +810,11 @@ export class Game {
     this.streamWorld();
     if (this.pendingPicks > 0) this.openPick();
     if (this.state !== 'playing') return;
+    if (this.earth) {
+      this.updateEarth(dt);
+      this.shake = Math.max(0, this.shake - realDt * 2.5);
+      return;
+    }
     this.updateThreat(dt);
     this.updateKaiju(dt);
     this.updateAugments(dt);
@@ -1538,6 +1548,8 @@ export class Game {
     this.fxEvent({ t: 'dash', x: k.x, y: k.y, dir: k.dashDir, r: k.r });
     this.emit('dash');
     // Signature traits change the Charge: Rex pounces, Volt Beetle blinks.
+    // (Not on the globe, where there is nothing to pounce on or blink past.)
+    if (this.earth) return true;
     if (this.def.trait === 'pounce') this.startPounce();
     else if (this.def.trait === 'blink') this.blink();
     return true;
@@ -1814,6 +1826,7 @@ export class Game {
     k.invuln = 2.5;
     this.projectiles = [];
     this.hazards = this.hazards.filter((h) => h.friendly);
+    if (this.earth) this.earth.missiles = [];
     for (const u of this.units) {
       const d = norm(u.x - k.x, u.y - k.y);
       u.x += d.x * k.r * 3;
@@ -1835,7 +1848,7 @@ export class Game {
     // The city's top size grows by beating its final boss (see damageBoss), never by biomass.
     if (k.stage === MAX_STAGE || k.biomass < this.stage.biomassToNext) return;
     // A full growth bar summons this size's boss; growing waits until it is beaten.
-    if (!this.gateCleared[k.stage]) {
+    if (!this.gateCleared[k.stage] && GATE_BOSSES[k.stage]) {
       k.biomass = this.stage.biomassToNext;
       if (!this.boss && this.gateTimer === null) {
         this.gateTimer = GATE.warn;
@@ -1881,6 +1894,215 @@ export class Game {
     this.emit('grow', { stage: k.stage, name: s.name, size: s.size, realm: this.realm, loop: this.loop });
     if (this.inCity && k.stage >= 2 && k.stage <= 5) this.schedule(18, () => this.placeVault());
     if (k.stage === MAX_STAGE) this.bossTimer = BOSS.arriveDelay;
+  }
+
+  // ---------------------------------------------------------------- the globe
+  // On the globe there is no city to stream and no military: the kaiju walks the real Earth (it
+  // stays put and the globe turns under it, see earth.js), bites craters out of the countries in
+  // reach, its augment moves carve bigger ones, and the countries still standing fire missiles.
+  // Eating enough of the world's land fills the growth bar; then it outgrows the planet.
+  updateEarth(dt) {
+    const k = this.kaiju;
+    const E = this.earth;
+    k.r += (this.stage.radius - k.r) * Math.min(1, dt * 3);
+    k.hitFlash = Math.max(0, k.hitFlash - dt);
+    k.invuln = Math.max(0, k.invuln - dt);
+    k.dashCd = Math.max(0, k.dashCd - dt);
+    k.dodging = Math.max(0, k.dodging - dt);
+    const mag = Math.hypot(this.input.x, this.input.y);
+    k.moving = mag > 0.05;
+    const speed = this.stage.speed * this.def.speedMult * (1 + 0.08 * this.level('longLegs'));
+    k.momentum = k.moving ? Math.min(1, (k.momentum || 0) + dt / 3) : Math.max(0, (k.momentum || 0) - dt * 1.5);
+    k.vx = this.input.x * speed;
+    k.vy = this.input.y * speed;
+    if (k.dashT > 0) {
+      k.dashT -= dt;
+      const sp = this.stage.speed * this.def.speedMult * DASH.speed;
+      k.vx = k.dashDir.x * sp;
+      k.vy = k.dashDir.y * sp;
+      k.moving = true;
+    }
+    if (k.moving) {
+      k.facing = k.dashT > 0 ? { ...k.dashDir } : norm(this.input.x, this.input.y);
+      k.stillTime = 0;
+      const before = Math.floor(k.walkPhase / Math.PI);
+      k.walkPhase += ((dt * speed) / Math.max(1, k.r)) * 1.6;
+      if (Math.floor(k.walkPhase / Math.PI) !== before) {
+        const side = Math.floor(k.walkPhase / Math.PI) % 2 ? 1 : -1;
+        this.fxEvent({ t: 'step', x: -k.facing.y * k.r * 0.4 * side, y: k.facing.x * k.r * 0.4 * side, r: k.r, stage: 4 });
+        this.shake = Math.max(this.shake, 0.06);
+      }
+    } else k.stillTime += dt;
+    E.move(k.vx * dt, k.vy * dt);
+    k.x = 0;
+    k.y = 0;
+
+    // Bites: wind up, lunge, and a crater where the jaws close.
+    k.attackCd -= dt;
+    if (k.windup) {
+      k.windup.t -= dt;
+      if (k.windup.t <= 0) {
+        const w = k.windup.target;
+        k.windup = null;
+        this.earthAttack(w);
+      }
+    } else if (k.attackCd <= 0) {
+      const aim = this.earthAim();
+      if (aim) {
+        const cd = this.def.attack.cooldown * (this.frenzy > 0 ? 0.5 : 1);
+        const wind = Math.min(ATTACK_WINDUP, cd * 0.4);
+        k.windup = { target: aim, t: wind, max: wind };
+        if (!k.moving && (aim.x || aim.y)) k.facing = norm(aim.x, aim.y);
+        k.attackCd = cd;
+      } else k.attackCd = 0.15;
+    }
+    this.updateEarthMoves(dt);
+
+    // Missiles: a callout when a nuclear power first lets one go, damage when one lands on you.
+    const { launches, impacts } = E.updateMissiles(dt, k.vx, k.vy, k.r);
+    for (const l of launches) {
+      const c = E.map.countries[l.country];
+      if (l.nuke && l.first) this.emit('banner', { text: `${c.say.replace(/^the /, 'The ')} launched a nuke!`, sub: 'Get out from under the yellow circle', kind: 'warning' });
+      this.emit('launch', { nuke: l.nuke });
+    }
+    for (const m of impacts) {
+      const p = E.toLocal(m.to);
+      this.fxEvent({ t: 'gBlast', x: p.x, y: p.y, z: p.z, r: m.r * E.R, nuke: m.nuke, near: p.facing > 0.75 });
+      if (p.facing > 0.75) this.shake = Math.max(this.shake, m.nuke ? 0.6 : 0.2);
+      if (E.hits(m, k.r)) {
+        if (k.dodging > 0) this.perfectDodge(p.x, p.z);
+        this.takeDamage(k.maxHp * m.dmg, 'explosive');
+      }
+    }
+    this.updateScheduled(dt);
+    this.updateFx(dt);
+  }
+
+  // How wide a bite is on the globe.
+  earthBiteR() {
+    return this.kaiju.r * 0.7 * this.moves.size();
+  }
+
+  // Where to bite: ahead if there is land there, else the nearest way round that has some.
+  earthAim() {
+    const k = this.kaiju;
+    const E = this.earth;
+    const R = this.earthBiteR();
+    if (this.def.attack.kind === 'pound') return E.landNear(0, 0, R * 1.35) > 2 ? { x: 0, y: 0 } : null;
+    const d = k.r * 1.1;
+    const f = Math.atan2(k.facing.y, k.facing.x);
+    for (let i = 0; i < 8; i++) {
+      const a = f + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (Math.PI / 4);
+      const x = Math.cos(a) * d;
+      const y = Math.sin(a) * d;
+      if (E.landNear(x, y, R) > 2) return { x, y };
+    }
+    return null;
+  }
+
+  earthAttack(t) {
+    const k = this.kaiju;
+    const atk = this.def.attack;
+    k.lastAttack = { kind: atk.kind, x: t.x, y: t.y, t: 0.25 };
+    k.attackCount++;
+    this.fxEvent({ t: 'attack', kind: atk.kind });
+    const R = this.earthBiteR();
+    this.earthCrater(t.x, t.y, atk.kind === 'pound' ? R * 1.35 : R, true);
+    // Volt Beetle's zaps jump on to land nearby.
+    if (atk.kind === 'zap') {
+      const pts = [{ x: k.x, y: k.y }, { x: t.x, y: t.y }];
+      for (let i = 0; i < (atk.chains || 0); i++) {
+        const a = this.lifeRng.range(0, Math.PI * 2);
+        const d = k.r * this.lifeRng.range(1.6, 3.2);
+        const x = t.x + Math.cos(a) * d;
+        const y = t.y + Math.sin(a) * d;
+        if (this.earth.landNear(x, y, R * 0.6) <= 1) continue;
+        this.earthCrater(x, y, R * 0.6, false);
+        pts.push({ x, y });
+      }
+      this.fx.bolts.push({ points: pts, life: 0.22, max: 0.22, width: Math.max(0.4, k.r * 0.12) });
+    }
+  }
+
+  // Bite a crater out of the globe at local (x, y): biomass and damage for the land that went, a
+  // feast for every country finished off.
+  earthCrater(x, y, R, bite = false) {
+    const E = this.earth;
+    const k = this.kaiju;
+    const M = E.map;
+    const res = E.bite(x, y, R);
+    const p = E.toLocal(res.v);
+    if (res.area <= 0) {
+      this.fxEvent({ t: 'splash', x: p.x, y: p.z, r: R * 0.7, big: true });
+      return res;
+    }
+    this.addBiomass((res.area * this.stage.biomassToNext) / (EARTH.need * M.land));
+    let price = 0;
+    let top = 0;
+    let topId = 0;
+    for (const [id, a] of res.per) {
+      const c = M.countries[id];
+      price += (c.worth * a) / c.area;
+      if (a > top) {
+        top = a;
+        topId = id;
+      }
+    }
+    const worth = this.worth(price, k.stage);
+    this.stats.damage += worth;
+    this.stats.land = E.progress;
+    this.fxEvent({ t: 'crater', x: p.x, y: p.z, h: p.y, r: R, color: M.countries[topId].color, bite });
+    this.fx.floaters.push({ x: p.x, y: p.z, h: k.r * 1.6, text: `+${shortMoney(worth)}`, color: '#ffd84a', life: 1, max: 1 });
+    this.shake = Math.max(this.shake, bite ? 0.12 : 0.2);
+    this.impact(0.03, 0.15);
+    this.bumpCombo();
+    for (const id of res.finished) {
+      const c = M.countries[id];
+      this.stats.countries = (this.stats.countries || 0) + 1;
+      // A whole country: a feast. Scrap by its size, a little health back, and its name in lights.
+      const share = c.area / M.land;
+      this.stats.scrap += Math.round(5 * Math.pow(3, 5) * (1 + 40 * share));
+      k.hp = Math.min(k.maxHp, k.hp + k.maxHp * (0.02 + 0.3 * share));
+      this.fx.floaters.push({ x: p.x, y: p.z, h: k.r * 2.8, text: `ATE ${c.say.toUpperCase()}!`, color: '#ff9a5a', life: 2, max: 2 });
+      this.emit('countryEaten', { name: c.say, n: this.stats.countries, of: M.eatable, big: share > 0.02 });
+    }
+    return res;
+  }
+
+  // Augment moves still fire on their cooldowns, as craters.
+  updateEarthMoves(dt) {
+    const mv = this.moves;
+    for (const m of MOVES) {
+      if (!this.has(m.id) || m.id === 'orbitingSpines') continue;
+      if (mv.timers[m.id] === undefined) mv.timers[m.id] = 1;
+      mv.timers[m.id] -= dt;
+      if (mv.timers[m.id] > 0) continue;
+      mv.timers[m.id] = mv.cooldown(m.id);
+      this.stats.moves = (this.stats.moves || 0) + 1;
+      this.fxEvent({ t: 'move', id: m.id });
+      this.earthMove(m.id);
+    }
+  }
+
+  earthMove(id) {
+    const k = this.kaiju;
+    const lvl = this.level(id);
+    const size = this.moves.size();
+    if (AROUND_MOVES.has(id)) {
+      const R = k.r * (1.5 + 0.08 * lvl) * size;
+      this.earthCrater(0, 0, R);
+      this.fx.rings.push({ x: 0, y: 0, r0: k.r, r1: R * 1.3, life: 0.45, max: 0.45, color: 0xffd8a0, width: k.r * 0.2 });
+      this.fxEvent({ t: 'dustRing', x: 0, y: 0, r: R });
+      return;
+    }
+    const f = Math.atan2(k.facing.y, k.facing.x);
+    const n = 3 + Math.floor(lvl / 3);
+    for (let i = 0; i < n; i++) {
+      const a = f + this.lifeRng.range(-0.3, 0.3);
+      const d = k.r * (1.7 + i * 1.15);
+      const R = k.r * (0.7 + 0.05 * lvl) * size;
+      this.schedule(i * 0.07, () => this.earth && this.earthCrater(Math.cos(a) * d, Math.sin(a) * d, R));
+    }
   }
 
   // ---------------------------------------------------------------- realms
@@ -1940,7 +2162,8 @@ export class Game {
   enterRealm(realm, stage) {
     const seed = Math.floor(this.rng.next() * 1e9) + 1;
     this.realm = realm;
-    this.attachWorld(realm === 'city' ? new World(seed, this.cityTheme) : new RealmWorld(realm, seed));
+    this.attachWorld(realm === 'city' ? new World(seed, this.cityTheme) : REALMS[realm].globe ? new EmptyWorld(realm, seed) : new RealmWorld(realm, seed));
+    this.earth = REALMS[realm].globe ? new EarthSim(this.lifeRng) : null;
     const k = this.kaiju;
     k.x = this.city.spawn.x;
     k.y = this.city.spawn.y;
@@ -2195,11 +2418,11 @@ export class Game {
   populate(initial = false) {
     // Nobody lives out in space. In the back garden, ants (and the odd ladybug) take the place of
     // people: just as snackable to a kaiju their size.
-    if (this.inSpace) return;
+    if (this.inSpace || this.earth) return;
     const k = this.kaiju;
     const span = this.viewSpan();
     const garden = this.realm === 'garden';
-    const want = garden ? (k.stage <= 10 ? 45 : 30) : k.stage <= 3 ? CROWD.people : Math.round(CROWD.people * 0.6);
+    const want = garden ? (k.stage <= 11 ? 45 : 30) : k.stage <= 3 ? CROWD.people : Math.round(CROWD.people * 0.6);
     const maxR = Math.max(120, span * (initial ? 1.4 : 1.3));
     const minR = initial ? 10 : span * 1.0;
     // The kaiju hatches in the middle of a backyard pool party (world.js): the guests are there.
@@ -4400,7 +4623,7 @@ export class Game {
       // Scavenger and Scrap Piles raise the scrap the run pays out (see meta.runRewards).
       scrapBoost: 0.2 * this.level('scavenger') + 0.1 * (s.scrapPiles || 0),
       gateKills: [...s.gateKills], chapter: this.chapter, vaultGems: s.vaultGems, vaults: s.vaults, objectiveDone: s.objectiveDone,
-      objective: this.objective.text, frenzies: s.frenzies,
+      objective: this.objective.text, frenzies: s.frenzies, countries: s.countries || 0,
       peak: s.peak, loop: this.loop, realm: this.realm, realmName: REALMS[this.realm].name,
     };
     this.emit('end', { results: this.results });

@@ -35,12 +35,13 @@ test('damage reads like a newspaper would print it', () => {
 
 test('past the city, each realm has its own paper, and the next loop gets a second printing', () => {
   const game = new Game({ seed: 3, kaijuId: 'rex' });
-  for (const [stage, mast] of [[7, 'The Galactic Gazette'], [9, 'The Galactic Gazette'], [10, 'The Anthill Herald'], [11, 'The Anthill Herald']]) {
+  for (const [stage, mast] of [[7, 'The World Tribune'], [8, 'The Galactic Gazette'], [10, 'The Galactic Gazette'], [11, 'The Anthill Herald'], [12, 'The Anthill Herald']]) {
     game.debugJump(stage);
     const page = frontPage(game, stage, () => 0.5);
     assert.equal(page.mast, mast, `size ${stage}`);
     assert.equal(page.menu, `${STAGE_INFO[stage].destroys}.`);
     assert.ok(page.headline && page.subhead && page.size.includes(`Size ${stage}`));
+    assert.ok(!page.subhead.includes('{'), 'no placeholders left in the copy');
   }
   game.loop = 2;
   game.debugJump(1);

@@ -6,6 +6,43 @@ import { AUGMENT_BY_ID, MOVES } from '../src/augments.js';
 import { distToSegment } from '../src/game.js';
 import { HOSPITAL_TYPES } from '../src/buildings.js';
 
+// On the globe: head for the most land nearby (looking a few bites out in a dozen directions),
+// and step out from under a missile about to land, charging through if it is close.
+function earthStep(game) {
+  const k = game.kaiju;
+  const E = game.earth;
+  game.botEarth = game.botEarth || { dir: 0, t: 0 };
+  const b = game.botEarth;
+  b.t -= 1;
+  if (b.t <= 0) {
+    b.t = 15;
+    let best = b.dir + 0.4;
+    let bestLand = 0;
+    for (let i = 0; i < 12; i++) {
+      const a = b.dir + (i / 12) * Math.PI * 2;
+      let land = i ? -0.5 : 0;
+      for (const d of [1.5, 3, 5, 8, 12]) land += E.landNear(Math.cos(a) * k.r * d, Math.sin(a) * k.r * d, k.r) / d;
+      if (land > bestLand) {
+        bestLand = land;
+        best = a;
+      }
+    }
+    b.dir = best;
+  }
+  let x = Math.cos(b.dir);
+  let y = Math.sin(b.dir);
+  for (const m of E.missiles) {
+    const p = E.toLocal(m.to);
+    const d = Math.hypot(p.x, p.z);
+    if (d < m.r * E.R + k.r * 1.2 && m.dur - m.t < 1.2) {
+      x = -p.x / (d || 1);
+      y = -p.z / (d || 1);
+      if (m.dur - m.t < 0.3) game.tryDash();
+    }
+  }
+  game.setInput(x, y);
+}
+
 export function botStep(game) {
   const k = game.kaiju;
   if (game.state === 'picking') {
@@ -33,6 +70,10 @@ export function botStep(game) {
   }
   if (game.state === 'dead') {
     if (!game.revive()) game.giveUp();
+    return;
+  }
+  if (game.earth) {
+    earthStep(game);
     return;
   }
   // Charge out of trouble: through an incoming round, or out of a blast that is about to land.

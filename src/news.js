@@ -13,6 +13,7 @@ const EDITIONS = [
   { name: 'Emergency Edition', price: '$1', note: 'Now printed in a basement' },
   { name: 'Bunker Edition', price: '$5', note: 'Our offices were eaten' },
   { name: 'Final Edition', price: 'FREE', note: 'Honestly, what is money now' },
+  { name: 'World Edition', price: 'Whatever is left', note: 'Printed wherever there is still a printer' },
   { name: 'Orbital Edition', price: '1 moon rock', note: 'Printed on the last satellite' },
   { name: 'Interstellar Edition', price: '3 stars', note: 'Delivered at light speed. Arrives in four years' },
   { name: 'Multiversal Edition', price: 'Priceless', note: 'Available in every universe, while they last' },
@@ -45,22 +46,26 @@ const HEADLINES = {
     ['CITY HALL FALLS', 'Monster now bigger than the city itself. Experts: "Well, that is not great"'],
   ],
   7: [
-    ['MONSTER LEAVES EARTH. EARTH RELIEVED', 'Coast Guard Mech defeated. Creature now the size of a planet. The Moon reportedly "nervous"'],
-    ['ONE SMALL STEP FOR LIZARD', 'Beast outgrows the planet and wanders off into space, still hungry'],
+    ['CITY GONE. WORLD NEXT?', 'Coast Guard Mech defeated. Creature now the size of a continent and eyeing the map'],
+    ['MAP MAKERS IN PANIC', 'Beast outgrows the city, steps onto the globe, licks its lips at a whole planet of countries'],
   ],
   8: [
+    ['MONSTER LEAVES EARTH. WHAT IS LEFT OF IT RELIEVED', '{countries} countries eaten. Creature now the size of a planet. The Moon reportedly "nervous"'],
+    ['ONE SMALL STEP FOR LIZARD', 'Beast finishes the planet, wanders off into space, still hungry'],
+  ],
+  9: [
     ['FEDERATION ADMIRAL EATEN', 'Creature now the size of a galaxy. Stars advised to stay indoors'],
     ['ZORBLAX DEMOTED (TO LUNCH)', 'Galactic Federation "reviewing its options". Monster now bigger than most galaxies'],
   ],
-  9: [
+  10: [
     ['IT WAS NOT A MOON', 'Battle station devoured. Monster outgrows the galaxy, starts eyeing whole universes'],
     ['THAT WAS NO MOON. NOW IT IS NO MOON', 'Creature now the size of a universe. Physicists request a long lie-down'],
   ],
-  10: [
+  11: [
     ['GIANT MONSTER LANDS IN GARDEN. IS VERY SMALL', 'Tiny lizard claims to have "eaten the multiverse". Ant colony unconvinced'],
     ['WHOLE MULTIVERSE "JUST A DEWDROP"', 'Rival kaiju Nebulor eaten. Winner falls out of a dewdrop onto a lawn, ant-sized and furious'],
   ],
-  11: [
+  12: [
     ['QUEEN DEPOSED', 'The colony mourns. Creature now the size of a mini shrub, and the shrubs know it'],
     ['LONG LIVE THE... OH NO', 'Ant Queen eaten. Garden gnomes report "a bad feeling about this"'],
   ],
@@ -73,10 +78,10 @@ const LOOP_HEADLINES = [
 // How big each size is, for the line over the headline.
 const AS_BIG_AS = {
   1: 'a person', 2: 'a backyard', 3: 'a house', 4: 'an apartment block', 5: 'an office tower', 6: 'the skyline',
-  7: 'a planet', 8: 'a galaxy', 9: 'a universe', 10: 'an ant', 11: 'a mini shrub',
+  7: 'a continent', 8: 'a planet', 9: 'a galaxy', 10: 'a universe', 11: 'an ant', 12: 'a mini shrub',
 };
 // Each realm has its own paper.
-const MASTHEAD = { city: 'The Daily Stomp', solar: 'The Galactic Gazette', galaxy: 'The Galactic Gazette', cosmos: 'The Galactic Gazette', garden: 'The Anthill Herald' };
+const MASTHEAD = { city: 'The Daily Stomp', earth: 'The World Tribune', solar: 'The Galactic Gazette', galaxy: 'The Galactic Gazette', cosmos: 'The Galactic Gazette', garden: 'The Anthill Herald' };
 
 const CAPTIONS = [
   'Above: the suspect, moments before eating our photographer.',
@@ -160,7 +165,7 @@ export function frontPage(game, stage, rng = Math.random) {
     note: ed.note,
     city: realm === 'city' ? game.cityDef.name : REALMS[realm].name,
     headline,
-    subhead,
+    subhead: subhead.replace('{countries}', n(s.countries)),
     size: `Size ${stage} · ${STAGES[stage].name} · as big as ${AS_BIG_AS[stage] || 'a building'}`,
     menu: `${STAGE_INFO[stage].destroys}.`,
     incoming: incoming(stage, game.cityDef, loop),

@@ -112,6 +112,10 @@ export class UI {
     this.objWrap = $('#objective');
     this.objEl = $('#objective span');
     this.timerEl = $('#timer');
+    this.countryBar = $('#countrybar');
+    this.countryName = $('#countrybar span');
+    this.countryFill = $('#countrybar .fill');
+    this.countryTally = $('#countrybar small');
     this.bossbar = $('#bossbar');
     this.bossFill = $('#bossbar .fill');
     this.bossName = $('#bossbar span');
@@ -292,6 +296,20 @@ export class UI {
     if (this.threatNote.textContent !== note) {
       this.threatNote.textContent = note;
       this.threatNote.classList.toggle('net', k.netted > 0);
+    }
+
+    // On the globe: the country underfoot, how much of it is left, and how many are gone.
+    const E = game.earth;
+    this.countryBar.classList.toggle('hidden', !E);
+    if (E) {
+      const id = E.map.ids[E.cellOf(E.up())]; // (even where it has been bitten away)
+      const c = id ? E.map.countries[id] : null;
+      const name = c ? c.say.replace(/^the /, '') : 'Open ocean';
+      if (this.countryName.textContent !== name) this.countryName.textContent = name;
+      this.countryBar.classList.toggle('sea', !c);
+      if (c) this.countryFill.style.width = `${Math.max(0, Math.min(100, (100 * E.left[id]) / c.area))}%`;
+      const tally = `${game.stats.countries || 0} of ${E.map.eatable} countries eaten`;
+      if (this.countryTally.textContent !== tally) this.countryTally.textContent = tally;
     }
 
     const b = game.boss;

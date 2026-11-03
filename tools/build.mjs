@@ -27,6 +27,8 @@ copyFileSync(join(root, 'vendor/three/three.min.js'), join(out, 'three.min.js'))
 const extrasJs = await transform(extras.map((f) => read(`vendor/three/${f}`)).join(';\n'), { minify: true, loader: 'js' });
 writeFileSync(join(out, 'three-extras.js'), extrasJs.code);
 copyFileSync(join(root, 'vendor/three/LICENSE'), join(out, 'licenses/three.js.txt'));
+// The globe's country borders (world-atlas, from Natural Earth's public-domain data).
+copyFileSync(join(root, 'vendor/world-atlas/LICENSE'), join(out, 'licenses/world-atlas.txt'));
 
 // One stylesheet: the fonts, then the game's styles.
 const fontsCss = read('vendor/fonts/fonts.css').replace(/url\(([^)]+\.woff2)\)/g, 'url(fonts/$1)');
