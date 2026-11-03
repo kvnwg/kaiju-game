@@ -1,5 +1,5 @@
 import {
-  WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_BOSSES, LIMITS,
+  WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_EARLY, GATE_BOSSES, LIMITS,
   BOAT_SCALE, UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, offerAugments, applyPick, completedSets, maxLevel, moveStats, MOVE_SLOTS } from './augments.js';
@@ -4166,8 +4166,9 @@ export class Game {
     }
     // Health is counted in hits of the kaiju's own damage, so the fight lasts about as long
     // whatever was picked, and a little longer the higher the level.
-    const hp = this.stage.damage * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * (def.hpMul || 1) * this.diff.enemyHp;
-    const dmgMul = 1 + (this.enemyScale().dmg - 1) * 0.5;
+    const ease = GATE_EARLY[k.stage] || { hp: 1, dmg: 1 };
+    const hp = this.stage.damage * (GATE.hits + GATE.hitsPerLevel * (k.level - 1)) * (def.hits || 1) * (def.hpMul || 1) * this.diff.enemyHp * ease.hp;
+    const dmgMul = (1 + (this.enemyScale().dmg - 1) * 0.5) * ease.dmg;
     this.boss = {
       isBoss: true, gate: k.stage, def, model: def.id, name: def.name, title: def.title,
       x, y, r: def.r * unit, unit, hp, maxHp: hp, D: this.stage.maxHp * dmgMul * 1.1, dmgMul,

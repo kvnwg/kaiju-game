@@ -241,7 +241,9 @@ test('a first run with no upgrades gets a good way into the city, but the city m
   const stages = runs.map((g) => g.kaiju.stage).sort((a, b) => a - b);
   assert.ok(stages.every((st) => st >= 3), `every first run outgrows the backyard and the houses: ${stages}`);
   assert.ok(stages[Math.floor(stages.length / 2)] >= 4, `most get to apartment size: ${stages}`);
-  assert.ok(runs.filter((g) => g.state === 'won').length <= 2, 'but without gear the city mostly holds');
+  // (A first run is softened, and its first three bosses go easy, so the odd one gets all the way;
+  // runs after it don't without gear, see the next test.)
+  assert.ok(runs.filter((g) => g.state === 'won').length <= 3, 'but without gear the city holds at least half the time');
 });
 
 test('upgrades are what win the city: with gear most runs beat the boss, without it hardly any', () => {
@@ -922,4 +924,17 @@ test('a void charge hits as hard as a full second of maxed Laser Eyes', () => {
   const s = moveStats('laserEyes', lvl);
   // Both eyes' main beams on the target, ten ticks a second, at 0.55 x damage each (moves.js).
   assert.ok(Math.abs(VOID_FORM.dashHit - s.dmg * 0.55 * 2 * 10) < 1e-9);
+});
+
+test('the first three size bosses go easier, ramping up to the full fight at size 4', () => {
+  const hpAt = (stage) => {
+    const g = new Game({ seed: 3 });
+    if (stage > 1) g.debugJump(stage);
+    g.spawnGateBoss();
+    return { hits: g.boss.maxHp / g.stage.damage / (GATE_BOSSES[stage].hits || 1) / (GATE_BOSSES[stage].hpMul || 1), D: g.boss.D / g.stage.maxHp };
+  };
+  const [one, two, three, four] = [1, 2, 3, 4].map(hpAt);
+  assert.ok(one.hits < two.hits && two.hits < three.hits && three.hits < four.hits, 'health ramps up');
+  assert.ok(one.D < two.D && two.D < three.D && three.D < four.D, 'so do the hits');
+  assert.ok(one.hits < four.hits * 0.4);
 });

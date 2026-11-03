@@ -349,6 +349,9 @@ export const BOSS_FIGHT = {
 };
 
 export const GATE = { warn: 2.5, hits: 120, hitsPerLevel: 0.6, interval: 3.1, furious: 0.7, heal: 0.15, secondWind: 0.5 };
+// The first few bosses go easier (health and damage multipliers), ramping up to the full fight
+// at Wrecking Bill (size 4), where the stagger bosses start.
+export const GATE_EARLY = [null, { hp: 0.35, dmg: 0.45 }, { hp: 0.45, dmg: 0.55 }, { hp: 0.6, dmg: 0.7 }];
 export const GATE_BOSSES = [
   null,
   {
