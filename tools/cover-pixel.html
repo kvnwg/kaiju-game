@@ -121,7 +121,33 @@ const LAYOUTS = {
     tanks: [{ x: 300, aim: -0.6, flash: true }, { x: 352, aim: -0.82 }, { x: 404, aim: -0.95 }],
   },
 };
-const L = LAYOUTS[shot];
+// Each framing is laid out for one canvas width; a bigger canvas of the same shape (the 1080x1620
+// video cover is the tall framing at 270x405) gets the layout scaled up, title sizes snapped to the
+// font's 8-pixel grid so its letters stay whole blocks.
+const BASE_W = { tall: 200, square: 200, wide: 480 };
+function scaleLayout(Lb, k) {
+  const m = (v) => Math.round(v * k);
+  const snap8 = (v) => Math.max(8, 8 * Math.round((v * k) / 8));
+  const layer = (c) => ({ top: c.top.map(m), base: m(c.base), w: c.w.map(m) });
+  return {
+    title: { cx: m(Lb.title.cx), y: m(Lb.title.y), k1: snap8(Lb.title.k1), k2: snap8(Lb.title.k2), gap: m(Lb.title.gap) },
+    horizon: m(Lb.horizon),
+    sun: { x: m(Lb.sun.x), y: m(Lb.sun.y), r: m(Lb.sun.r) },
+    streaks: Lb.streaks.map(([x, y, len, th]) => [m(x), m(y), m(len), th + (k > 1.2 ? 1 : 0)]),
+    clouds: Lb.clouds.map((c) => ({ x: m(c.x), y: m(c.y), w: m(c.w), h: m(c.h) })),
+    jets: Lb.jets.map((j) => ({ ...j, x: m(j.x), y: m(j.y), s: j.s * k, trail: m(j.trail) })),
+    rex: { x: m(Lb.rex.x), y: m(Lb.rex.y), ppv: Lb.rex.ppv * k },
+    tower: { x: m(Lb.tower.x), base: m(Lb.tower.base), h: m(Lb.tower.h) },
+    far: layer(Lb.far),
+    mid: layer(Lb.mid),
+    near: layer(Lb.near),
+    smoke: Lb.smoke.map((c) => ({ x: m(c.x), y: m(c.y), h: m(c.h), r: m(c.r) })),
+    fires: Lb.fires.map((f) => ({ x: m(f.x), y: m(f.y), w: m(f.w), h: m(f.h) })),
+    highway: m(Lb.highway),
+    tanks: Lb.tanks.map((t) => ({ ...t, x: m(t.x) })),
+  };
+}
+const L = W === BASE_W[shot] ? LAYOUTS[shot] : scaleLayout(LAYOUTS[shot], W / BASE_W[shot]);
 const SUN = L.sun;
 
 // ---------------------------------------------------------------- sky

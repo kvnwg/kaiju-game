@@ -1,6 +1,6 @@
 // Renders the store covers to store/covers/: 1920x1080, 800x1200 and 800x800, the sizes CrazyGames
-// asks for, as pixel art (tools/cover-pixel.html), plus the preview videos' opening frames
-// (1920x1080 and 1080x1620, tools/cover-art.html) to store/video/. Needs Playwright with Chromium:
+// asks for, plus the preview videos' opening frames (1920x1080 and 1080x1620) to store/video/, all
+// as pixel art (tools/cover-pixel.html). Needs Playwright with Chromium:
 // node tools/cover-art.mjs [filter], or with PLAYWRIGHT=/path/to/playwright/index.mjs if it isn't
 // installed in this project. A filter renders only outputs whose path contains it ("covers").
 import { createServer } from 'node:http';
@@ -30,10 +30,10 @@ const jobs = [
   ['cover-pixel', 'wide', 1920, 1080, 'store/covers/cover-1920x1080.png'],
   ['cover-pixel', 'tall', 800, 1200, 'store/covers/cover-800x1200.png'],
   ['cover-pixel', 'square', 800, 800, 'store/covers/cover-800x800.png'],
-  ['cover-art', 'wide', 1920, 1080, 'store/video/cover-1920x1080.png'],
-  ['cover-art', 'tall', 1080, 1620, 'store/video/cover-1080x1620.png'],
+  ['cover-pixel', 'wide', 1920, 1080, 'store/video/cover-1920x1080.png'],
+  ['cover-pixel', 'tall', 1080, 1620, 'store/video/cover-1080x1620.png'],
 ];
-const only = process.argv[2]; // e.g. "covers" skips the slow 3D video frames
+const only = process.argv[2]; // e.g. "video" renders just the video covers
 for (const [tool, shot, w, h, out] of jobs) {
   if (only && !out.includes(only)) continue;
   const page = await browser.newPage({ viewport: { width: w, height: h } });
