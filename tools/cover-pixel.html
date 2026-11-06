@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kaiju Rampage pixel cover</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+<!-- The store covers as true pixel art: every scene is painted pixel by pixel on a small canvas
+     (a quarter of the cover's size) from one fixed palette, then blown up 4x with no smoothing, so
+     each art pixel is a crisp 4x4 square. The rex is the game's own voxel build, rendered tiny,
+     snapped to the palette and outlined; everything else is drawn directly. Sunset over the city:
+     the title up top, jets streaking in, the rex roaring over the skyline, fires, a broadcast tower,
+     tanks on the elevated highway. tools/cover-art.mjs opens this page and saves store/covers/. -->
+<script src="../vendor/three/three.min.js"></script>
+</head>
+<body>
+<script type="module">
+import { meshGrid } from '../src/mesher.js';
+import { toGeometry } from '../src/actors3d.js';
+import { upperHead, lowerJaw, neck } from './cover-rex.js';
+import { VoxelGrid } from '../src/voxel.js';
+
+// ?shot=tall|square|wide&w=&h=
+const q = new URLSearchParams(location.search);
+const shot = q.get('shot') || 'tall';
+const OW = Number(q.get('w')) || 800;
+const OH = Number(q.get('h')) || 1200;
+const S = 4; // screen pixels per art pixel
+const W = Math.ceil(OW / S);
+const H = Math.ceil(OH / S);
+
+let seed = 20261106;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
+const pick = (a) => a[Math.floor(rnd() * a.length)];
+
+// ---------------------------------------------------------------- the canvas and palette
+const buf = new Uint32Array(W * H);
+const CACHE = {};
+const col = (h) => (CACHE[h] ??= ((255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16)) >>> 0);
+const set = (x, y, c) => {
+  x = Math.round(x);
+  y = Math.round(y);
+  if (x >= 0 && y >= 0 && x < W && y < H) buf[y * W + x] = col(c);
+};
+const rect = (x, y, w, h, c) => {
+  for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) set(i, j, c);
+};
+const line = (x0, y0, x1, y1, c) => {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let e = dx + dy;
+  for (;;) {
+    set(x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * e;
+    if (e2 >= dy) { e += dy; x0 += sx; }
+    if (e2 <= dx) { e += dx; y0 += sy; }
+  }
+};
+// 4x4 ordered dither: true where a pixel should take the second colour at mix t.
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const dith = (x, y, t) => t * 16 > BAYER[(y & 3) * 4 + (x & 3)] + 0.5;
+
+const SKY = ['#9a2a3c', '#ab3039', '#c13a33', '#d4482f', '#e3592f', '#ef6c2f', '#f8822f', '#fc9636', '#fdab3b', '#fdc046', '#fdd45a'];
+const INK = '#21102a';
+
+// ---------------------------------------------------------------- framings (art pixels)
+const LAYOUTS = {
+  tall: {
+    title: { cx: 100, y: 12, k1: 32, k2: 16, gap: 10 },
+    horizon: 252,
+    sun: { x: 54, y: 182, r: 15 },
+    streaks: [[-12, 30, 62, 3], [156, 22, 70, 3], [132, 88, 84, 2], [-8, 96, 54, 2], [26, 150, 66, 2], [4, 194, 92, 2], [120, 160, 50, 2]],
+    clouds: [{ x: 170, y: 214, w: 96, h: 42 }, { x: 14, y: 232, w: 70, h: 26 }, { x: 176, y: 120, w: 64, h: 18 }],
+    jets: [{ x: 44, y: 116, a: -0.3, s: 1, trail: 56 }, { x: 14, y: 128, a: -0.3, s: 0.8, trail: 34 }, { x: 186, y: 92, a: 0.18, s: 0.55, trail: 26 }],
+    rex: { x: 62, y: 104, ppv: 1.62 },
+    tower: { x: 26, base: 262, h: 104 },
+    far: { top: [208, 236], base: 264, w: [8, 16] },
+    mid: { top: [220, 250], base: 272, w: [12, 24] },
+    near: { top: [252, 268], base: 300, w: [16, 30] },
+    smoke: [{ x: 150, y: 246, h: 70, r: 9 }, { x: 98, y: 240, h: 52, r: 7 }, { x: 186, y: 250, h: 40, r: 7 }],
+    fires: [{ x: 96, y: 266, w: 36, h: 48 }, { x: 152, y: 252, w: 14, h: 16 }, { x: 186, y: 258, w: 12, h: 12 }],
+    highway: 274,
+    tanks: [{ x: 120, aim: -0.62, flash: true }, { x: 164, aim: -0.8 }],
+  },
+  square: {
+    title: { cx: 100, y: 8, k1: 32, k2: 16, gap: 8 },
+    horizon: 176,
+    sun: { x: 44, y: 128, r: 12 },
+    streaks: [[-12, 24, 44, 2], [168, 18, 50, 2], [-6, 84, 40, 2], [140, 82, 70, 2], [18, 112, 54, 2], [2, 146, 70, 2]],
+    clouds: [{ x: 176, y: 150, w: 70, h: 30 }, { x: 10, y: 162, w: 54, h: 20 }],
+    jets: [{ x: 40, y: 92, a: -0.22, s: 0.85, trail: 30 }, { x: 54, y: 108, a: -0.2, s: 0.7, trail: 26 }],
+    rex: { x: 72, y: 74, ppv: 1.24 },
+    tower: { x: 16, base: 184, h: 70 },
+    far: { top: [146, 166], base: 186, w: [7, 14] },
+    mid: { top: [154, 174], base: 192, w: [10, 20] },
+    near: { top: [180, 190], base: 200, w: [14, 26] },
+    smoke: [{ x: 150, y: 172, h: 46, r: 7 }],
+    fires: [{ x: 86, y: 190, w: 28, h: 34 }, { x: 150, y: 178, w: 12, h: 12 }],
+    highway: 192,
+    tanks: [{ x: 116, aim: -0.6, flash: true }, { x: 156, aim: -0.78 }],
+  },
+  wide: {
+    title: { cx: 124, y: 22, k1: 40, k2: 24, gap: 10 },
+    horizon: 228,
+    sun: { x: 126, y: 168, r: 18 },
+    streaks: [[-20, 30, 70, 3], [250, 18, 120, 3], [380, 46, 110, 2], [-10, 118, 90, 2], [216, 96, 70, 2], [40, 150, 110, 2], [300, 170, 90, 2]],
+    clouds: [{ x: 430, y: 186, w: 120, h: 50 }, { x: 40, y: 200, w: 90, h: 30 }, { x: 228, y: 196, w: 70, h: 22 }],
+    jets: [{ x: 176, y: 124, a: -0.26, s: 1, trail: 90 }, { x: 214, y: 142, a: -0.2, s: 0.8, trail: 70 }, { x: 300, y: 32, a: 0.12, s: 0.6, trail: 50 }],
+    rex: { x: 238, y: 26, ppv: 2.4 },
+    tower: { x: 58, base: 238, h: 118 },
+    far: { top: [176, 208], base: 236, w: [8, 18] },
+    mid: { top: [190, 222], base: 244, w: [12, 26] },
+    near: { top: [222, 238], base: 270, w: [16, 32] },
+    smoke: [{ x: 410, y: 214, h: 70, r: 11 }],
+    fires: [{ x: 226, y: 244, w: 44, h: 52 }, { x: 368, y: 226, w: 18, h: 18 }, { x: 140, y: 232, w: 16, h: 14 }],
+    highway: 246,
+    tanks: [{ x: 300, aim: -0.6, flash: true }, { x: 352, aim: -0.82 }, { x: 404, aim: -0.95 }],
+  },
+};
+const L = LAYOUTS[shot];
+const SUN = L.sun;
+
+// ---------------------------------------------------------------- sky
+// Flat bands with a short dithered seam between each pair, brighter in rings round the low sun.
+function skyIndex(x, y) {
+  const t = Math.max(0, y / L.horizon);
+  const d = Math.hypot((x - SUN.x) * 0.8, y - SUN.y);
+  const glow = Math.max(0, 1 - d / (SUN.r * 6)) * 0.34;
+  return Math.min(0.9999, t * 0.86 + glow) * (SKY.length - 1);
+}
+function sky() {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const f = skyIndex(x, y);
+    const i = Math.floor(f);
+    const fr = f - i;
+    set(x, y, SKY[fr > 0.72 && dith(x, y, (fr - 0.72) / 0.28) ? i + 1 : i]);
+  }
+}
+function sun() {
+  const { x: cx, y: cy, r } = SUN;
+  for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) {
+    const d = Math.hypot(x - cx, y - cy);
+    if (d > r) continue;
+    set(x, y, d > r - 1.2 ? '#ffd27a' : d > r - 3 ? '#ffe8a4' : '#fff7d6');
+  }
+}
+// Long thin clouds: a band of a lighter sky colour, lit along the underside by the sun.
+function streak([x0, y0, len, th]) {
+  for (let j = 0; j < th; j++) {
+    const inset = (th - 1 - j) * 3;
+    for (let x = x0 + inset; x < x0 + len - inset * 1.5; x++) {
+      const i = Math.floor(skyIndex(x, y0 + j));
+      set(x, y0 + j, SKY[Math.min(SKY.length - 1, i + (j === th - 1 ? 3 : 2))]);
+    }
+  }
+  for (let x = x0 + len * 0.15; x < x0 + len * 0.7; x++) {
+    const i = Math.floor(skyIndex(x, y0 + th));
+    set(x, y0 + th, SKY[Math.min(SKY.length - 1, i + 1)]);
+  }
+}
+
+// ---------------------------------------------------------------- puffy clouds and smoke
+// A shape built from overlapping circles, shaded by how far each pixel is from the edge toward
+// the light: a bright rim, a lit band, the body, and a dark underside.
+function blob(circles, shadeFn) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [cx, cy, r] of circles) {
+    x0 = Math.min(x0, cx - r); x1 = Math.max(x1, cx + r);
+    y0 = Math.min(y0, cy - r); y1 = Math.max(y1, cy + r);
+  }
+  const inside = (x, y) => circles.some(([cx, cy, r, floor]) => (floor === undefined || y <= floor) && (x - cx) ** 2 + (y - cy) ** 2 <= r * r);
+  for (let y = Math.floor(y0); y <= y1; y++) for (let x = Math.floor(x0); x <= x1; x++) {
+    if (!inside(x, y)) continue;
+    let lit = 0;
+    while (lit < 5 && inside(x - lit - 1, y - lit - 1)) lit++;
+    let under = 0;
+    while (under < 4 && inside(x, y + under + 1)) under++;
+    set(x, y, shadeFn(x, y, lit, under));
+  }
+}
+function cloud({ x, y, w, h }) {
+  const circles = [];
+  const n = Math.max(3, Math.round(w / 12));
+  for (let i = 0; i < n; i++) {
+    const u = (i + 0.5) / n;
+    const r = h * (0.32 + 0.42 * Math.sin(Math.PI * u)) * (0.85 + rnd() * 0.3);
+    circles.push([x - w / 2 + u * w + (rnd() - 0.5) * 5, y - r * 0.55, r, y]);
+  }
+  for (let i = 0; i < n - 1; i++) circles.push([x - w * 0.3 + rnd() * w * 0.6, y - h * (0.55 + rnd() * 0.3), h * (0.2 + rnd() * 0.18), y]);
+  blob(circles, (px, py, lit, under) => {
+    if (lit === 0) return '#ffc27a';
+    if (lit === 1) return '#ffa262';
+    if (lit === 2 && !dith(px, py, 0.5)) return '#ffa262';
+    if (under === 0) return '#7e4358';
+    if (under === 1) return dith(px, py, 0.5) ? '#7e4358' : '#a2555c';
+    return lit < 4 ? '#e07a56' : '#c2645a';
+  });
+}
+function smoke({ x, y, h, r }) {
+  const circles = [];
+  for (let k = 0; k < 9; k++) {
+    const t = k / 8;
+    const rr = r * (0.7 + t * 0.9) * (0.85 + rnd() * 0.3);
+    circles.push([x + t * h * 0.45 + (rnd() - 0.5) * r, y - t * h, rr]);
+    circles.push([x + t * h * 0.45 + (rnd() - 0.5) * r * 1.6, y - t * h + rr * 0.4, rr * 0.7]);
+  }
+  blob(circles, (px, py, lit, under) => {
+    const fire = glowAt(px, py);
+    if (fire > 0.5 || (fire > 0.4 && dith(px, py, 0.5))) return under < 2 ? '#d8703e' : '#a8503c';
+    if (lit === 0) return '#9a6266';
+    if (lit === 1) return '#7a4c5a';
+    if (under === 0) return '#3a2438';
+    return dith(px, py, 0.35) ? '#4a2e44' : '#5a3a4e';
+  });
+}
+
+// ---------------------------------------------------------------- jets
+// A top-down fighter, drawn straight onto the grid at its heading, with a contrail behind.
+function jet({ x, y, a, s, trail }) {
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  for (let k = 0; k < trail; k++) {
+    const tx = x - ca * (7 * s + k);
+    const ty = y - sa * (7 * s + k);
+    const fade = k / trail;
+    if (fade > 0.55 && dith(Math.round(tx), Math.round(ty), (fade - 0.55) / 0.45)) continue;
+    set(tx, ty, fade < 0.25 ? '#fff4d8' : '#ffe0a8');
+    if (k > 4 && s > 0.7 && !dith(Math.round(tx), Math.round(ty) + 1, fade)) set(tx, ty + 1, '#ffc888');
+  }
+  const R = 8 * s;
+  for (let py = Math.floor(y - R); py <= y + R; py++) for (let px = Math.floor(x - R); px <= x + R; px++) {
+    const dx = px - x;
+    const dy = py - y;
+    const u = (dx * ca + dy * sa) / s; // along the nose
+    const v = (-dx * sa + dy * ca) / s;
+    const av = Math.abs(v);
+    const body = u >= -6.5 && u <= 6.5 && av <= Math.min(1.1, (7 - u) * 0.45);
+    const wing = av <= 6.2 && u <= 2.6 - av * 0.82 && u >= -1.8 - av * 0.35;
+    const tail = av <= 3 && u <= -4.4 - (av - 1) * 0.3 && u >= -6.5;
+    if (!(body || wing || tail)) continue;
+    let c = '#3a2a44';
+    if (v < -0.4 && (wing || tail)) c = '#5c4a66';
+    if (body && u > 1.5 && u < 3.6 && av < 0.6) c = '#9fd8ff';
+    set(px, py, c);
+  }
+}
+
+// ---------------------------------------------------------------- the rex
+// The game's voxel rex, rendered at 4x4 samples per art pixel with flat sunset lighting, each
+// sample snapped to the kaiju palette, then each art pixel takes the colour most of its samples
+// agree on (teeth and eyes count extra, so they survive). Finally a dark outline.
+const REX_PAL = [
+  '#1f3a1c', '#2b5528', '#3a7232', '#4f8f3c', '#68ad48', '#8cc854', '#b6df64', '#d6ec7c',
+  '#686a36', '#94984c', '#c0c46a', '#dfe392', '#f4f2bc',
+  '#3c0c1a', '#5a1424', '#8a2238', '#b8344a', '#d85a72',
+  '#fffaf0', '#d6c8b0',
+  '#ffd23a', '#fff4a0', '#1a0a00', '#e8a020',
+  '#e8c64a', '#b08a2a',
+];
+const PRIORITY = new Set(['#fffaf0', '#d6c8b0', '#ffd23a', '#fff4a0', '#1a0a00']);
+const REX_RGB = REX_PAL.map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
+function nearestRex(r, g, b) {
+  let best = 0;
+  let bd = Infinity;
+  for (let i = 0; i < REX_RGB.length; i++) {
+    const [R, G, B] = REX_RGB[i];
+    const d = (r - R) ** 2 * 0.9 + (g - G) ** 2 * 1.2 + (b - B) ** 2 * 0.7;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function renderRex(ppv) {
+  const mat = new THREE.ShaderMaterial({
+    vertexColors: true,
+    vertexShader: `attribute float aFlags; varying vec3 vC; varying vec3 vN; varying float vE;
+      void main() {
+        vC = color; vE = mod(aFlags, 2.0);
+        vN = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `varying vec3 vC; varying vec3 vN; varying float vE;
+      void main() {
+        vec3 n = normalize(vN);
+        float key = max(dot(n, normalize(vec3(-0.45, 0.8, 0.45))), 0.0);
+        float sun = max(dot(n, normalize(vec3(-0.95, 0.15, -0.3))), 0.0);
+        vec3 c = vC * (0.5 + 0.55 * key) + vC * vec3(1.0, 0.62, 0.3) * sun * 0.55;
+        if (vE > 0.5) c = vC;
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  const mesh = (g, ox, oy, oz) => new THREE.Mesh(toGeometry(meshGrid(g, { v: 1, ox, oy, oz, jitter: 0 })), mat);
+  const rex = new THREE.Group();
+  const head = new THREE.Group();
+  const uh = upperHead();
+  head.add(mesh(uh.g, uh.pivot.x, uh.pivot.y, uh.pivot.z));
+  const lj = lowerJaw();
+  const jaw = new THREE.Group();
+  jaw.add(mesh(lj.g, lj.pivot.x, lj.pivot.y, lj.pivot.z));
+  jaw.position.set(1, -1, 0);
+  jaw.rotation.z = -0.66; // roaring
+  head.add(jaw);
+  // The inside of the roaring mouth: a dark back wall and far cheek, hollow in between so the
+  // tongue and bottom teeth still show through the opening. (Local +z is the side away from us.)
+  const throat = new VoxelGrid(36, 32, 20);
+  for (let x = 0; x < 36; x++) {
+    const hx = x - 3;
+    const floor = -1 - 0.78 * (hx - 1);
+    for (let y = 0; y < 32; y++) {
+      const hy = y - 31;
+      if (hy > -1 || hy < floor + 1.5) continue;
+      for (let z = 1; z < 19; z++) {
+        if (hx >= 7 && z < 15) continue;
+        throat.set(x, y, z, hx < 4 ? 0x3c0c1a : 0x5a1424);
+      }
+    }
+  }
+  head.add(mesh(throat, 3, 31, 10));
+  const nk = neck();
+  const nm = mesh(nk.g, nk.pivot.x, nk.pivot.y, nk.pivot.z);
+  nm.position.set(2, 8, 0);
+  nm.rotation.z = 0.82;
+  head.add(nm);
+  head.rotation.z = -0.06;
+  rex.add(head);
+  rex.rotation.set(0.12, Math.PI + 0.36, 0);
+  const scene = new THREE.Scene();
+  scene.add(rex);
+  rex.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(rex);
+  const SS = 4;
+  const w = Math.ceil((box.max.x - box.min.x) * ppv);
+  const h = Math.ceil((box.max.y - box.min.y) * ppv);
+  const cam = new THREE.OrthographicCamera(box.min.x, box.min.x + w / ppv, box.min.y + h / ppv, box.min.y, 0.1, 4000);
+  cam.position.set(0, 0, 1000);
+  const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  renderer.setSize(w * SS, h * SS);
+  renderer.setClearColor(0x000000, 0);
+  renderer.render(scene, cam);
+  const c2 = document.createElement('canvas');
+  c2.width = w * SS;
+  c2.height = h * SS;
+  const x2 = c2.getContext('2d');
+  x2.drawImage(renderer.domElement, 0, 0);
+  const d = x2.getImageData(0, 0, c2.width, c2.height).data;
+  renderer.dispose();
+  const idx = new Int16Array(w * h).fill(-1);
+  const memo = new Map();
+  const counts = new Float32Array(REX_PAL.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    counts.fill(0);
+    let empty = 0;
+    for (let j = 0; j < SS; j++) for (let i = 0; i < SS; i++) {
+      const p = ((y * SS + j) * c2.width + x * SS + i) * 4;
+      if (d[p + 3] < 128) { empty++; continue; }
+      const key = (d[p] << 16) | (d[p + 1] << 8) | d[p + 2];
+      let k = memo.get(key);
+      if (k === undefined) memo.set(key, (k = nearestRex(d[p], d[p + 1], d[p + 2])));
+      counts[k] += PRIORITY.has(REX_PAL[k]) ? 3 : 1;
+    }
+    if (empty > SS * SS / 2) continue;
+    let best = 0;
+    for (let k = 1; k < counts.length; k++) if (counts[k] > counts[best]) best = k;
+    idx[y * w + x] = best;
+  }
+  // Clean up: a lone pixel whose neighbours mostly agree on another colour takes theirs, so the
+  // hide reads as clean shapes rather than noise. Teeth and eyes are left alone.
+  for (let pass = 0; pass < 2; pass++) {
+    const prev = idx.slice();
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const k = prev[y * w + x];
+      if (k < 0 || PRIORITY.has(REX_PAL[k])) continue;
+      const ns = [prev[y * w + x - 1], prev[y * w + x + 1], prev[(y - 1) * w + x], prev[(y + 1) * w + x]];
+      for (const n of ns) {
+        if (n < 0 || n === k) continue;
+        if (ns.filter((m) => m === n).length >= 3) { idx[y * w + x] = n; break; }
+      }
+    }
+  }
+  // Outline every edge against the sky.
+  const out = new Array(w * h).fill(null);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = idx[y * w + x];
+    if (k >= 0) { out[y * w + x] = REX_PAL[k]; continue; }
+    const n = (xx, yy) => xx >= 0 && yy >= 0 && xx < w && yy < h && idx[yy * w + xx] >= 0;
+    if (n(x - 1, y) || n(x + 1, y) || n(x, y - 1) || n(x, y + 1)) out[y * w + x] = '#14200f';
+  }
+  let minX = w, minY = h;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (out[y * w + x]) { minX = Math.min(minX, x); minY = Math.min(minY, y); }
+  return { w, h, out, minX, minY };
+}
+function drawRex(sp, ox, oy) {
+  for (let y = 0; y < sp.h; y++) for (let x = 0; x < sp.w; x++) {
+    const c = sp.out[y * sp.w + x];
+    if (c) set(ox + x - sp.minX, oy + y - sp.minY, c);
+  }
+}
+
+// ---------------------------------------------------------------- fire
+const FIRES = L.fires;
+function glowAt(x, y) {
+  let g = 0;
+  for (const f of FIRES) {
+    const d = Math.hypot((x - f.x) * 0.8, (y - (f.y - f.h * 0.3)) * 1.1);
+    g = Math.max(g, 1 - d / (f.h * 1.5 + 10));
+  }
+  return Math.max(0, g);
+}
+function fire(f) {
+  for (let i = 0; i < f.w; i++) {
+    const u = ((i + 0.5) / f.w) * 2 - 1;
+    const env = Math.pow(Math.max(0, 1 - u * u), 0.6);
+    // Pointed tongues: a triangle wave with a wandering period.
+    const ph = i / (5 + (Math.floor(i / 7) % 3)) + f.x * 0.37;
+    const tri = 1 - Math.abs(2 * (ph - Math.floor(ph)) - 1);
+    const tongue = 0.32 + 0.68 * Math.pow(tri, 0.9) * (0.8 + rnd() * 0.2);
+    const hc = Math.round(f.h * env * tongue);
+    const x = Math.round(f.x - f.w / 2 + i);
+    for (let k = 0; k < hc; k++) {
+      const r = k / hc;
+      const core = 1 - Math.abs(u);
+      let c = '#ffe27a';
+      if (r > 0.78) c = '#c8301e';
+      else if (r > 0.52) c = '#f5581c';
+      else if (r > 0.26 || core < 0.35) c = '#ffa12a';
+      else if (core > 0.6 && r < 0.14) c = '#fff6c8';
+      set(x, f.y - k, c);
+    }
+    // Licks of flame breaking off above the tongues.
+    if (hc > 6 && rnd() < 0.35) set(x, f.y - hc - ri(2, 5), rnd() < 0.5 ? '#f5581c' : '#ffa12a');
+  }
+}
+function embers() {
+  for (const f of FIRES) {
+    for (let i = 0; i < f.w * 1.2; i++) {
+      const t = rnd();
+      set(f.x + (rnd() - 0.3) * f.w * 1.6 + t * 20, f.y - f.h * (0.8 + t * 1.6), rnd() < 0.6 ? '#ffb43a' : '#fff0a0');
+    }
+  }
+}
+
+// ---------------------------------------------------------------- the city
+const LAYERS = {
+  far: { body: '#a2566a', side: '#8c4a62', rim: '#ec8e62', roof: '#b8646e', dark: '#7e4060', lights: ['#f0a062'], winP: 0.22, win: [1, 1], pitch: [3, 3], warm: '#c8604c' },
+  mid: { body: '#6a4870', side: '#56385e', rim: '#f09062', roof: '#82567c', dark: '#3e2848', lights: ['#ffd36a', '#ffb24a'], winP: 0.32, win: [1, 2], pitch: [3, 4], warm: '#a24c48' },
+  near: { body: '#3c2a4a', side: '#2e1f3c', rim: '#d0704e', roof: '#54385c', dark: '#24182f', lights: ['#ffd36a', '#ffe9a0', '#ffb24a', '#ffd36a', '#8fe0ff'], winP: 0.42, win: [2, 2], pitch: [4, 4], warm: '#7c3440' },
+};
+function paint(x, y, c, Lr) {
+  // Firelight in bands: fully warm close in, a 50% dither ring, then nothing.
+  const g = glowAt(x, y) * 1.4;
+  if ((c === Lr.body || c === Lr.side || c === Lr.roof) && (g > 0.66 || (g > 0.4 && dith(x, y, 0.5)))) c = Lr.warm;
+  set(x, y, c);
+}
+function building(x0, w, top, base, Lr, tall) {
+  const lit = SUN.x < x0 + w / 2 ? 'left' : 'right';
+  const sideW = Math.max(2, Math.round(w * 0.28));
+  for (let y = top; y < base; y++) for (let x = x0; x < x0 + w; x++) {
+    const fromLit = lit === 'left' ? x - x0 : x0 + w - 1 - x;
+    let c = w - 1 - fromLit < sideW ? Lr.side : Lr.body;
+    if (fromLit === 0) c = Lr.rim;
+    if (y === top) c = Lr.roof;
+    paint(x, y, c, Lr);
+  }
+  // Windows in a grid; the shadowed face's windows are dimmer.
+  const [ww, wh] = Lr.win;
+  const [px, py] = Lr.pitch;
+  for (let y = top + 3; y + wh <= base - 1; y += py) for (let x = x0 + 2; x + ww <= x0 + w - 1; x += px) {
+    const shaded = y > L.highway + 4; // under the elevated road
+    const on = rnd() < Lr.winP * (shaded ? 0.45 : 1);
+    const fromLit = lit === 'left' ? x - x0 : x0 + w - 1 - x;
+    const c = on ? (shaded ? '#d88a4a' : w - 1 - fromLit < sideW ? Lr.lights[0] : pick(Lr.lights)) : Lr.dark;
+    for (let j = 0; j < wh; j++) for (let i = 0; i < ww; i++) set(x + i, y + j, c);
+  }
+  // Rooftops: antennas, water tanks, a spire on the tallest.
+  const r = rnd();
+  if (tall && r < 0.45) {
+    const cx = x0 + Math.floor(w / 2);
+    for (let k = 1; k <= Math.min(6, w / 2); k++) for (let i = -Math.floor((w / 2 - k) / 2); i <= Math.floor((w / 2 - k) / 2); i++) set(cx + i, top - k, Lr.roof);
+    line(cx, top - 6, cx, top - 12, Lr.side);
+    set(cx, top - 13, '#ff4a3a');
+  } else if (r < 0.6 && w > 8) {
+    const tx = x0 + ri(2, w - 6);
+    rect(tx, top - 4, 4, 3, Lr.side);
+    set(tx, top - 1, Lr.side);
+    set(tx + 3, top - 1, Lr.side);
+    set(tx, top - 4, Lr.roof);
+  } else if (r < 0.8) {
+    const ax = x0 + ri(1, w - 2);
+    line(ax, top - 1, ax, top - ri(3, 8), Lr.side);
+  } else if (w > 6) {
+    rect(x0 + 1, top - 2, Math.max(2, Math.floor(w / 3)), 2, Lr.roof);
+  }
+}
+function skyline(name, avoid) {
+  const cfg = L[name];
+  const Lr = LAYERS[name];
+  let x = -ri(0, 8);
+  while (x < W) {
+    const w = ri(cfg.w[0], cfg.w[1]);
+    let top = ri(cfg.top[0], cfg.top[1]);
+    if (rnd() < 0.18) top -= ri(6, 16);
+    // Keep the rex's jaw clear.
+    if (avoid && x + w > avoid.x0 && x < avoid.x1) top = Math.max(top, avoid.y);
+    building(x, w, top, cfg.base, Lr, top < cfg.top[0]);
+    x += w - (rnd() < 0.4 ? ri(1, 4) : 0) + (rnd() < 0.15 ? ri(1, 3) : 0);
+  }
+}
+// ---------------------------------------------------------------- the broadcast tower
+function tower({ x: cx, base, h }) {
+  const top = base - h;
+  const RED = ['#d8402e', '#a82c26'];
+  const WHITE = ['#f6e6d4', '#c8b0a8'];
+  const half = (y) => {
+    const f = (y - top) / h;
+    return Math.round(0.6 + f * f * 10 + f * 2.5);
+  };
+  for (let y = top; y <= base; y++) {
+    const hw = half(y);
+    const band = Math.floor((y - top) / 8) % 2 ? WHITE : RED;
+    const litLeft = SUN.x < cx;
+    set(cx - hw, y, band[litLeft ? 0 : 1]);
+    set(cx + hw, y, band[litLeft ? 1 : 0]);
+    if ((y - top) % 8 === 0) for (let x = cx - hw; x <= cx + hw; x++) set(x, y, band[1]);
+    for (let x = cx - hw + 1; x < cx + hw; x++) {
+      const k = x - cx;
+      if (((y + k) & 7) === 0 || ((y - k) & 7) === 0) set(x, y, band[1]);
+    }
+  }
+  // Two decks with lit windows.
+  for (const [f, dw, dh] of [[0.4, 4, 4], [0.17, 2, 3]]) {
+    const y = Math.round(top + f * h);
+    const hw = half(y) + dw;
+    rect(cx - hw, y, hw * 2 + 1, dh, WHITE[1]);
+    rect(cx - hw, y, hw * 2 + 1, 1, WHITE[0]);
+    for (let x = cx - hw + 1; x < cx + hw; x += 2) set(x, y + 1 + (dh > 3 ? 1 : 0), '#ffd36a');
+    rect(cx - hw, y + dh, hw * 2 + 1, 1, INK);
+  }
+  line(cx, top, cx, top - 12, '#c8b0a8');
+  set(cx, top - 13, '#ff4a3a');
+  set(cx, top - 14, '#ffb0a0');
+}
+
+// ---------------------------------------------------------------- the highway and tanks
+function highway(y) {
+  for (let x = 0; x < W; x++) {
+    if (x % 3 === 0) set(x, y - 2, '#6e4c66');
+    set(x, y - 1, '#6e4c66');
+    set(x, y, '#b0786e');
+    set(x, y + 1, '#5a3c56');
+    set(x, y + 2, '#4a3048');
+    set(x, y + 3, '#4a3048');
+    set(x, y + 4, '#24182f');
+  }
+  for (let x = 6; x < W; x += 34) {
+    rect(x, y + 5, 5, H - y - 5, '#2c1f3a');
+    rect(x, y + 5, 1, H - y - 5, '#4e3456');
+  }
+}
+function tank({ x, aim, flash }, y) {
+  // Tracks with road wheels.
+  rect(x, y - 3, 22, 3, '#22261a');
+  for (let i = 1; i < 22; i += 3) set(x + i, y - 2, '#5a5c48');
+  set(x, y - 3, INK);
+  set(x + 21, y - 3, INK);
+  // Hull, sloped front, lit top edge.
+  for (let j = 0; j < 3; j++) for (let i = j === 0 ? 1 : 0; i < 22 - (j === 0 ? 2 : 0); i++) set(x + i, y - 4 - j, j === 2 ? '#8a9a48' : '#5b6a2e');
+  // Turret.
+  rect(x + 6, y - 9, 9, 3, '#5f6e32');
+  rect(x + 7, y - 10, 7, 1, '#93a250');
+  set(x + 10, y - 11, '#3e4622');
+  // Barrel aimed up at the rex.
+  const bx = x + 14;
+  const by = y - 9;
+  const ex = bx + Math.cos(aim) * 12;
+  const ey = by + Math.sin(aim) * 12;
+  line(bx, by, ex, ey, '#3a4220');
+  line(bx, by - 1, ex, ey - 1, '#6e7c3a');
+  if (flash) {
+    const fx = ex + Math.cos(aim) * 2;
+    const fy = ey + Math.sin(aim) * 2;
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) set(fx + dx, fy + dy, '#fff2a0');
+    for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2], [1, 1], [-1, -1], [1, -1], [-1, 1]]) set(fx + dx, fy + dy, '#ffa12a');
+  }
+}
+
+// ---------------------------------------------------------------- the title
+// Press Start 2P, the game's logo face, at a whole multiple of its 8-pixel grid so every glyph pixel
+// is a clean block of art pixels: cream KAIJU and lilac RAMPAGE, each with a top highlight, a shaded
+// bottom row, a two-tone plum extrusion and a 1-pixel ink outline.
+function titleLine(text, k, cx, y, P) {
+  const c = document.createElement('canvas');
+  c.width = k * text.length + 16;
+  c.height = k * 2;
+  const g = c.getContext('2d');
+  g.font = `${k}px 'Press Start 2P'`;
+  g.textBaseline = 'top';
+  g.fillStyle = '#fff';
+  g.fillText(text, 8, 8);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let x0 = c.width, y0 = c.height, x1 = 0, y1 = 0;
+  const M = new Uint8Array(c.width * c.height);
+  for (let yy = 0; yy < c.height; yy++) for (let xx = 0; xx < c.width; xx++) {
+    if (d[(yy * c.width + xx) * 4 + 3] < 128) continue;
+    M[yy * c.width + xx] = 1;
+    x0 = Math.min(x0, xx); x1 = Math.max(x1, xx);
+    y0 = Math.min(y0, yy); y1 = Math.max(y1, yy);
+  }
+  const fp = k / 8;
+  const ext = fp + 1;
+  const mh = y1 - y0 + 1;
+  const ox = Math.round(cx - (x1 - x0 + 1) / 2) - x0;
+  const oy = y - y0;
+  const inM = (xx, yy) => xx >= 0 && yy >= 0 && xx < c.width && yy < c.height && M[yy * c.width + xx] === 1;
+  const extAt = (xx, yy) => {
+    for (let e = 1; e <= ext; e++) if (inM(xx, yy - e)) return e;
+    return 0;
+  };
+  const shape = (xx, yy) => inM(xx, yy) || extAt(xx, yy) > 0;
+  for (let yy = y0 - 2; yy <= y1 + ext + 2; yy++) for (let xx = x0 - 2; xx <= x1 + 2; xx++) {
+    let colr = null;
+    if (inM(xx, yy)) {
+      const ry = yy - y0;
+      colr = ry === 0 || !inM(xx, yy - 1) ? P.hi : ry >= mh - fp ? P.shade : P.face;
+    } else {
+      const e = extAt(xx, yy);
+      if (e) colr = e <= Math.ceil(ext / 2) ? P.ext1 : P.ext2;
+      else if (shape(xx - 1, yy) || shape(xx + 1, yy) || shape(xx, yy - 1) || shape(xx, yy + 1) || shape(xx - 1, yy - 1) || shape(xx + 1, yy - 1) || shape(xx - 1, yy + 1) || shape(xx + 1, yy + 1)) colr = INK;
+    }
+    if (colr) set(xx + ox, yy + oy, colr);
+  }
+  return y1 - y0 + 1 + ext;
+}
+async function title(T) {
+  const face = new FontFace('Press Start 2P', 'url(../vendor/fonts/press-start-2p.woff2)');
+  document.fonts.add(await face.load());
+  const h1 = titleLine('KAIJU', T.k1, T.cx, T.y, { hi: '#ffffff', face: '#fff0d8', shade: '#f4c49a', ext1: '#8a3e6e', ext2: '#52204a' });
+  titleLine('RAMPAGE', T.k2, T.cx, T.y + h1 + T.gap, { hi: '#f2e4ff', face: '#c8a2f4', shade: '#9e74d8', ext1: '#5e3690', ext2: '#3a2064' });
+}
+
+// ---------------------------------------------------------------- paint it
+const rexSprite = renderRex(L.rex.ppv);
+sky();
+sun();
+L.streaks.forEach(streak);
+L.clouds.forEach(cloud);
+skyline('far');
+drawRex(rexSprite, L.rex.x, L.rex.y);
+L.jets.forEach(jet);
+L.smoke.forEach(smoke);
+tower(L.tower);
+skyline('mid');
+FIRES.forEach(fire);
+rect(0, L.highway + 5, W, H - L.highway - 5, LAYERS.near.dark); // nothing shows through gaps under the road
+skyline('near', { x0: FIRES[0].x - FIRES[0].w * 0.6, x1: FIRES[0].x + FIRES[0].w * 0.6, y: FIRES[0].y + 3 });
+highway(L.highway);
+L.tanks.forEach((t) => tank(t, L.highway));
+embers();
+await title(L.title);
+
+const art = document.createElement('canvas');
+art.width = W;
+art.height = H;
+art.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(buf.buffer), W, H), 0, 0);
+const out = document.createElement('canvas');
+out.width = OW;
+out.height = OH;
+const ctx = out.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+ctx.drawImage(art, 0, 0, W * S, H * S);
+document.body.appendChild(out);
+window.done = true;
+</script>
+</body>
+</html>
