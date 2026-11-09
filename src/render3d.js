@@ -1583,11 +1583,13 @@ export class Renderer3D {
     if (!entry.w) {
       entry.w = el.offsetWidth;
       entry.h = el.offsetHeight;
+      // The tail grows with the interface scale (see .floater.bubble::after).
+      entry.tail = Math.abs(parseFloat(getComputedStyle(el, '::after').bottom)) || 8;
     }
     const ax = ((v.x + 1) / 2) * this.w;
     const ay = ((1 - v.y) / 2) * this.h;
     let cx = ax;
-    let cy = ay - entry.h / 2 - 7; // sitting on its tail, just over the head
+    let cy = ay - entry.h / 2 - entry.tail + 1; // sitting on its tail, just over the head
     let dx = cx - clear.x;
     let dy = cy - clear.y;
     const d = Math.hypot(dx, dy);

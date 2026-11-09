@@ -184,8 +184,13 @@ export class UI {
     if (photo) el.querySelector('.np-img').appendChild(halftone(photo));
     el.classList.remove('hidden', 'out');
     const paper = el.querySelector('.news-paper');
-    const fit = Math.min(1, (window.innerWidth * 0.94) / paper.offsetWidth, (window.innerHeight * 0.84) / paper.offsetHeight);
-    el.querySelector('.news-fit').style.setProperty('--fit', fit.toFixed(3));
+    // Fitted to the window, and grown on a big screen (up to 1.6x) so its print stays readable.
+    const fit = Math.min(1.6, (window.innerWidth * 0.94) / paper.offsetWidth, (window.innerHeight * 0.84) / paper.offsetHeight);
+    const fitEl = el.querySelector('.news-fit');
+    fitEl.style.setProperty('--fit', fit.toFixed(3));
+    // The scale is a transform, so the layout still sees the full-size page; margins take its
+    // layout box to the scaled size, so a page taller than the window is still centred in it.
+    fitEl.style.margin = `${((fit - 1) * paper.offsetHeight) / 2}px ${((fit - 1) * paper.offsetWidth) / 2}px`;
     const shown = performance.now();
     const close = (ev) => {
       if (ev.type === 'keydown') {

@@ -44,6 +44,7 @@ const warpFx = new WarpOverlay(document.getElementById('warp'));
 // (that wins over the player's in-game sound setting).
 platform.onAdStart = () => sfx.hold('ad', true);
 platform.onAdEnd = () => sfx.hold('ad', false);
+platform.onAdBusy = (busy) => document.getElementById('app').classList.toggle('ad-busy', busy);
 platform.onAdsOff = () => hub && hub.adsChanged();
 platform.onSettings = () => {
   sfx.hold('platform', platform.muteAudio);
@@ -628,12 +629,24 @@ async function boot() {
   requestAnimationFrame(frame);
 }
 
-// The interface is laid out for phone and laptop windows; a big screen scales it up (see #app's --ui).
+// The interface is laid out for phones and for CrazyGames' small 821x462 frame. Anything bigger
+// scales it up with the window (see #app's --ui), so a 16:9 frame of any size (the usual 1216x684,
+// fullscreen) shows the same layout, just bigger, instead of small type in a sea of space.
+// Media queries see the window, not the zoomed layout, so the layout's own size goes on #app as
+// classes: ui-short and ui-shorter for the compact layouts, ui-roomy for the bigger HUD.
+const UI_FIT = { width: 800, height: 480, max: 3 };
 let uiScale = 1;
 function fitUi() {
-  const fit = Math.max(1, Math.min(1.6, window.innerWidth / 1100, window.innerHeight / 640));
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const fit = Math.max(1, Math.min(UI_FIT.max, w / UI_FIT.width, h / UI_FIT.height));
   uiScale = Math.round(fit * 20) / 20;
   appEl.style.setProperty('--ui', String(uiScale));
+  const lw = w / uiScale;
+  const lh = h / uiScale;
+  appEl.classList.toggle('ui-short', lh <= 560);
+  appEl.classList.toggle('ui-shorter', lh <= 520);
+  appEl.classList.toggle('ui-roomy', lw >= 760 && lh >= 440);
 }
 fitUi();
 window.addEventListener('resize', () => {

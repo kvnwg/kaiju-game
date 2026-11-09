@@ -71,6 +71,7 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
 | muteAudio setting | Obeyed at start and on change; the in-game sound toggle can't override it |
 | Midgame ads | After a match ends, before the results; never during play. On top of the SDK's 3-minute cap, `src/adpacing.js` waits for 3–5 minutes of play before the first one (longer in a player's first session), skips very short runs, keeps 90 s of real play between breaks, and skips the first break for players back after 3+ days |
 | Rewarded ads | Labelled with a ▶ icon; the reward only after `adFinished`; a "try again later" message on failure; game muted and paused while an ad plays |
+| No progress during an ad | From the moment an ad is requested until it finishes or fails, gameplay is frozen and an invisible layer takes every click and tap (`onAdBusy` in `src/platform.js`, `#app.ad-busy`) |
 | Not too often / not pushed | Free gems: 10 a day, 3 minutes apart with a countdown on the button; no flashing promos |
 | Skip matches the ad button | Revive / Give up, Spin / Close, energy, patrol and results buttons are the same size and colour |
 | Out-of-lives ads | The ad revive is at most one offer per run and at least 5 minutes apart (not every knock-down), on a 10 s countdown; no ad break follows a knock-down that offered one. New players, players back after a break and players on a losing streak get one free revive a session instead |
@@ -79,7 +80,7 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
 | No external ads, links, purchases or logins | None in the game |
 | No custom fullscreen button | None (CrazyGames provides fullscreen) |
 | Restricted keys | Escape isn't used (P pauses); WASD is read by key position, so ZQSD works on AZERTY |
-| Readable in small 16:9 frames | Checked at 821x462, 800x450 and up to 1920x1080; the interface scales up on big screens |
+| Readable in small 16:9 frames | Every font size went up by 2px for Full Launch QA (the smallest text is now 8px in the pixel font, from 6px). Above about 800x480 the whole interface scales with the frame (`fitUi` in `src/main.js`), so every 16:9 frame from 821x462 to 1920x1080 shows the same layout, just bigger, and the HUD gets a further 1.25x on anything bigger than a phone. Floating combat text and speech bubbles scale with it. The damage counter is deep green on its lavender pill (it was pale gold, which QA flagged as hard to read) |
 | Consistent at 144 Hz+ | Simulation runs on frame time (capped at 20 fps steps) |
 | Text selection on touch | Off (`user-select: none` with every prefix, no touch callouts) |
 | iOS audio | The audio context resumes on every touch or click while suspended or interrupted |

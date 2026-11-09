@@ -28,6 +28,7 @@ export class Platform {
     this.placeholder = null; // (kind) => Promise<boolean>, drawn by the hub
     this.onAdStart = null; // mute the game while an ad plays
     this.onAdEnd = null;
+    this.onAdBusy = null; // (busy) => block the game's buttons from the request until the ad is over
     this.onSettings = null; // the platform's settings changed (muteAudio)
     this.onAdsOff = null; // rewarded ads just became unavailable
     try {
@@ -135,6 +136,8 @@ export class Platform {
   async showAd(kind) {
     if (this.adPlaying) return false;
     this.adPlaying = true;
+    // CrazyGames: nothing in the game may move on while an ad is requested or playing.
+    if (this.onAdBusy) this.onAdBusy(true);
     await this.ready;
     let started = false;
     const start = () => {
@@ -144,6 +147,7 @@ export class Platform {
     };
     const end = (ok) => {
       this.adPlaying = false;
+      if (this.onAdBusy) this.onAdBusy(false);
       if (started && this.onAdEnd) this.onAdEnd();
       return ok;
     };
