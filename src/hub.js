@@ -18,6 +18,7 @@ import {
 } from './meta.js';
 
 import { MONEY_NAMES, moneyScale, shortMoney } from './prices.js';
+import { fitBox, MIN_FIT } from './fit.js';
 
 const hq = (root, sel) => root.querySelector(sel);
 // How each upgrade looks and reads: its colour pair, which stat it raises, how to word a total,
@@ -34,6 +35,8 @@ const MUT_LOOK = {
   revive: { c: '#ff8ad0', c2: '#c83a8a', key: 'revive', fmt: (v) => `${v} free revive a run`, pop: 'EXTRA LIFE!' },
 };
 const REVIVE_OFFER = 10; // seconds to take the ad revive
+// Modals that are mostly a list or long text (see Hub.fitModal).
+const LONG_MODALS = new Set(['quests', 'pass', 'gearhelp', 'patrol', 'login', 'item', 'slot']);
 // Why a revive is free this time (see adpacing.js).
 const GIFT_WHY = { new: 'New here? This one’s on the house.', welcome: 'Welcome back! This one’s on the house.', rough: 'Rough patch? This one’s on the house.' };
 export function hfmt(n) {
@@ -133,9 +136,11 @@ export class Hub {
       </div>
       <div id="hub" class="hub hidden">
         <div class="hub-top"></div>
-        <div class="hub-side left"></div>
-        <div class="hub-side right"></div>
-        <div class="hub-body"></div>
+        <div class="hub-mid">
+          <div class="hub-side left"></div>
+          <div class="hub-side right"></div>
+          <div class="hub-body"></div>
+        </div>
         <nav class="hub-nav"></nav>
       </div>
       <div id="hubModal" class="modal hub-modal hidden"></div>
@@ -235,6 +240,14 @@ export class Hub {
     this.lastTab = this.tab;
     this.body.dataset.tab = this.tab;
     this.el.dataset.tab = this.tab;
+    this.fit();
+  }
+
+  // Shrink the battle tab's card and the open modal if the frame is too short for them (see fit.js).
+  fit() {
+    const battle = this.visible && this.tab === 'battle' && this.body.querySelector('.battle');
+    if (battle) fitBox(battle, 'end');
+    if (this.modalKind) this.fitModal();
   }
 
   renderTop() {
@@ -627,6 +640,13 @@ export class Hub {
     this.modal.innerHTML = html;
     this.modal.classList.remove('hidden');
     this.modal.dataset.kind = kind;
+    this.fitModal();
+  }
+
+  // Lists and long text only shrink a little to fit a short frame, then scroll (see fit.js).
+  fitModal() {
+    const box = this.modal.firstElementChild;
+    if (box) fitBox(box, 'center', LONG_MODALS.has(this.modalKind) ? 0.9 : MIN_FIT);
   }
 
   // Rewarded ads can be offered (not switched off for this session, and no ad blocker).

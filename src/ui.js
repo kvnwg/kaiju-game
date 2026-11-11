@@ -1,6 +1,7 @@
 import { STAGES, MAX_STAGE, KAIJU, CITIES, DIFFICULTIES, xpToNext } from './config.js';
 import { AUGMENTS, AUGMENT_BY_ID, EVOLUTIONS, evolutionFor, recipeState, setsFor, SYNERGY_SETS, levelText, maxLevel, movesHeld, passivesHeld, MOVE_SLOTS, PASSIVE_SLOTS } from './augments.js';
 import { MONEY_NAMES, moneyScale } from './prices.js';
+import { fitBox } from './fit.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -130,6 +131,8 @@ export class UI {
     this.modals = {
       pick: $('#pick'), revive: $('#revive'), results: $('#results'), menu: $('#menu'), pause: $('#pause'),
     };
+    // Opening or closing the evolution recipes changes how much there is to fit.
+    for (const m of Object.values(this.modals)) m.addEventListener('toggle', () => this.fit(m), true);
     this.augSig = '';
     this.xpFill = $('#xpbar .fill');
     this.xpText = $('#xpbar span');
@@ -218,6 +221,15 @@ export class UI {
     const el = name === 'hud' ? this.hud : this.modals[name];
     el.classList.toggle('hidden', !on);
     if (name === 'hud' && !on) this.dashBtn.classList.add('hidden');
+    if (on && name !== 'hud') this.fit(el);
+  }
+
+  // Shrink a modal's panel if the frame is too short for it (see fit.js); with no modal, all open ones.
+  fit(modal) {
+    for (const m of modal ? [modal] : Object.values(this.modals)) {
+      const panel = !m.classList.contains('hidden') && m.querySelector(':scope > .panel');
+      if (panel) fitBox(panel);
+    }
   }
 
   hideModals() {

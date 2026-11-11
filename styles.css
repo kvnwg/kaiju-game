@@ -318,9 +318,9 @@ html, body {
   background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'><path d='M1 3h2l2-2v7l-2-2H1z' fill='%23f4f1e8'/><path d='M6 3h1v1H6zM8 3h1v1H8zM7 4h1v1H7zM6 5h1v1H6zM8 5h1v1H8z' fill='%23ff5a5a'/></svg>");
 }
 
+/* The boss's health: above the move tiles, clear of the charge button (see #hudFoot). */
 #bossbar {
-  margin: 10px auto 0;
-  max-width: 520px;
+  width: min(520px, calc(100% - 172px));
   text-align: center;
   font-family: var(--display);
   font-size: 12px;
@@ -361,11 +361,24 @@ html, body {
 #countrybar.sea span { color: #9fd8ff; }
 #countrybar.sea .track { visibility: hidden; }
 
-#augbar {
+/* Along the bottom, below the kaiju (the camera keeps it at the centre of the screen) and clear of
+   the top HUD however tall that gets: a tip, the boss's health, the move tiles. */
+#hudFoot {
   position: absolute;
   left: 12px;
   right: 12px;
   bottom: max(12px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+/* On a wide screen, above the tiles can still be the middle (a phone on its side is under 300px
+   tall with the browser's bars showing), so the boss's health goes in the bottom-left corner. */
+@media (orientation: landscape) {
+  #bossbar { position: absolute; left: 0; bottom: 0; width: min(400px, calc(50% - 150px)); text-align: left; }
+}
+#augbar {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -429,11 +442,11 @@ html, body {
   100% { transform: scale(1); }
 }
 
-/* Tutorial tip: a small toast above the move tiles. */
+/* Tutorial tip: a small toast above the move tiles (and the boss bar). */
 #hint {
   position: absolute;
   left: 50%;
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 52px);
+  bottom: calc(100% + 4px);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -479,6 +492,13 @@ html, body {
   overflow-y: auto;
 }
 #menu { background: linear-gradient(rgba(36, 18, 46, 0.35), rgba(36, 18, 46, 0.8)); align-items: flex-start; }
+/* A panel shrunk to fit a short frame (fit.js) is laid out wider than it is drawn: nothing to scroll. */
+#app .fitted { overflow: hidden; }
+/* Lists that do scroll (quests, the pass) get a thin bar in the interface's colours, not the browser's. */
+#app * { scrollbar-width: thin; scrollbar-color: var(--line) rgba(42, 23, 54, 0.45); }
+#app ::-webkit-scrollbar { width: 8px; height: 8px; }
+#app ::-webkit-scrollbar-track { background: rgba(42, 23, 54, 0.45); }
+#app ::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--ink); }
 .panel {
   width: 100%;
   max-width: 760px;
@@ -517,7 +537,21 @@ html, body {
 .btn.primary { background: var(--pink); }
 .btn.ghost { background: var(--lav); }
 .btn.big { font-size: 18px; padding: 16px 28px 14px; }
-.btn.ad::before { content: '\25B6  '; color: #2f8a3a; }
+/* Rewarded-ad buttons say so plainly, all the same way: a green AD tag with a play mark. */
+.btn.ad::before, .side-btn.ad::after, .prew.prem.adclaim::after {
+  content: 'AD';
+  display: inline-block;
+  margin-right: 8px;
+  padding: 3px 4px 2px 13px;
+  vertical-align: 1px;
+  font-family: var(--display);
+  font-size: 9px;
+  line-height: 1;
+  color: #fff;
+  text-shadow: none;
+  background: #2f8a3a 4px 50% / 6px 10px no-repeat url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 5' shape-rendering='crispEdges'><path d='M0 0h1v5H0zM1 1h1v3H1zM2 2h1v1H2z' fill='white'/></svg>");
+  box-shadow: 0 0 0 var(--p) var(--ink);
+}
 
 /* pick */
 .pick-panel { text-align: center; }
@@ -1024,16 +1058,19 @@ html, body {
 .hub-top .cur small { font-family: var(--body); font-size: 14px; color: var(--muted); }
 .hub-top .cur .plus { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 2px; background: var(--mint); color: var(--ink-text); font-size: 14px; box-shadow: 0 0 0 var(--p) var(--ink); }
 .hub-top .cur.scrap { margin-left: auto; }
-.hub-side { position: absolute; top: 64px; display: flex; flex-direction: column; gap: 8px; z-index: 2; }
+/* Between the top bar and the tabs: the side buttons over the body. When the column runs out of
+   height (a short frame) it wraps into another one, inwards. */
+.hub-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.hub-side { position: absolute; top: 8px; bottom: 8px; display: flex; flex-direction: column; flex-wrap: wrap; align-content: flex-start; gap: 8px; z-index: 2; }
 .hub-side.left { left: max(8px, env(safe-area-inset-left)); }
-.hub-side.right { right: max(8px, env(safe-area-inset-right)); }
+.hub-side.right { right: max(8px, env(safe-area-inset-right)); flex-wrap: wrap-reverse; }
 .side-btn { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 58px; min-height: 56px; padding: 6px 2px 6px; background: var(--lav); cursor: pointer; font-family: var(--display); font-size: 9px; text-transform: uppercase; }
 .side-btn .ic { width: 26px; height: 26px; }
 .side-btn em, .nav-btn em { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 3px; background: var(--hp); color: #fff; font-family: var(--display); font-style: normal; font-size: 10px; line-height: 16px; text-align: center; box-shadow: 0 0 0 var(--p) var(--ink); }
-.side-btn.ad::after { content: '\25B6'; position: absolute; top: 4px; left: 6px; font-size: 10px; color: #2f8a3a; }
+.side-btn.ad::after { order: -1; margin: 0; }
 .side-btn:disabled { opacity: 0.6; cursor: default; }
 .side-btn .t { font-family: var(--body); font-size: 13px; color: #9a5a08; text-transform: none; }
-.hub-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px max(10px, env(safe-area-inset-right)) 12px max(10px, env(safe-area-inset-left)); pointer-events: auto; }
+.hub-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: 8px max(10px, env(safe-area-inset-right)) 12px max(10px, env(safe-area-inset-left)); pointer-events: auto; }
 .hub-body[data-tab="battle"] { pointer-events: none; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
 .hub-nav { display: flex; gap: 5px; align-items: flex-end; justify-content: center; padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--panel); border-top: var(--fp) solid var(--ink); box-shadow: inset 0 calc(2 * var(--fp)) 0 #7a5590; z-index: 2; }
 .nav-btn { position: relative; flex: 1; max-width: 110px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 2px 8px; background: var(--lilac); font-family: var(--display); font-size: 10px; text-transform: uppercase; cursor: pointer; }
@@ -1080,6 +1117,16 @@ html, body {
 #app.ui-short .ch-title { gap: 2px; }
 #app.ui-short .play-btn { padding: 12px 34px; }
 #app.ui-short .kaiju-pill { align-self: stretch; }
+/* ui-tiny (a phone on its side with the browser's bars showing): a slimmer top bar and tabs, and
+   smaller side buttons, so the chapter card keeps some room. */
+#app.ui-tiny .hub-top { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: 4px; }
+#app.ui-tiny .hub-top .lv { width: 34px; height: 34px; }
+#app.ui-tiny .hub-top .cur { height: 30px; }
+#app.ui-tiny .hub-nav { padding-top: 4px; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+#app.ui-tiny :is(.nav-btn, .nav-btn.main) { flex-direction: row; justify-content: center; gap: 6px; padding: 5px 4px; }
+#app.ui-tiny :is(.nav-btn, .nav-btn.main) .ic { width: 22px; height: 22px; }
+#app.ui-tiny .side-btn { min-height: 0; padding: 4px 2px; }
+#app.ui-tiny .side-btn .ic { width: 22px; height: 22px; }
 .kaiju-pill { display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 7px; background: var(--lav); font-family: var(--display); font-size: 12px; cursor: pointer; }
 .kaiju-pill small { color: #9a5a08; font-size: 12px; }
 .kport { display: inline-block; width: 28px; height: 28px; background: linear-gradient(135deg, color-mix(in srgb, var(--kc, #5aa84f) 70%, #fff) 0 30%, var(--kc, #5aa84f) 30% 70%, color-mix(in srgb, var(--kc, #5aa84f) 65%, #000) 70%); -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'><path d='M5 0h6v1h1v4h-2v1h2v1H8v1H7v3H6v1H2v-1H1V8H0V5h1V4h1V3h3z' fill='black'/></svg>") center / contain no-repeat; mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'><path d='M5 0h6v1h1v4h-2v1h2v1H8v1H7v3H6v1H2v-1H1V8H0V5h1V4h1V3h3z' fill='black'/></svg>") center / contain no-repeat; flex: none; image-rendering: pixelated; }
@@ -1271,7 +1318,7 @@ html, body {
 .ptier .pn { display: grid; place-items: center; font-family: var(--display); font-size: 12px; background: var(--panel-hi); }
 .prew { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; justify-content: center; padding: 7px; background: var(--lilac); cursor: pointer; font: inherit; }
 .prew.prem { position: relative; background: #f7dc93; }
-.prew.prem.adclaim::after { content: '\25B6'; position: absolute; top: 2px; right: 4px; font-size: 11px; color: #7dff5a; }
+.prew.prem.adclaim::after { position: absolute; top: 2px; right: 2px; margin: 0; }
 .prew .pcost { position: absolute; top: 1px; right: 3px; display: flex; align-items: center; gap: 1px; font-family: var(--display); font-size: 9px; font-style: normal; color: #6ff0ff; }
 .prew .pcost .ic { width: 9px; height: 9px; }
 .prew.got { opacity: 0.35; }
@@ -1360,6 +1407,7 @@ html, body {
 .ccard .face { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px; background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--rc) 45%, transparent), var(--panel-hi) 70%); border: var(--p) solid var(--rc); text-align: center; opacity: 0; transform: translateY(-40%); }
 .ccard .face b { font-family: var(--display); font-weight: 400; font-size: 11px; line-height: 1.3; }
 .ccard .face small { color: var(--rc); font-size: 15px; }
+.ccard .face .rchip small { color: var(--ink-text); }
 .ccard .face .extra { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; max-width: 100%; }
 .ccard .face .extra .rchip { flex-wrap: wrap; justify-content: center; max-width: 100%; padding: 1px 3px; font-size: 12px; line-height: 1.2; }
 .ccard.landed .reel { display: none; }
@@ -1370,6 +1418,8 @@ html, body {
 .crate-open.done .done-btn { opacity: 1; pointer-events: auto; }
 .crate-open.flash::after { content: ''; position: fixed; inset: 0; background: var(--rc); opacity: 0; animation: rareFlash 0.5s ease-out; pointer-events: none; }
 @keyframes rareFlash { 0% { opacity: 0.45; } 100% { opacity: 0; } }
+/* The rays behind the cards are wider than the window; they mustn't make it scroll. */
+.hub-modal[data-kind='crate'] { overflow: hidden; }
 
 @media (max-width: 560px) {
   .hub-top .cur { font-size: 11px; padding: 0 5px; height: 30px; }
