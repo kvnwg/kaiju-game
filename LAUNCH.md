@@ -66,7 +66,7 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
 | --- | --- |
 | Gameplay start/stop | Start when a run is being played, stop on pause, knock-downs, level-up picks, the newspaper, ads, results and menus (`src/platform.js`, `setPlaying`) |
 | Loading start/stop, happytime | Loading around boot; happytime when a chapter is won |
-| Lands new players in gameplay within one click | One tap on the title starts the first run; no menus before it |
+| Lands new players in gameplay immediately | No title or play button: once the city has loaded, a new player is in their first run (controls tip on screen); returning players land in the hub |
 | Progress saving | Everything is one save in the SDK's Data module (a few KB; the limit is 1 MB), read after `SDK.init()` |
 | muteAudio setting | Obeyed at start and on change; the in-game sound toggle can't override it |
 | Midgame ads | After a match ends, before the results; never during play. On top of the SDK's 3-minute cap, `src/adpacing.js` waits for 3–5 minutes of play before the first one (longer in a player's first session), skips very short runs, keeps 90 s of real play between breaks, and skips the first break for players back after 3+ days |

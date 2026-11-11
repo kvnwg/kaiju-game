@@ -685,10 +685,13 @@ html, body {
 }
 .floater.bubble.pushed::after { display: none; }
 .floater.bubble span { display: inline-block; animation: bubble-pop 0.16s steps(3) both, bubble-shout 0.28s steps(2) 0.16s 3; }
+@keyframes tapPulse { 50% { opacity: 0.35; } }
 @keyframes bubble-pop { from { transform: scale(0.3); } to { transform: scale(1); } }
 @keyframes bubble-shout { 50% { transform: translate(1px, -1px) rotate(-2deg); } }
-/* Loading: the title art behind the logo while the city is built. */
+/* Loading: the painted art (art/, rendered by tools/title-art.mjs) behind the logo while the city
+   is built: the city burning at sundown, the kaiju vast on the horizon. */
 #loading { background: #140604 url(art/title-wide.jpg) center 55% / cover no-repeat; }
+@media (max-aspect-ratio: 1/1) { #loading { background-image: url(art/title-tall.jpg); } }
 #loading .loading-card { padding: 20px 28px; background: radial-gradient(ellipse at center, rgba(16, 4, 2, 0.72), transparent 75%); }
 .loading-card { text-align: center; }
 .loading-card .muted { font-size: 18px; animation: blink 1s steps(1) infinite; }
@@ -985,8 +988,6 @@ html, body {
 .btn.wide { width: 100%; margin-top: 12px; }
 .link { border: none; background: none; color: var(--link); font: inherit; font-size: 15px; text-decoration: underline; cursor: pointer; padding: 0; pointer-events: auto; }
 
-/* ---------- title: a live cinematic with letterbox bars ---------- */
-#app:has(#title:not(.hidden)) #floaters { display: none; }
 /* run extras: the bonus objective, the altar, frenzy edges, size-up letterbox */
 .objective { display: flex; gap: 6px; align-items: baseline; max-width: 100%; font-size: 15px; color: var(--text); text-shadow: var(--outline); white-space: nowrap; overflow: hidden; }
 .objective b { font-family: var(--display); font-weight: 400; font-size: 9px; color: var(--gold); text-transform: uppercase; }
@@ -1006,41 +1007,6 @@ html, body {
 @keyframes frenzyPulse { to { box-shadow: inset 0 0 140px rgba(255, 40, 60, 0.75); } }
 #app.cine::before { content: ''; position: absolute; inset: 0; z-index: 4; pointer-events: none; border-top: 0 solid #000; border-bottom: 0 solid #000; animation: cineBars 1.7s ease-in-out forwards; }
 @keyframes cineBars { 0% { border-width: 0; } 20%, 75% { border-top-width: 8vh; border-bottom-width: 8vh; } 100% { border-width: 0; } }
-.title-screen { position: absolute; inset: 0; z-index: 40; cursor: pointer; display: flex; flex-direction: column; justify-content: center; padding: 0 max(24px, 7vw); }
-.title-screen::before, .title-screen::after { content: ''; position: absolute; left: 0; right: 0; height: 9vh; background: #000; }
-.title-screen::before { top: 0; }
-.title-screen::after { bottom: 0; }
-/* The title art: the city burning at sundown, the kaiju vast on the horizon (art/, rendered by
-   tools/title-art.mjs), pushing in slowly, with embers rising and the fires flickering. */
-.title-screen { overflow: hidden; background: #140604; }
-.title-art { position: absolute; inset: 0; background: #140604 url(art/title-wide.jpg) center 55% / cover no-repeat; animation: titlePush 36s ease-in-out infinite alternate; }
-.title-glow { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 32% at 50% 88%, rgba(255, 110, 40, 0.3), transparent 70%); mix-blend-mode: screen; animation: titleFlicker 3.4s steps(6) infinite; pointer-events: none; }
-.title-embers::before, .title-embers::after { content: ''; position: absolute; inset: 0; pointer-events: none;
-  background-image: radial-gradient(circle at 12% 30%, #ffcf6a 0 1.5px, transparent 2.5px), radial-gradient(circle at 47% 65%, #ff9a3c 0 1.5px, transparent 2.5px), radial-gradient(circle at 78% 12%, #ffd88a 0 1px, transparent 2px), radial-gradient(circle at 63% 88%, #ff7a2a 0 2px, transparent 3px), radial-gradient(circle at 28% 92%, #ffb04a 0 1px, transparent 2px);
-  background-size: 260px 300px; animation: embersNear 11s linear infinite; }
-.title-embers::after { background-size: 410px 470px; opacity: 0.6; animation-name: embersFar; animation-duration: 21s; }
-.title-grade { position: absolute; inset: 0; background: radial-gradient(ellipse at 60% 45%, transparent 40%, rgba(16, 4, 2, 0.6) 100%), linear-gradient(90deg, rgba(16, 4, 2, 0.62), transparent 55%); pointer-events: none; }
-@keyframes titlePush { from { transform: scale(1); } to { transform: scale(1.08) translateY(-1.5%); } }
-@keyframes titleFlicker { 0%, 100% { opacity: 0.7; } 20% { opacity: 1; } 40% { opacity: 0.55; } 60% { opacity: 0.9; } 80% { opacity: 0.65; } }
-@keyframes embersNear { from { background-position: 0 0; } to { background-position: 40px -300px; } }
-@keyframes embersFar { from { background-position: 0 0; } to { background-position: -60px -470px; } }
-@media (max-aspect-ratio: 1/1) { .title-art, #loading { background-image: url(art/title-tall.jpg); } }
-@media (prefers-reduced-motion: reduce) { .title-art, .title-glow, .title-embers::before, .title-embers::after { animation: none; } }
-.title-logo { position: relative; display: flex; flex-direction: column; font-family: var(--display); line-height: 1.05; text-transform: uppercase; animation: titleIn 1.6s ease-out both; }
-.title-logo .t1 { font-size: clamp(30px, 7vw, 76px); color: #fff4fb; text-shadow: 0 4px 0 var(--pink), 0 8px 0 var(--pink-dark), var(--outline-big), 4px 14px 0 rgba(42, 23, 54, 0.6); letter-spacing: 0.06em; }
-.title-logo .t2 { font-size: clamp(22px, 5vw, 54px); color: var(--lav); text-shadow: 0 4px 0 #8a5aa8, var(--outline-big), 4px 12px 0 rgba(42, 23, 54, 0.6); letter-spacing: 0.1em; margin-top: 6px; }
-.title-tap { position: relative; margin-top: 7vh; font-family: var(--display); font-size: clamp(13px, 1.9vw, 22px); letter-spacing: 0.2em; text-transform: uppercase; color: #e8e4da; text-shadow: var(--outline); animation: tapPulse 2.2s ease-in-out infinite 1.6s, titleIn 1.4s ease-out both 0.8s; }
-.title-screen.leaving { animation: titleOut 0.45s ease-in forwards; }
-@keyframes titleIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@keyframes titleOut { to { opacity: 0; } }
-@keyframes tapPulse { 50% { opacity: 0.35; } }
-/* On a tall screen the kaiju fills the middle: the logo goes up in the sky, the prompt down in the city. */
-@media (max-aspect-ratio: 1/1) {
-  .title-screen { justify-content: flex-start; padding-top: calc(9vh + 5vh); padding-bottom: calc(9vh + 7vh); }
-  .title-tap { margin-top: auto; text-align: center; }
-  .title-grade { background: linear-gradient(rgba(16, 4, 2, 0.6), transparent 30%, transparent 70%, rgba(16, 4, 2, 0.55)); }
-}
-
 /* ---------- hub frame ---------- */
 .hub { position: absolute; inset: 0; z-index: 20; pointer-events: none; display: flex; flex-direction: column; }
 .hub::before { content: ''; position: absolute; inset: 0; background: linear-gradient(rgba(36, 18, 46, 0.55), transparent 22%, transparent 55%, rgba(36, 18, 46, 0.75)); pointer-events: none; }

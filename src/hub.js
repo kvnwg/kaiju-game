@@ -1,4 +1,4 @@
-// The hub between runs: a painted title screen, then a Habby-style home with currencies on
+// The hub between runs: a Habby-style home with currencies on
 // top, a bottom bar (Shop, Gear, Battle, Kaiju, Mutations) and every meta-game screen: crates,
 // quests, the login calendar, the Rampage Pass, Patrol, the Lucky Wheel and the shop. There are
 // no real-money purchases: the shop runs on gems, scrap and rewarded ads, which play through the
@@ -126,14 +126,6 @@ export class Hub {
     this.tab = 'battle';
     this.rng = createRng(Date.now());
     app.insertAdjacentHTML('beforeend', `
-      <div id="title" class="title-screen hidden">
-        <div class="title-art"></div>
-        <div class="title-glow"></div>
-        <div class="title-embers"></div>
-        <div class="title-grade"></div>
-        <div class="title-logo"><span class="t1">KAIJU</span><span class="t2">RAMPAGE</span></div>
-        <div class="title-tap">Tap to begin</div>
-      </div>
       <div id="hub" class="hub hidden">
         <div class="hub-top"></div>
         <div class="hub-mid">
@@ -146,7 +138,6 @@ export class Hub {
       <div id="hubModal" class="modal hub-modal hidden"></div>
       <div id="adBreak" class="ad-break hidden"></div>
       <div id="toast" class="toast"></div>`);
-    this.title = hq(app, '#title');
     this.el = hq(app, '#hub');
     this.top = hq(this.el, '.hub-top');
     this.left = hq(this.el, '.hub-side.left');
@@ -175,23 +166,6 @@ export class Hub {
     this.toastEl.classList.remove('show');
     void this.toastEl.offsetWidth;
     this.toastEl.classList.add('show');
-  }
-
-  // ------------------------------------------------------------------ title
-  showTitle(onBegin) {
-    this.title.classList.remove('hidden');
-    const go = () => {
-      this.title.removeEventListener('pointerdown', go);
-      window.removeEventListener('keydown', go);
-      this.title.classList.add('leaving');
-      setTimeout(() => {
-        this.title.classList.add('hidden');
-        this.title.classList.remove('leaving');
-        onBegin();
-      }, 450);
-    };
-    this.title.addEventListener('pointerdown', go);
-    window.addEventListener('keydown', go);
   }
 
   // ------------------------------------------------------------------ hub

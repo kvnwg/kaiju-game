@@ -51,11 +51,10 @@ platform.onSettings = () => {
   showSound();
 };
 
-// Which tune and how hard it should hit right now: the menu tune on the title and in the hub,
-// then the rampage theme by size and threat, and the boss theme in boss fights.
+// Which tune and how hard it should hit right now: the menu tune in the hub, then the rampage
+// theme by size and threat, and the boss theme in boss fights.
 function musicState() {
   const inRun = game && !ui.hud.classList.contains('hidden');
-  if (titleActive) return { theme: 'menu', level: 1, bpm: 132 };
   if (!inRun) return { theme: 'menu', level: 0, bpm: 126 };
   if (game.state === 'won' || game.state === 'lost') return { theme: 'menu', level: -1, bpm: 126 };
   // Each realm has its own tune: a floaty one out in space, a bouncy one in the garden.
@@ -77,7 +76,6 @@ let renderer = null;
 let game = null;
 let paused = false;
 let lastSettings = { kaijuId: 'rex', chapter: 1, mode: 'normal' };
-let titleActive = false;
 let runCtx = null;
 let hintUntil = 0;
 let movedFor = 0;
@@ -108,7 +106,6 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, sta
   persist();
   lastSettings = { kaijuId, chapter, mode };
   runCtx = { chapter, mode, kaijuId };
-  titleActive = false;
   hub.hide();
   game = new Game({ kaijuId, difficulty: mode, firstRun, chapter, meta: loadout(save, kaijuId), seed: Number(params.get('seed')) || Date.now() });
   // Admin mode can start a run at a later size (see the hub's settings).
@@ -139,7 +136,6 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, sta
 
 // The hub, with the city (or the wreckage of the last run) behind it.
 function showHub(tab) {
-  titleActive = false;
   warpFx.cancel();
   if (!game || game.state === 'playing' || game.state === 'dead' || game.state === 'picking') {
     game = new Game({ seed: 1, kaijuId: save.lastKaiju, meta: { skin: save.skins.equipped } });
@@ -151,18 +147,6 @@ function showHub(tab) {
   hub.show(tab);
   // Habby-style: the daily reward greets the player once a day.
   if (loginReady(save, now()) && save.tutorialDone) hub.openLogin();
-}
-
-// The title: a painted voxel scene of the city burning at sundown with the kaiju vast on the
-// horizon (art/, rendered by tools/title-art.mjs); nothing runs behind it.
-function showTitle() {
-  titleActive = true;
-  ui.show('hud', false);
-  hub.showTitle(() => {
-    titleActive = false;
-    if (!save.tutorialDone) startRun({ kaijuId: 'rex', firstRun: true });
-    else showHub('battle');
-  });
 }
 
 const CALLOUTS = ['Smashing!', 'Rampage!', 'Unstoppable!', 'Kaiju-geddon!', 'Extinction event!'];
@@ -577,7 +561,7 @@ async function boot() {
   // CrazyGames' SDK first: it brings the player's save with it. A stalled SDK doesn't hold the
   // game up for long; the save then stays in this browser for the session.
   await Promise.race([platform.ready, new Promise((done) => setTimeout(done, 8000))]);
-  // `#new` on the address (anywhere but CrazyGames) plays as a brand-new player, from the title,
+  // `#new` on the address (anywhere but CrazyGames) plays as a brand-new player, from the first run,
   // on a throwaway save that is never written back: a look at the first-time experience
   // that leaves real progress alone.
   const freshLook = location.hash === '#new' && !platform.sdk;
@@ -620,10 +604,11 @@ async function boot() {
     clearSave(store);
     location.reload();
   };
-  // `?play` skips straight into a run; otherwise the title comes first.
+  // No title or play button: a new player lands straight in their first run (CrazyGames: "land
+  // new users in gameplay immediately"), a returning one in the hub. `?play` always starts a run.
   if (params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', firstRun: true });
-  else if (params.has('hub')) showHub('battle');
-  else showTitle();
+  else if (params.has('hub') || save.tutorialDone) showHub('battle');
+  else startRun({ kaijuId: 'rex', firstRun: true });
   loading.classList.add('hidden');
   platform.loadingStop();
   requestAnimationFrame(frame);
