@@ -12,7 +12,7 @@ npm run build
 ```
 
 `npm run build` writes `dist/` and `dist/kaiju-rampage.zip`. Upload the zip: `index.html` is at its
-root, all paths are relative, and it holds 15 files (about 1.6 MB unpacked, well under the 20 MB
+root, all paths are relative, and it holds 18 files (about 3 MB unpacked and 1.5 MB zipped, well under the 20 MB
 needed for the mobile homepage). three.js r147 and the fonts ship inside it; the only outside
 script is the CrazyGames SDK itself.
 
