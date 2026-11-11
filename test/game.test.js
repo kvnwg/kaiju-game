@@ -272,6 +272,20 @@ test('upgrades are what win the city: with gear most runs beat the boss, without
   assert.ok(times[Math.floor(times.length / 2)] < 28 * 60, `median boss arrival ${times}`);
 });
 
+test('a seeded run replays exactly: same seed and same inputs give the same run', () => {
+  // Every roll in the simulation goes through game.rng, so the balance runs above come out the
+  // same every time. Start with the moves that scatter hatchlings, meteors and cracks around.
+  const run = () => {
+    const g = new Game({ seed: 4, kaijuId: 'rex' });
+    for (const id of ['broodCall', 'meteorCall', 'seismicSlam']) g.held.set(id, AUGMENT_BY_ID[id].levels.length + 1);
+    return simulate(g, { maxTime: 60 });
+  };
+  const a = run();
+  const b = run();
+  assert.ok(a.stats.moves > 0, 'the moves fired');
+  assert.deepEqual(b.stats, a.stats);
+});
+
 function checkRuns(runs) {
   for (const g of runs) {
     assert.ok(g.state === 'won' || g.state === 'lost', `run ended (state ${g.state})`);
