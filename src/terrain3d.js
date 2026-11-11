@@ -2,23 +2,29 @@
 // Ground for an endless world. Each tile covers one cell (2x2 or 4x4 cells once the kaiju is
 // huge) and is painted onto a canvas at a resolution that follows the kaiju's size: very fine
 // for the hatchling, coarse for the Apex, so the painted area stays cheap at every scale.
-// A world-space voxel grain in the shader keeps the ground crisp up close, shorelines are
-// drawn as smooth contours of the water field, and water planes take a small field texture
-// that the shader thresholds, so coasts stay smooth at any zoom.
+// The shader then lays the painting out in voxels, as if the ground were built from the same
+// blocks as everything standing on it: each voxel takes the colour at its centre, with the
+// models' small per-voxel colour jitter, and grass in patches of a few shades. The voxels are
+// about the size of the blocks of the things that matter at each size (the props for the
+// hatchling, the houses for the Brute, the towers for the Colossus), and blend back into the
+// smooth painting where they would be under two pixels across. Water planes take a small field
+// texture that the shader cuts out voxel by voxel too, with a ring of foam along the shore.
 import { WORLD } from './config.js';
 import { waterField } from './world.js';
 import { shade } from './voxel.js';
 
 const CELL = WORLD.cell;
 const RW = WORLD.road;
-// Ground detail per stage: world units per texel, cells per tile, voxel grain size.
+// Ground detail per stage: world units per texel, cells per tile, and the ground's voxel size
+// (props are built from 1-1.8 unit voxels, houses 2.5, towers 3-4; each size divides a cell,
+// so voxels never straddle two tiles).
 const LOD = [null,
-  { upx: 0.41, ts: 1, grain: 0.5 },
-  { upx: 0.82, ts: 1, grain: 0.75 },
-  { upx: 1.64, ts: 1, grain: 1.25 },
-  { upx: 3.3, ts: 1, grain: 2.5 },
-  { upx: 3.3, ts: 2, grain: 5 },
-  { upx: 6.5, ts: 4, grain: 10 },
+  { upx: 0.41, ts: 1, vox: 1.5 },
+  { upx: 0.82, ts: 1, vox: 2.5 },
+  { upx: 1.64, ts: 1, vox: 3 },
+  { upx: 3.3, ts: 1, vox: 4 },
+  { upx: 3.3, ts: 2, vox: 6 },
+  { upx: 6.5, ts: 4, vox: 10 },
 ];
 const GLOW_UPX = 6.5;
 const STYLE_COLOR = {
@@ -48,6 +54,17 @@ const GRAIN_GLSL = `
   float gNoise(vec2 p) {
     vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
     return mix(mix(gHash(i), gHash(i + vec2(1.0, 0.0)), f.x), mix(gHash(i + vec2(0.0, 1.0)), gHash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  // How blocky to draw here: 1 where a ground voxel is a few pixels across, 0 where it would
+  // be under two (there the voxels would only shimmer, so the smooth painting shows instead).
+  float voxSnap(vec2 wpos, float vox) {
+    float wpp = max(fwidth(wpos.x), fwidth(wpos.y));
+    return smoothstep(1.6, 3.2, vox / max(wpp, 1e-4));
+  }
+  // The tile's uv at the centre of the voxel this fragment is in (uv runs east and north).
+  vec2 voxUv(vec2 uv, vec2 wpos, float vox, float tile) {
+    vec2 cc = (floor(wpos / vox) + 0.5) * vox;
+    return uv + vec2(cc.x - wpos.x, wpos.y - cc.y) / tile;
   }`;
 
 export class Terrain {
@@ -56,7 +73,7 @@ export class Terrain {
     this.renderer = renderer;
     this.tiles = new Map();
     this.world = null;
-    this.uGrain = { value: 0.5 };
+    this.uVox = { value: 1.5 };
     this.night = 0;
     this.waterColor = new THREE.Color(0x3a8ac0);
     // Water materials are reused, never disposed: freeing the last one would throw its shader
@@ -116,7 +133,7 @@ export class Terrain {
   update(stage, tx, tz, span, night, waterColor, t, budget = 5) {
     if (!this.world) return;
     const lod = LOD[stage];
-    this.uGrain.value = lod.grain;
+    this.uVox.value = lod.vox;
     this.night = night;
     this.waterColor.copy(waterColor);
     this.waterNormal.offset.set(t * 0.01, t * 0.006);
@@ -752,22 +769,42 @@ export class Terrain {
     map.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const glow = new THREE.CanvasTexture(gv);
     const mat = new THREE.MeshLambertMaterial({ map, emissiveMap: glow, emissive: 0xffffff, emissiveIntensity: this.night * 0.75, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 });
+    const uTile = { value: size };
     mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uGrain = this.uGrain;
+      shader.uniforms.uVox = this.uVox;
+      shader.uniforms.uTile = uTile;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWP;')
         .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\nuniform float uGrain;\nvarying vec3 vWP;\n${GRAIN_GLSL}`)
-        .replace('#include <map_fragment>', `#include <map_fragment>
+        .replace('#include <common>', `#include <common>\nuniform float uVox;\nuniform float uTile;\nvarying vec3 vWP;\n${GRAIN_GLSL}`)
+        .replace('#include <map_fragment>', `
+          float snap = voxSnap(vWP.xz, uVox);
           {
-            vec2 wp = mod(vWP.xz, 2048.0);
-            vec2 g = wp / uGrain;
-            float fw = max(fwidth(g.x), fwidth(g.y));
-            float fade = 1.0 - smoothstep(0.3, 0.8, fw);
-            float n = gHash(floor(g)) * 0.65 + gHash(floor(g * 0.5) + 31.0) * 0.35;
-            diffuseColor.rgb *= 1.0 + (n - 0.5) * 0.2 * fade;
-            diffuseColor.rgb *= 1.0 + (gNoise(wp / 41.0) - 0.5) * 0.1;
+            vec4 smoothC = texture2D(map, vUv);
+            #if __VERSION__ >= 300
+              // The colour at the voxel's centre, filtered for this pixel's footprint (so the
+              // mip level doesn't jump at voxel edges).
+              vec4 blockC = textureGrad(map, voxUv(vUv, vWP.xz, uVox, uTile), dFdx(vUv), dFdy(vUv));
+            #else
+              vec4 blockC = smoothC;
+            #endif
+            diffuseColor *= mix(smoothC, blockC, snap);
+          }
+          {
+            vec2 cell = mod(floor(vWP.xz / uVox), 4096.0);
+            // Each voxel a shade lighter or darker, as on the models.
+            diffuseColor.rgb *= 1.0 + (gHash(cell) - 0.5) * 0.12 * snap;
+            // Grass grows in patches a few voxels across, in three shades, with the odd
+            // sunlit tuft.
+            vec3 c = diffuseColor.rgb;
+            float grassy = smoothstep(0.03, 0.1, c.g - max(c.r, c.b)) * snap;
+            float pn = gNoise(cell / 5.0) * 0.6 + gNoise(cell / 13.0 + 17.0) * 0.4;
+            diffuseColor.rgb *= 1.0 + (floor(pn * 3.0) * 0.5 - 0.5) * 0.12 * grassy;
+            float tuft = step(0.94, gHash(cell + 71.0)) * grassy;
+            diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.14, 1.12, 0.84), tuft);
+            // Broad, gentle variation across the whole ground.
+            diffuseColor.rgb *= 1.0 + (gNoise(mod(vWP.xz, 2048.0) / 41.0) - 0.5) * 0.1;
           }`)
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance *= 0.5 + diffuseColor.rgb * 0.5;');
     };
@@ -797,6 +834,7 @@ export class Terrain {
       field.needsUpdate = true;
       const wm = this.waterPool.pop() || this.makeWaterMaterial();
       wm.color.copy(this.waterColor);
+      wm.userData.uTile.value = size;
       wm.userData.uField.value = field;
       wm.userData.uFS.value = N / n1;
       wm.userData.uFO.value = 0.5 / n1;
@@ -821,23 +859,36 @@ export class Terrain {
     return tile;
   }
 
-  // The water surface: the tile's wet field (a texture) cuts the outline and adds foam.
+  // The water surface: the tile's wet field (a texture) cuts the outline voxel by voxel, like
+  // the ground under it, and puts foam on the voxels along the shore.
   makeWaterMaterial() {
     const wm = new THREE.MeshPhongMaterial({ color: this.waterColor, specular: 0x4a5a6a, shininess: 45, transparent: true, opacity: 0.9, normalMap: this.waterNormal, normalScale: new THREE.Vector2(0.5, 0.5), depthWrite: false });
-    const u = { uField: { value: null }, uFS: { value: 1 }, uFO: { value: 0 } };
+    const u = { uField: { value: null }, uFS: { value: 1 }, uFO: { value: 0 }, uTile: { value: CELL }, uVox: this.uVox };
     wm.userData = u;
     wm.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, u);
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec2 vTUv;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTUv = uv;');
+        .replace('#include <common>', '#include <common>\nvarying vec2 vTUv;\nvarying vec3 vWP;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTUv = uv;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D uField;\nuniform float uFS;\nuniform float uFO;\nvarying vec2 vTUv;')
+        .replace('#include <common>', `#include <common>\nuniform sampler2D uField;\nuniform float uFS;\nuniform float uFO;\nuniform float uTile;\nuniform float uVox;\nvarying vec2 vTUv;\nvarying vec3 vWP;\n${GRAIN_GLSL}`)
         .replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
+          float snapW = voxSnap(vWP.xz, uVox);
           float fWet = texture2D(uField, vTUv * uFS + uFO).r;
           float fAA = fwidth(fWet) * 0.9 + 0.002;
-          diffuseColor.a *= smoothstep(0.5 - fAA, 0.5 + fAA, fWet);
-          float foam = 1.0 - smoothstep(0.5, 0.54, fWet);`)
+          float wetSmooth = smoothstep(0.5 - fAA, 0.5 + fAA, fWet);
+          float foamSmooth = 1.0 - smoothstep(0.5, 0.54, fWet);
+          // Voxel by voxel: wet where its centre is; foam where a neighbour is dry.
+          vec2 fuv = voxUv(vTUv, vWP.xz, uVox, uTile);
+          float wetBlock = step(0.5, texture2D(uField, fuv * uFS + uFO).r);
+          vec2 dv = vec2(uVox / uTile, 0.0);
+          float dryN = min(
+            min(texture2D(uField, (fuv + dv.xy) * uFS + uFO).r, texture2D(uField, (fuv - dv.xy) * uFS + uFO).r),
+            min(texture2D(uField, (fuv + dv.yx) * uFS + uFO).r, texture2D(uField, (fuv - dv.yx) * uFS + uFO).r));
+          float foamBlock = wetBlock * (1.0 - step(0.5, dryN)) * (0.8 + 0.4 * gHash(mod(floor(vWP.xz / uVox), 4096.0)));
+          diffuseColor.a *= mix(wetSmooth, wetBlock, snapW);
+          float foam = mix(foamSmooth, foamBlock, snapW);`)
         .replace('#include <output_fragment>', 'outgoingLight += vec3(0.32) * foam;\n#include <output_fragment>');
     };
     wm.customProgramCacheKey = () => 'water-tile';

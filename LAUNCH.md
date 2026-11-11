@@ -69,18 +69,18 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
 | Lands new players in gameplay immediately | No title or play button: once the city has loaded, a new player is in their first run (controls tip on screen); returning players land in the hub |
 | Progress saving | Everything is one save in the SDK's Data module (a few KB; the limit is 1 MB), read after `SDK.init()` |
 | muteAudio setting | Obeyed at start and on change; the in-game sound toggle can't override it |
-| Midgame ads | After a match ends, before the results; never during play. On top of the SDK's 3-minute cap, `src/adpacing.js` waits for 3–5 minutes of play before the first one (longer in a player's first session), skips very short runs, keeps 90 s of real play between breaks, and skips the first break for players back after 3+ days |
-| Rewarded ads | Labelled with a ▶ icon; the reward only after `adFinished`; a "try again later" message on failure; game muted and paused while an ad plays |
+| Midgame ads | Only after a size-up: the newspaper slams in, and once the player taps it away an ad break may follow (QA's suggestion); never during play, and never on a navigational button (a run ends on "Give up" or "Cash out" and goes straight to the results). On top of the SDK's 3-minute cap, `src/adpacing.js` waits for 3–5 minutes of play before the first one (longer in a player's first session), keeps 90 s of real play between breaks, skips one straight after a rewarded video, and skips the first break for players back after 3+ days |
+| Rewarded ads | Every rewarded button wears the same green tag: a video-camera icon and "AD" (revive, reroll, 2x rewards, free crates and eggs, the free daily deal, energy, gems, pass, patrol, wheel); the reward only after `adFinished`; a "try again later" message on failure; game muted and paused while an ad plays |
 | No progress during an ad | From the moment an ad is requested until it finishes or fails, gameplay is frozen and an invisible layer takes every click and tap (`onAdBusy` in `src/platform.js`, `#app.ad-busy`) |
 | Not too often / not pushed | Free gems: 10 a day, 3 minutes apart with a countdown on the button; no flashing promos |
 | Skip matches the ad button | Revive / Give up, Spin / Close, energy, patrol and results buttons are the same size and colour |
-| Out-of-lives ads | The ad revive is at most one offer per run and at least 5 minutes apart (not every knock-down), on a 10 s countdown; no ad break follows a knock-down that offered one. New players, players back after a break and players on a losing streak get one free revive a session instead |
+| Out-of-lives ads | The ad revive is at most one offer per run and at least 5 minutes apart (not every knock-down), on a 10 s countdown; no ad break follows a knock-down. New players, players back after a break and players on a losing streak get one free revive a session instead |
 | Ad pressure (`AD_PRESSURE` in `src/config.js`) | Once a run, when an ad revive is ready and the run nears the player's best, enemies hit 1.8x harder for 25 s with two extra strike waves. Never without ads, never in a player's first 3 runs; one A/B arm in three never gets it. **Review risk:** CrazyGames bans ads that "trigger deceptively"; if QA questions it, set `enabled: false` and rebuild |
 | Ads off (Basic Launch) or ad blockers | Detected (`hasAdblock`, `adsDisabled`) and every rewarded button is hidden; the pass bonus and the wheel switch to small gem prices; the game plays normally |
 | No external ads, links, purchases or logins | None in the game |
 | No custom fullscreen button | None (CrazyGames provides fullscreen) |
 | Restricted keys | Escape isn't used (P pauses); WASD is read by key position, so ZQSD works on AZERTY |
-| Readable in small 16:9 frames | Every font size went up by 2px for Full Launch QA (the smallest text is now 8px in the pixel font, from 6px). Above about 800x480 the whole interface scales with the frame (`fitUi` in `src/main.js`), so every 16:9 frame from 821x462 to 1920x1080 shows the same layout, just bigger, and the HUD gets a further 1.25x on anything bigger than a phone. Floating combat text and speech bubbles scale with it. The damage counter is deep green on its lavender pill (it was pale gold, which QA flagged as hard to read) |
+| Readable in small 16:9 frames | Every font size went up by 2px for Full Launch QA (the smallest text is now 8px in the pixel font, from 6px). Above about 800x480 the whole interface scales with the frame (`fitUi` in `src/main.js`), so every 16:9 frame from 821x462 to 1920x1080 shows the same layout, just bigger, and the HUD gets a further 1.25x on anything bigger than a phone. Floating combat text and speech bubbles scale with it. The in-run HUD is dark glass with white type and a bright gold damage counter by a gold coin (it was pale gold on lavender, which QA flagged as hard to read), and on short screens it packs down (narrower bars, a smaller charge button, the tutorial tip moved to a corner) so the kaiju keeps the middle of the screen |
 | Consistent at 144 Hz+ | Simulation runs on frame time (capped at 20 fps steps) |
 | Text selection on touch | Off (`user-select: none` with every prefix, no touch callouts) |
 | iOS audio | The audio context resumes on every touch or click while suspended or interrupted |
@@ -93,8 +93,9 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
   run badly on Safari).
 - A 4 GB Chromebook or an older phone: if late runs stutter, the game steps graphics down on its own,
   and the pause menu has Low graphics.
-- In the Developer Portal preview: an ad break after a run (after the first few minutes of play), a
-  rewarded ad for gems, and the game with an ad blocker on.
+- In the Developer Portal preview: an ad break after tapping away a size-up newspaper (after the
+  first few minutes of play), none after "Give up", a rewarded ad for gems, and the game with an ad
+  blocker on.
 - Signing in and out of a CrazyGames account: progress should follow the account.
 
 ## 6. Decisions for you

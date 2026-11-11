@@ -83,7 +83,6 @@ let newsAt = 0; // when the size-up newspaper slams in (0: none on its way)
 let newsStage = 0;
 let newsAfterWarp = false; // a size-up arrived mid-warp: its newspaper waits for the warp to end
 let newsUp = false; // the newspaper is on screen, and the run waits for it
-let reviveAdOffered = false; // this run's last knockdown offered an ad revive (so no ad break follows)
 
 function defaultQuality() {
   const saved = settings.quality;
@@ -125,10 +124,10 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, sta
   newsUp = false;
   newsAfterWarp = false;
   warpFx.cancel();
-  reviveAdOffered = false;
   // Rex pounces and Volt Beetle blinks where the others charge.
   const trait = game.def.trait;
   dashBtn.querySelector('b').textContent = trait === 'pounce' ? 'Pounce' : trait === 'blink' ? 'Blink' : 'Charge';
+  dashBtn.dataset.move = trait === 'pounce' || trait === 'blink' ? trait : 'charge'; // (its icon)
   ui.warmNewsFonts();
   hintUntil = firstRun || save.runs < 2 ? performance.now() + 7000 : 0;
   ui.hint(hintUntil ? (window.matchMedia('(pointer: coarse)').matches ? 'Drag to move. You attack on your own. Eat people to grow.' : 'WASD or arrows to move. You attack on your own. Eat people to grow.') : '');
@@ -290,7 +289,7 @@ function handleEvents(events) {
         // A free revive instead of the ad one for players who look likely to drift away, and an
         // honest word on how close the run is to their best (see adpacing.js).
         const offer = reviveOffer(pace, { damage: game.stats.damage, bestDamage: save.stats.bestDamage, now: now() });
-        reviveAdOffered = hub.showRevive({
+        const adOffered = hub.showRevive({
           free: game.freeRevives > 0, ad: game.reviveAvailable && offer.ad, gems: price, gift: game.reviveAvailable ? offer.gift : null, near: offer,
           onRevive: (how) => {
             reviveTaken(pace, how, { pressured: Boolean(game.pressure) });
@@ -301,7 +300,7 @@ function handleEvents(events) {
             game.giveUp();
           },
         });
-        if (reviveAdOffered) markReviveAd(pace, now());
+        if (adOffered) markReviveAd(pace, now());
         persist();
         break;
       }
@@ -346,19 +345,29 @@ function onRunEnd(results) {
     },
     onAgain: () => startRun(lastSettings),
   });
-  // An ad break when one fits (see adpacing.js: enough play since the last one, not after a very
-  // short run, never straight after an ad revive was offered), then the results.
+  // Straight to the results: a run ends on a button ("Give up", the countdown, "Cash out"), and
+  // CrazyGames counts an ad break there as navigational. The ad breaks come after the size-up
+  // newspaper instead (see adBreakAfterNews).
   runEnded(pace, { won: results.won, runSec: results.time });
-  const brk = breakDecision(pace, { now: now(), runSec: results.time, reviveOffered: reviveAdOffered });
   persist();
-  if (!brk.show) show();
-  else {
-    platform.showAd('midgame').then((ok) => {
-      if (ok) adShown(pace, 'midgame', now());
-      persist();
-      show();
-    });
+  show();
+}
+
+// The size-up newspaper is the run's natural break (CrazyGames QA suggested it): once the player
+// puts it away, an ad break when one fits (see adpacing.js: a few minutes of play first, minutes
+// between breaks, never just after a rewarded video), then the run carries on.
+function adBreakAfterNews(then) {
+  const brk = pace && game ? breakDecision(pace, { now: now(), runSec: game.time }) : { show: false };
+  persist();
+  if (!brk.show) {
+    then();
+    return;
   }
+  platform.showAd('midgame').then((ok) => {
+    if (ok) adShown(pace, 'midgame', now());
+    persist();
+    then();
+  });
 }
 
 // The augment pick, with the extra reroll behind a rewarded ad.
@@ -504,7 +513,10 @@ function frame(stamp) {
       const head = renderer.project(k.x, k.y, k.r * 2.4);
       const photo = renderer.snapshot((feet.x + head.x) / 2, (feet.y + head.y) / 2, Math.hypot(head.x - feet.x, head.y - feet.y), 360, 240);
       ui.showNewspaper(frontPage(game, newsStage), photo, () => {
-        newsUp = false;
+        // (the run stays held while the ad plays)
+        adBreakAfterNews(() => {
+          newsUp = false;
+        });
       });
       sfx.paper();
     }

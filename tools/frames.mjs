@@ -37,8 +37,38 @@ const FRAMES = {
     ' OOOOOOOO ',
     '  OOOOOO  ',
   ],
+  // The in-run HUD's dark glass plates: a near-black edge, a faint lit line along the top and a
+  // shade along the bottom.
+  'frame-hud': [
+    '  QQQQQQ  ',
+    ' QLLLLLLQ ',
+    'QL______LQ',
+    'Q________Q',
+    'Q________Q',
+    'Q________Q',
+    'Q________Q',
+    'QD______DQ',
+    ' QDDDDDDQ ',
+    '  QQQQQQ  ',
+  ],
+  // The same with a bevelled gold trim: the level badge, a charged-up move, an evolution.
+  'frame-gold': [
+    '  QQQQQQ  ',
+    ' QGGGGGGQ ',
+    'QG______gQ',
+    'QG______gQ',
+    'QG______gQ',
+    'QG______gQ',
+    'QG______gQ',
+    'QG______gQ',
+    ' QggggggQ ',
+    '  QQQQQQ  ',
+  ],
 };
-const COLORS = { O: '#2a1736', H: 'rgba(255,255,255,0.42)', S: 'rgba(42,23,54,0.22)' };
+const COLORS = {
+  O: '#2a1736', H: 'rgba(255,255,255,0.42)', S: 'rgba(42,23,54,0.22)',
+  Q: '#160d1c', L: 'rgba(255,255,255,0.16)', D: 'rgba(0,0,0,0.32)', G: '#ffd864', g: '#b8761b',
+};
 
 function svg(rows) {
   const w = rows[0].length;
