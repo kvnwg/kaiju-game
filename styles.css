@@ -50,6 +50,9 @@
   --frame-btn: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%232a1736'/><rect x='1' y='1' width='1' height='1' fill='%232a1736'/><rect x='2' y='1' width='6' height='1' fill='rgba(255,255,255,0.42)'/><rect x='8' y='1' width='1' height='1' fill='%232a1736'/><rect x='0' y='2' width='1' height='1' fill='%232a1736'/><rect x='1' y='2' width='1' height='1' fill='rgba(255,255,255,0.42)'/><rect x='8' y='2' width='1' height='1' fill='rgba(255,255,255,0.42)'/><rect x='9' y='2' width='1' height='1' fill='%232a1736'/><rect x='0' y='3' width='1' height='1' fill='%232a1736'/><rect x='9' y='3' width='1' height='1' fill='%232a1736'/><rect x='0' y='4' width='1' height='1' fill='%232a1736'/><rect x='9' y='4' width='1' height='1' fill='%232a1736'/><rect x='0' y='5' width='1' height='1' fill='%232a1736'/><rect x='9' y='5' width='1' height='1' fill='%232a1736'/><rect x='0' y='6' width='1' height='1' fill='%232a1736'/><rect x='1' y='6' width='1' height='1' fill='rgba(42,23,54,0.22)'/><rect x='8' y='6' width='1' height='1' fill='rgba(42,23,54,0.22)'/><rect x='9' y='6' width='1' height='1' fill='%232a1736'/><rect x='0' y='7' width='1' height='1' fill='%232a1736'/><rect x='1' y='7' width='8' height='1' fill='rgba(42,23,54,0.22)'/><rect x='9' y='7' width='1' height='1' fill='%232a1736'/><rect x='1' y='8' width='8' height='1' fill='%232a1736'/><rect x='2' y='9' width='6' height='1' fill='%232a1736'/></svg>");
   --frame-hud: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%23160d1c'/><rect x='1' y='1' width='1' height='1' fill='%23160d1c'/><rect x='2' y='1' width='6' height='1' fill='rgba(255,255,255,0.16)'/><rect x='8' y='1' width='1' height='1' fill='%23160d1c'/><rect x='0' y='2' width='1' height='1' fill='%23160d1c'/><rect x='1' y='2' width='1' height='1' fill='rgba(255,255,255,0.16)'/><rect x='8' y='2' width='1' height='1' fill='rgba(255,255,255,0.16)'/><rect x='9' y='2' width='1' height='1' fill='%23160d1c'/><rect x='0' y='3' width='1' height='1' fill='%23160d1c'/><rect x='9' y='3' width='1' height='1' fill='%23160d1c'/><rect x='0' y='4' width='1' height='1' fill='%23160d1c'/><rect x='9' y='4' width='1' height='1' fill='%23160d1c'/><rect x='0' y='5' width='1' height='1' fill='%23160d1c'/><rect x='9' y='5' width='1' height='1' fill='%23160d1c'/><rect x='0' y='6' width='1' height='1' fill='%23160d1c'/><rect x='9' y='6' width='1' height='1' fill='%23160d1c'/><rect x='0' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='7' width='1' height='1' fill='rgba(0,0,0,0.32)'/><rect x='8' y='7' width='1' height='1' fill='rgba(0,0,0,0.32)'/><rect x='9' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='8' width='6' height='1' fill='rgba(0,0,0,0.32)'/><rect x='8' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='9' width='6' height='1' fill='%23160d1c'/></svg>");
   --frame-gold: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%23160d1c'/><rect x='1' y='1' width='1' height='1' fill='%23160d1c'/><rect x='2' y='1' width='6' height='1' fill='%23ffd864'/><rect x='8' y='1' width='1' height='1' fill='%23160d1c'/><rect x='0' y='2' width='1' height='1' fill='%23160d1c'/><rect x='1' y='2' width='1' height='1' fill='%23ffd864'/><rect x='8' y='2' width='1' height='1' fill='%23b8761b'/><rect x='9' y='2' width='1' height='1' fill='%23160d1c'/><rect x='0' y='3' width='1' height='1' fill='%23160d1c'/><rect x='1' y='3' width='1' height='1' fill='%23ffd864'/><rect x='8' y='3' width='1' height='1' fill='%23b8761b'/><rect x='9' y='3' width='1' height='1' fill='%23160d1c'/><rect x='0' y='4' width='1' height='1' fill='%23160d1c'/><rect x='1' y='4' width='1' height='1' fill='%23ffd864'/><rect x='8' y='4' width='1' height='1' fill='%23b8761b'/><rect x='9' y='4' width='1' height='1' fill='%23160d1c'/><rect x='0' y='5' width='1' height='1' fill='%23160d1c'/><rect x='1' y='5' width='1' height='1' fill='%23ffd864'/><rect x='8' y='5' width='1' height='1' fill='%23b8761b'/><rect x='9' y='5' width='1' height='1' fill='%23160d1c'/><rect x='0' y='6' width='1' height='1' fill='%23160d1c'/><rect x='1' y='6' width='1' height='1' fill='%23ffd864'/><rect x='8' y='6' width='1' height='1' fill='%23b8761b'/><rect x='9' y='6' width='1' height='1' fill='%23160d1c'/><rect x='0' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='7' width='1' height='1' fill='%23ffd864'/><rect x='8' y='7' width='1' height='1' fill='%23b8761b'/><rect x='9' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='8' width='6' height='1' fill='%23b8761b'/><rect x='8' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='9' width='6' height='1' fill='%23160d1c'/></svg>");
+  --frame-silver: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%23160d1c'/><rect x='1' y='1' width='1' height='1' fill='%23160d1c'/><rect x='2' y='1' width='6' height='1' fill='%23eef2f8'/><rect x='8' y='1' width='1' height='1' fill='%23160d1c'/><rect x='0' y='2' width='1' height='1' fill='%23160d1c'/><rect x='1' y='2' width='7' height='1' fill='%23eef2f8'/><rect x='8' y='2' width='1' height='1' fill='%238590a6'/><rect x='9' y='2' width='1' height='1' fill='%23160d1c'/><rect x='0' y='3' width='1' height='1' fill='%23160d1c'/><rect x='1' y='3' width='2' height='1' fill='%23eef2f8'/><rect x='7' y='3' width='2' height='1' fill='%238590a6'/><rect x='9' y='3' width='1' height='1' fill='%23160d1c'/><rect x='0' y='4' width='1' height='1' fill='%23160d1c'/><rect x='1' y='4' width='2' height='1' fill='%23eef2f8'/><rect x='7' y='4' width='2' height='1' fill='%238590a6'/><rect x='9' y='4' width='1' height='1' fill='%23160d1c'/><rect x='0' y='5' width='1' height='1' fill='%23160d1c'/><rect x='1' y='5' width='2' height='1' fill='%23eef2f8'/><rect x='7' y='5' width='2' height='1' fill='%238590a6'/><rect x='9' y='5' width='1' height='1' fill='%23160d1c'/><rect x='0' y='6' width='1' height='1' fill='%23160d1c'/><rect x='1' y='6' width='2' height='1' fill='%23eef2f8'/><rect x='7' y='6' width='2' height='1' fill='%238590a6'/><rect x='9' y='6' width='1' height='1' fill='%23160d1c'/><rect x='0' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='7' width='1' height='1' fill='%23eef2f8'/><rect x='2' y='7' width='7' height='1' fill='%238590a6'/><rect x='9' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='8' width='6' height='1' fill='%238590a6'/><rect x='8' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='9' width='6' height='1' fill='%23160d1c'/></svg>");
+  --frame-gold-tier: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%23160d1c'/><rect x='1' y='1' width='1' height='1' fill='%23160d1c'/><rect x='2' y='1' width='1' height='1' fill='%23fff7d1'/><rect x='3' y='1' width='5' height='1' fill='%23ffd95a'/><rect x='8' y='1' width='1' height='1' fill='%23160d1c'/><rect x='0' y='2' width='1' height='1' fill='%23160d1c'/><rect x='1' y='2' width='1' height='1' fill='%23fff7d1'/><rect x='2' y='2' width='6' height='1' fill='%23ffd95a'/><rect x='8' y='2' width='1' height='1' fill='%23b26f12'/><rect x='9' y='2' width='1' height='1' fill='%23160d1c'/><rect x='0' y='3' width='1' height='1' fill='%23160d1c'/><rect x='1' y='3' width='2' height='1' fill='%23ffd95a'/><rect x='7' y='3' width='2' height='1' fill='%23b26f12'/><rect x='9' y='3' width='1' height='1' fill='%23160d1c'/><rect x='0' y='4' width='1' height='1' fill='%23160d1c'/><rect x='1' y='4' width='2' height='1' fill='%23ffd95a'/><rect x='7' y='4' width='2' height='1' fill='%23b26f12'/><rect x='9' y='4' width='1' height='1' fill='%23160d1c'/><rect x='0' y='5' width='1' height='1' fill='%23160d1c'/><rect x='1' y='5' width='2' height='1' fill='%23ffd95a'/><rect x='7' y='5' width='2' height='1' fill='%23b26f12'/><rect x='9' y='5' width='1' height='1' fill='%23160d1c'/><rect x='0' y='6' width='1' height='1' fill='%23160d1c'/><rect x='1' y='6' width='2' height='1' fill='%23ffd95a'/><rect x='7' y='6' width='2' height='1' fill='%23b26f12'/><rect x='9' y='6' width='1' height='1' fill='%23160d1c'/><rect x='0' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='7' width='1' height='1' fill='%23ffd95a'/><rect x='2' y='7' width='7' height='1' fill='%23b26f12'/><rect x='9' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='8' width='6' height='1' fill='%23b26f12'/><rect x='8' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='9' width='6' height='1' fill='%23160d1c'/></svg>");
+  --frame-prism: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' shape-rendering='crispEdges'><rect x='2' y='0' width='6' height='1' fill='%23160d1c'/><rect x='1' y='1' width='1' height='1' fill='%23160d1c'/><rect x='8' y='1' width='1' height='1' fill='%23160d1c'/><rect x='0' y='2' width='1' height='1' fill='%23160d1c'/><rect x='9' y='2' width='1' height='1' fill='%23160d1c'/><rect x='0' y='3' width='1' height='1' fill='%23160d1c'/><rect x='9' y='3' width='1' height='1' fill='%23160d1c'/><rect x='0' y='4' width='1' height='1' fill='%23160d1c'/><rect x='9' y='4' width='1' height='1' fill='%23160d1c'/><rect x='0' y='5' width='1' height='1' fill='%23160d1c'/><rect x='9' y='5' width='1' height='1' fill='%23160d1c'/><rect x='0' y='6' width='1' height='1' fill='%23160d1c'/><rect x='9' y='6' width='1' height='1' fill='%23160d1c'/><rect x='0' y='7' width='1' height='1' fill='%23160d1c'/><rect x='9' y='7' width='1' height='1' fill='%23160d1c'/><rect x='1' y='8' width='1' height='1' fill='%23160d1c'/><rect x='8' y='8' width='1' height='1' fill='%23160d1c'/><rect x='2' y='9' width='6' height='1' fill='%23160d1c'/></svg>");
   /* frames:end */
   /* The in-run HUD's icons, drawn to show at 2 screen pixels per art pixel. */
   /* hud-icons:begin (generated by tools/hud-icons.mjs) */
@@ -2123,4 +2126,98 @@ html, body {
   .card:hover, .card:focus-visible, .card[class*='kind-']:hover { background: linear-gradient(180deg, var(--kc) 0%, var(--lav) 65%, var(--lav) 100%); }
   .chest-odds span { background: #fff; box-shadow: inset 0 0 0 2px var(--rc); }
   .crate-open::before { background: repeating-conic-gradient(from 0deg, rgba(255, 255, 255, 0.16) 0 7deg, transparent 7deg 20deg); }
+}
+
+/* ---------- move tiers ---------- */
+/* Silver, gold and prismatic tell apart at a glance, on the level-up cards and the HUD's move
+   tiles alike: each tier has its own frame (tools/frames.mjs) and chip, and the rarer it is, the
+   more goes on. Silver glints now and then. Gold glows, sparkles and has two stars circling its
+   medal. Prismatic has a rainbow ring running round it, a holographic sheen, rainbow rays, five
+   circling stars and a shower of rainbow sparks. A card's effects start once its reel lands.
+   (Glows are inset: a card's rounded clip cuts off anything drawn outside it.) */
+.card.tier-silver, #hud .tile.tier-silver { border-image-source: var(--frame-silver); }
+.card.tier-gold, #hud .tile.tier-gold { border-image-source: var(--frame-gold-tier); }
+.card.tier-prismatic, #hud .tile.tier-prismatic { border-image-source: var(--frame-prism); }
+.tile::before { display: none; }
+
+.card.tier-silver .tier { background: linear-gradient(180deg, #ffffff 0%, #d9e0ea 50%, #98a2b6 100%); color: #2a1736; }
+.card.tier-gold .tier { background: linear-gradient(180deg, #fff3b0 0%, #ffd23f 50%, #c8861a 100%); color: #3b2149; }
+.card.tier-prismatic .tier { background: linear-gradient(90deg, #ff6b9a, #ffd23f, #7dff5a, #5ff0ff, #c58bff); color: #2a1736; animation: tierHue 2.4s steps(12) infinite; }
+
+.card.tier-gold.landed { animation: tierGoldPulse 1.6s steps(8) infinite; }
+@keyframes tierGoldPulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 236, 160, 0.4), inset 0 0 14px rgba(255, 196, 46, 0.35); }
+  50% { box-shadow: inset 0 0 0 2px rgba(255, 236, 160, 0.85), inset 0 0 28px rgba(255, 196, 46, 0.7); }
+}
+.card.tier-prismatic.landed { animation: tierPrismGlow 1.5s steps(10) infinite; }
+@keyframes tierPrismGlow {
+  0%, 100% { box-shadow: inset 0 0 24px rgba(255, 107, 154, 0.5); } 20% { box-shadow: inset 0 0 24px rgba(255, 210, 63, 0.5); }
+  40% { box-shadow: inset 0 0 24px rgba(125, 255, 90, 0.5); } 60% { box-shadow: inset 0 0 24px rgba(95, 240, 255, 0.5); }
+  80% { box-shadow: inset 0 0 24px rgba(197, 139, 255, 0.5); }
+}
+
+/* Prismatic's ring: rainbow, running round inside the outline (its corners notched to fit the
+   frame's stepped ones). */
+.tier-ring {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  border: calc(2 * var(--fp)) solid transparent;
+  border-image: linear-gradient(135deg, #ff6b9a, #ffd23f, #7dff5a, #5ff0ff, #c58bff, #ff6b9a) 1;
+  clip-path: polygon(var(--fp) 0, calc(100% - var(--fp)) 0, calc(100% - var(--fp)) var(--fp), 100% var(--fp), 100% calc(100% - var(--fp)), calc(100% - var(--fp)) calc(100% - var(--fp)), calc(100% - var(--fp)) 100%, var(--fp) 100%, var(--fp) calc(100% - var(--fp)), 0 calc(100% - var(--fp)), 0 var(--fp), var(--fp) var(--fp));
+  animation: tierHue 2.4s steps(12) infinite;
+}
+.tile .tier-ring { z-index: 3; border-width: calc(1.5 * var(--fp)); }
+@keyframes tierHue { to { filter: hue-rotate(360deg); } }
+
+/* Prismatic's holographic sheen: a rainbow band sweeping across the card. */
+.tier-foil {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0;
+  background: linear-gradient(115deg, transparent 36%, rgba(255, 107, 154, 0.3) 41%, rgba(255, 210, 63, 0.3) 45%, rgba(125, 255, 90, 0.3) 49%, rgba(95, 240, 255, 0.3) 53%, rgba(197, 139, 255, 0.3) 57%, transparent 62%) 100% 0 / 300% 100% no-repeat;
+}
+.card.landed .tier-foil { opacity: 1; animation: tierFoil 2.8s steps(18) infinite; }
+@keyframes tierFoil { 0% { background-position: 100% 0; } 65%, 100% { background-position: 0 0; } }
+
+/* Sparks: little pixel stars (a plus of five pixels) in the tier's colours. */
+.tier-fx { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.tier-fx i, .tier-burst i, .medal-orbit i, .tile .spark {
+  position: absolute; width: 2px; height: 2px; background: var(--c, #fff);
+  box-shadow: 2px 0 0 var(--c, #fff), -2px 0 0 var(--c, #fff), 0 2px 0 var(--c, #fff), 0 -2px 0 var(--c, #fff);
+}
+.tier-fx i { left: var(--x); top: var(--y); opacity: 0; }
+.card.landed .tier-fx i.tw { animation: tierTwinkle var(--t) steps(6) var(--d) infinite; }
+.card.landed .tier-fx i.rise { animation: tierRise var(--t) steps(9) var(--d) infinite; }
+.card.tier-silver.landed .tier-fx i { animation-duration: 3.6s; }
+@keyframes tierTwinkle { 0%, 100% { opacity: 0; transform: scale(0.4); } 35% { opacity: 1; transform: scale(1.3); } 65% { opacity: 0; transform: scale(0.4); } }
+@keyframes tierRise { 0% { opacity: 0; transform: translateY(4px); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-36px); } }
+
+/* The landing burst out of the medal: 4 sparks for silver, 8 for gold, 16 for prismatic. */
+.tier-burst { position: absolute; left: 50%; top: 50%; z-index: 3; pointer-events: none; }
+.tier-burst i { left: -1px; top: -1px; opacity: 0; }
+.card.landed .tier-burst i { animation: tierBurst 0.75s steps(8) forwards; }
+@keyframes tierBurst { 0% { opacity: 1; transform: translate(0, 0) scale(1.8); } 100% { opacity: 0; transform: translate(var(--bx), var(--by)) scale(0.6); } }
+
+/* Stars circling the medal: two for gold, five (and faster) for prismatic. */
+.medal-orbit { position: absolute; left: 50%; top: 50%; z-index: 2; pointer-events: none; opacity: 0; }
+.medal-orbit i { left: -1px; top: -1px; transform: rotate(var(--a)) translateY(-45px); }
+.card.landed .medal-orbit { opacity: 1; animation: tierOrbit 3.2s steps(32) infinite; }
+.card.tier-prismatic.landed .medal-orbit { animation-duration: 2.2s; }
+@keyframes tierOrbit { to { transform: rotate(360deg); } }
+
+/* Rays behind the medal: gold ones for gold, a rainbow spinning faster for prismatic. */
+.card.tier-gold .medal-rays { background: repeating-conic-gradient(#ffd23f 0deg 12deg, transparent 12deg 30deg); }
+.card.tier-prismatic .medal-rays {
+  background: conic-gradient(#ff6b9a 0deg 14deg, transparent 14deg 36deg, #ffd23f 36deg 50deg, transparent 50deg 72deg, #7dff5a 72deg 86deg, transparent 86deg 108deg, #5ff0ff 108deg 122deg, transparent 122deg 144deg, #c58bff 144deg 158deg, transparent 158deg 180deg, #ff6b9a 180deg 194deg, transparent 194deg 216deg, #ffd23f 216deg 230deg, transparent 230deg 252deg, #7dff5a 252deg 266deg, transparent 266deg 288deg, #5ff0ff 288deg 302deg, transparent 302deg 324deg, #c58bff 324deg 338deg, transparent 338deg 360deg);
+}
+.card.tier-prismatic.landed .medal-rays { opacity: 1; animation-duration: 2.6s; }
+
+/* On the HUD's tiles: one twinkle for gold, three in rainbow colours for prismatic. */
+.tile .spark { z-index: 4; opacity: 0; --c: #fff3a8; animation: tierTwinkle 3s steps(6) infinite; }
+.tile .spark.s1 { left: 5px; top: 5px; }
+.tile.tier-prismatic .spark { animation-duration: 2.2s; }
+.tile.tier-prismatic .spark.s1 { --c: #ffffff; }
+.tile .spark.s2 { right: 6px; top: 10px; --c: #5ff0ff; animation-delay: 0.7s; }
+.tile .spark.s3 { left: 10px; bottom: 7px; --c: #ff6b9a; animation-delay: 1.4s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tier-fx, .tier-burst, .medal-orbit, .tier-foil, .tile .spark { display: none; }
+  .tier-ring, .card.tier-prismatic .tier, .card.tier-gold.landed, .card.tier-prismatic.landed { animation: none; }
 }

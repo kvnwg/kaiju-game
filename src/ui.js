@@ -45,6 +45,49 @@ function codex(held) {
 // Card colours by kind: moves warm, passives cool, evolutions gold, bonuses green.
 const KIND_LOOK = { move: ['#ff8a9a', '#c8344a'], passive: ['#8ad4ff', '#2a74c8'], evolution: ['#ffe07a', '#c8901a'], filler: ['#9ee88a', '#3a9a3a'], void: ['#2a2238', '#0a0810'] };
 
+// Move tiers, as the player sees them: each has its own frame, chip and effects (styles.css,
+// "move tiers"), and the rarer the tier the more goes on. Silver glints, gold sparkles and
+// glows with two stars circling its medal, prismatic gets a rainbow ring, a holographic sheen
+// and a shower of rainbow particles.
+const TIER_NAME = { silver: 'Silver', gold: 'Gold', prismatic: 'Prismatic' };
+const TIER_FX = {
+  silver: { sparks: 3, burst: 4, orbit: 0, colors: ['#ffffff', '#dfe6f1'] },
+  gold: { sparks: 8, burst: 8, orbit: 2, colors: ['#fff3a8', '#ffd23f', '#ffb52e'] },
+  prismatic: { sparks: 18, burst: 16, orbit: 5, colors: ['#ff6b9a', '#ffd23f', '#7dff5a', '#5ff0ff', '#c58bff', '#ffffff'] },
+};
+
+// A card's tier effects: sparkles round its edges (`card`), and a burst and orbiting stars on its
+// medal (`medal`). Positions are fixed per card, so a re-render doesn't reshuffle them.
+function tierFx(tier, seed) {
+  const fx = TIER_FX[tier];
+  if (!fx) return { card: '', medal: '' };
+  const r = (n) => {
+    const x = Math.sin(seed * 97.13 + n * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  // Along the edges, clear of the card's text: a side, then a spot along it.
+  const spot = (j) => {
+    const along = (4 + r(j) * 92).toFixed(1);
+    const off = (3 + r(j + 30) * 9).toFixed(1);
+    return [[along, off], [along, 100 - off], [off, along], [100 - off, along]][Math.floor(r(j + 60) * 4)];
+  };
+  const sparks = Array.from({ length: fx.sparks }, (_, j) => {
+    const [x, y] = spot(j);
+    const kind = tier === 'silver' || j % 3 ? 'tw' : 'rise';
+    return `<i class="${kind}" style="--x:${x}%;--y:${y}%;--d:${(r(j + 90) * 2.4).toFixed(2)}s;--t:${(1.3 + r(j + 120) * 1.3).toFixed(2)}s;--c:${fx.colors[j % fx.colors.length]}"></i>`;
+  }).join('');
+  const burst = Array.from({ length: fx.burst }, (_, j) => {
+    const a = (j / fx.burst) * Math.PI * 2 + r(j + 150) * 0.4;
+    const d = 38 + r(j + 180) * 46;
+    return `<i style="--bx:${(Math.cos(a) * d).toFixed(0)}px;--by:${(Math.sin(a) * d).toFixed(0)}px;--c:${fx.colors[j % fx.colors.length]}"></i>`;
+  }).join('');
+  const orbit = fx.orbit ? `<span class="medal-orbit">${Array.from({ length: fx.orbit }, (_, j) => `<i style="--a:${((360 * j) / fx.orbit).toFixed(0)}deg;--c:${fx.colors[j % fx.colors.length]}"></i>`).join('')}</span>` : '';
+  return {
+    card: `${tier === 'prismatic' ? '<span class="tier-ring"></span><span class="tier-foil"></span>' : ''}<span class="tier-fx">${sparks}</span>`,
+    medal: `${orbit}<span class="tier-burst">${burst}</span>`,
+  };
+}
+
 function reel(a, i) {
   const syms = Array.from({ length: 10 + i * 5 }, () => REEL_POOL[Math.floor(Math.random() * REEL_POOL.length)]);
   return `<div class="reel"><div class="strip">${icon(a)}${syms.map(icon).join('')}</div></div>`;
@@ -364,8 +407,10 @@ export class UI {
           const st = evo && !game.held.has(evo.id) ? recipeState(game.held, evo) : null;
           const hint = st ? `<i class="evo-hint aug-ico ico-${evo.passive}${st.passive ? ' have' : ''}"></i>` : '';
           const title = st ? `${a.name}: ${a.text}. Max it and hold ${AUGMENT_BY_ID[evo.passive].name} to evolve into ${evo.name}` : `${a.name}: ${a.text}`;
+          // The tier shows on the tile too: its frame, a rainbow ring for prismatic, and sparkles.
+          const sparkles = a.tier === 'prismatic' ? '<i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i>' : a.tier === 'gold' ? '<i class="spark s1"></i>' : '';
           return `<div class="tile tier-${a.tier} kind-${a.kind}${st && st.ready ? ' evo-ready' : ''}${fresh.includes(id) ? ' slam-in' : ''}" ${a.kind === 'move' ? `data-move="${id}"` : ''} title="${title}">
-            ${icon(a)}${hint}${a.kind === 'move' ? '<span class="cd"></span>' : ''}<b class="lvl${level >= maxLevel(a) ? ' max' : ''}">${level}</b></div>`;
+            ${a.tier === 'prismatic' ? '<span class="tier-ring"></span>' : ''}${icon(a)}${hint}${a.kind === 'move' ? '<span class="cd"></span>' : ''}${sparkles}<b class="lvl${level >= maxLevel(a) ? ' max' : ''}">${level}</b></div>`;
       };
       const held = [...game.held.entries()].filter(([id]) => AUGMENT_BY_ID[id]);
       const row = (kind) => held.filter(([id]) => AUGMENT_BY_ID[id].kind === kind).map(tile).join('');
@@ -476,7 +521,10 @@ export class UI {
         const level = game.level(id);
         const max = a.kind === 'filler' ? 0 : maxLevel(a);
         const next = level + 1;
-        const tag = a.kind === 'filler' ? 'Bonus' : id === 'voidShard' ? `Shard ${next} of 3` : id === 'voidRevert' ? 'The way back' : level ? `Lv ${level} → ${next}${next === max ? ' · Max' : ''}` : 'New';
+        const tag = a.kind === 'filler' ? 'Bonus' : id === 'voidShard' ? `Shard ${next} of 3` : id === 'voidRevert' ? 'The way back' : level ? `Lv ${level} → ${next}${next === max ? ' · Max' : ''}` : `New ${a.kind}`;
+        // The chip names the tier (an evolution says so instead); the effects follow the tier.
+        const chip = a.kind === 'filler' ? 'Bonus' : a.kind === 'evolution' ? 'Evolution' : TIER_NAME[a.tier] || a.kind;
+        const fx = tierFx(a.tier, i + 1);
         const sets = setsFor(id)
           .map((st) => {
             const have = st.augments.filter((x) => game.has(x) || x === id).length;
@@ -492,9 +540,9 @@ export class UI {
         const [kc, kc2] = KIND_LOOK[a.kind] || KIND_LOOK.filler;
         return `<button class="card tier-${a.tier} kind-${a.kind}${level ? ' upgrade' : ''}${slam ? ' evo-slam' : ''}" data-id="${id}" style="--i:${i};--kc:${kc};--kc2:${kc2}">
           ${slam ? `<span class="slam-ring"></span><span class="slam-sparks"></span><span class="slam-stamp">${a.kind === 'void' ? (id === 'voidRevert' ? 'Light' : 'Void') : 'Evolution!'}</span>` : ''}
-          <span class="card-shine"></span>
-          <div class="card-top"><span class="tier">${a.kind === 'filler' ? 'Bonus' : a.kind}</span><span class="cat">${tag}</span></div>
-          <div class="card-main"><span class="medal"><span class="medal-rays"></span>${slam ? `<div class="reel"><div class="strip">${icon(a)}</div></div>` : reel(a, i)}</span><div class="name">${a.name}</div></div>
+          <span class="card-shine"></span>${fx.card}
+          <div class="card-top"><span class="tier">${chip}</span><span class="cat">${tag}</span></div>
+          <div class="card-main"><span class="medal"><span class="medal-rays"></span>${fx.medal}${slam ? `<div class="reel"><div class="strip">${icon(a)}</div></div>` : reel(a, i)}</span><div class="name">${a.name}</div></div>
           <div class="text">${level ? levelText(id, level) : a.text}</div>
           ${pips}
           ${sets ? `<div class="sets">${sets}</div>` : ''}

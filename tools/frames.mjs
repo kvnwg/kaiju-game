@@ -64,10 +64,52 @@ const FRAMES = {
     ' QggggggQ ',
     '  QQQQQQ  ',
   ],
+  // Move tiers (see TIER_ORDER in augments.js), on the level-up cards and the HUD's move tiles.
+  // Silver: a two-pixel steel bevel, lit from the top left.
+  'frame-silver': [
+    '  QQQQQQ  ',
+    ' QXXXXXXQ ',
+    'QXXXXXXXxQ',
+    'QXX____xxQ',
+    'QXX____xxQ',
+    'QXX____xxQ',
+    'QXX____xxQ',
+    'QXxxxxxxxQ',
+    ' QxxxxxxQ ',
+    '  QQQQQQ  ',
+  ],
+  // Gold: the same in gold, with a white-hot glint in the top-left corner.
+  'frame-gold-tier': [
+    '  QQQQQQ  ',
+    ' QZYYYYYQ ',
+    'QZYYYYYYyQ',
+    'QYY____yyQ',
+    'QYY____yyQ',
+    'QYY____yyQ',
+    'QYY____yyQ',
+    'QYyyyyyyyQ',
+    ' QyyyyyyQ ',
+    '  QQQQQQ  ',
+  ],
+  // Prismatic: just the outline; a rainbow ring that runs round the inside is drawn over it
+  // (.tier-ring in styles.css), since a frame image can't move.
+  'frame-prism': [
+    '  QQQQQQ  ',
+    ' Q______Q ',
+    'Q________Q',
+    'Q________Q',
+    'Q________Q',
+    'Q________Q',
+    'Q________Q',
+    'Q________Q',
+    ' Q______Q ',
+    '  QQQQQQ  ',
+  ],
 };
 const COLORS = {
   O: '#2a1736', H: 'rgba(255,255,255,0.42)', S: 'rgba(42,23,54,0.22)',
   Q: '#160d1c', L: 'rgba(255,255,255,0.16)', D: 'rgba(0,0,0,0.32)', G: '#ffd864', g: '#b8761b',
+  X: '#eef2f8', x: '#8590a6', Y: '#ffd95a', y: '#b26f12', Z: '#fff7d1',
 };
 
 function svg(rows) {
