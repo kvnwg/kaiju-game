@@ -759,13 +759,22 @@ export class Renderer3D {
     const key = `${o.type}:${o.variant}`;
     let v = this.variants.get(key);
     if (!v) {
-      const built = buildBuilding(o.type, o.variant);
-      const geo = toGeometry(meshGrid(built.grid, { v: built.dims.v, ox: built.origin.x, oz: built.origin.z }));
-      v = { key, built, geo, frac: null, used: 0 };
+      // (the full-detail mesh is made only when something needs it: see fullGeo)
+      v = { key, built: buildBuilding(o.type, o.variant), geo: null, frac: null, used: 0 };
       this.variants.set(key, v);
     }
     v.used = performance.now();
     return v;
+  }
+
+  // A design's full-detail mesh. Most designs on screen at the big sizes are only ever drawn as
+  // coarse copies (see lodGeo), so this is made the first time one is needed up close.
+  fullGeo(v) {
+    if (!v.geo) {
+      const b = v.built;
+      v.geo = toGeometry(meshGrid(b.grid, { v: b.dims.v, ox: b.origin.x, oz: b.origin.z }));
+    }
+    return v.geo;
   }
 
   // Building designs are made when first seen and kept while they're in use. A long run passes
@@ -788,7 +797,7 @@ export class Renderer3D {
   dropVariant(v) {
     const key = v.key;
     this.variants.delete(key);
-    v.geo.dispose();
+    if (v.geo) v.geo.dispose();
     for (const g of v.lods || []) if (g) g.dispose();
     for (const [map, tags] of [[this.bInst, ['', ':L1', ':L2', ':L3']], [this.rInst, [':R0', ':R1', ':R2']]]) {
       for (const tag of tags) {
@@ -893,7 +902,7 @@ export class Renderer3D {
     }
     rec.v = this.variant(o);
     if (o.state === 'rubble') return rec;
-    const mesh = new THREE.Mesh(rec.geo || rec.v.geo, this.voxelMat);
+    const mesh = new THREE.Mesh(rec.geo || this.fullGeo(rec.v), this.voxelMat);
     mesh.position.set(o.x, 0, o.y);
     mesh.rotation.y = (o.rot * Math.PI) / 2;
     mesh.castShadow = true;
@@ -941,11 +950,9 @@ export class Renderer3D {
         // The fewer pixels a building covers, the coarser the voxels it is drawn with.
         const px = view.px(o.x, o.y, size) / this.lodBias;
         const lod = px > 110 ? 0 : px > 40 ? 1 : px > 16 ? 2 : 3;
-        list.push(lod ? this.instFor(this.bInst, `${key}:L${lod}`, null) : this.instFor(this.bInst, key, v.geo), o, 0);
-        if (lod) {
-          list[list.length - 3].lodOf = v;
-          list[list.length - 3].lod = lod;
-        }
+        list.push(this.instFor(this.bInst, lod ? `${key}:L${lod}` : key, null), o, 0);
+        list[list.length - 3].lodOf = v;
+        list[list.length - 3].lod = lod;
       } else if (!o.walkable && !o.vanish && !(rec && rec.collapse)) {
         // Rubble gets coarser with distance too, and a pile a few pixels wide isn't drawn.
         const px = view.px(o.x, o.y, size) / this.lodBias;
@@ -977,7 +984,7 @@ export class Renderer3D {
             this.buildingsDirty = true;
             continue;
           }
-          e.geo = e.lodOf ? this.lodGeo(e.lodOf, e.lod) : this.rubbleGeo(e.rubbleOf, e.lod || 0);
+          e.geo = e.rubble ? this.rubbleGeo(e.rubbleOf, e.lod || 0) : e.lod ? this.lodGeo(e.lodOf, e.lod) : this.fullGeo(e.lodOf);
         }
         this.ensureInst(e, e.n, casts(e));
       }
@@ -1175,7 +1182,7 @@ export class Renderer3D {
       this.bld.set(o.id, rec);
     }
     rec.v = this.variant(o);
-    const mesh = new THREE.Mesh(rec.geo || rec.v.geo, this.voxelMat);
+    const mesh = new THREE.Mesh(rec.geo || this.fullGeo(rec.v), this.voxelMat);
     mesh.position.set(o.x, 0, o.y);
     mesh.rotation.y = (o.rot * Math.PI) / 2;
     mesh.castShadow = true;
