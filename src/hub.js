@@ -221,6 +221,9 @@ export class Hub {
   fit() {
     const battle = this.visible && this.tab === 'battle' && this.body.querySelector('.battle');
     if (battle) fitBox(battle, 'end');
+    // A shrunk battle card stops the tab area scrolling (see fit.js); the other tabs share that
+    // area and must scroll, or a short frame cuts the bottom of the shop, gear and kaiju lists off.
+    else this.body.classList.remove('fitted');
     if (this.modalKind) this.fitModal();
   }
 
@@ -803,7 +806,10 @@ export class Hub {
       </div>
       <button class="btn primary" data-act="close">Close</button></div>`;
     if (refresh) {
-      if (this.modalKind === 'patrol') this.modal.innerHTML = html;
+      if (this.modalKind === 'patrol') {
+        this.modal.innerHTML = html;
+        this.fitModal();
+      }
       return;
     }
     this.openModal('patrol', html);
