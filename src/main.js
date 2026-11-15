@@ -5,11 +5,11 @@ import { UI } from './ui.js';
 import { loadSave, writeSave, clearSave } from './storage.js';
 import { KAIJU, STAGES, MAX_STAGE } from './config.js';
 import { Sfx, Music } from './audio.js';
-import { Hub } from './hub.js';
+import { Hub, hfmt } from './hub.js';
 import { Platform } from './platform.js';
 import { frontPage } from './news.js';
 import { WarpOverlay } from './warp.js';
-import { rollover, spendEnergy, runRewards, applyRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
+import { rollover, spendEnergy, runRewards, applyRun, bookOpenRun, loadout, grant, useAd, loginReady, ECONOMY } from './meta.js';
 import { paceState, startSession, tickPlay, breakDecision, adShown, reviveOffer, markReviveAd, reviveTaken, runEnded, paceReport, pressureDue, pressureStarted } from './adpacing.js';
 
 const canvas = document.getElementById('game');
@@ -83,16 +83,34 @@ let newsAt = 0; // when the size-up newspaper slams in (0: none on its way)
 let newsStage = 0;
 let newsAfterWarp = false; // a size-up arrived mid-warp: its newspaper waits for the warp to end
 let newsUp = false; // the newspaper is on screen, and the run waits for it
+let liveRun = null; // the run being played (the hub's backdrop city is a Game too, but not a run)
+let checkpointIn = 0; // seconds of play to the next checkpoint
+const CHECKPOINT_EVERY = 30;
 
 function defaultQuality() {
   const saved = settings.quality;
   if (params.get('q')) return params.get('q');
   if (saved) return saved;
   const mobile = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  // A weak device (two cores or fewer, or 2 GB of memory or less) starts on Low; the game steps
-  // down further on its own if it still struggles (see Renderer3D.trackPerf).
-  const weak = (navigator.hardwareConcurrency || 4) <= 2 || (navigator.deviceMemory || 4) <= 2;
+  // A weak device (two cores or fewer, or 2 GB of memory or less) starts on Low, and so does an
+  // iPhone or iPad on iOS 15 or older (2-3 GB, and Safari closes the tab when memory runs short);
+  // the game steps down further on its own if it still struggles (see Renderer3D.trackPerf).
+  const ios = iosVersion();
+  const weak = (navigator.hardwareConcurrency || 4) <= 2 || (navigator.deviceMemory || 4) <= 2 || (ios > 0 && ios < 16);
   return weak ? 'low' : mobile ? 'medium' : 'high';
+}
+
+// The iOS version (0 elsewhere). iPads ask for the desktop site, so they look like a Mac with a
+// touch screen; their Safari version stands in.
+function iosVersion() {
+  const ua = navigator.userAgent || '';
+  const m = ua.match(/(?:iPhone|iPad|iPod).* OS (\d+)_/);
+  if (m) return Number(m[1]);
+  if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) {
+    const v = ua.match(/Version\/(\d+)/);
+    return v ? Number(v[1]) : 0;
+  }
+  return 0;
 }
 
 // A chapter run: costs energy (the very first run is free), carries the meta loadout in.
@@ -107,6 +125,8 @@ function startRun({ kaijuId, chapter = 1, mode = 'normal', firstRun = false, sta
   runCtx = { chapter, mode, kaijuId };
   hub.hide();
   game = new Game({ kaijuId, difficulty: mode, firstRun, chapter, meta: loadout(save, kaijuId), seed: Number(params.get('seed')) || Date.now() });
+  liveRun = game;
+  checkpointIn = CHECKPOINT_EVERY;
   // Admin mode can start a run at a later size (see the hub's settings).
   if (startStage > 1 && save.settings.admin) game.debugJump(startStage);
   // ...or holding two Void Shards, the third on the first level-up.
@@ -169,6 +189,7 @@ function handleEvents(events) {
         hintUntil = 0;
         ui.hint('');
         newsStage = e.stage;
+        checkpoint();
         // Arriving in a new realm: the newspaper waits until the zoom-out has finished.
         if (game.warp) {
           newsAfterWarp = true;
@@ -301,6 +322,7 @@ function handleEvents(events) {
           },
         });
         if (adOffered) markReviveAd(pace, now());
+        checkpoint();
         persist();
         break;
       }
@@ -316,12 +338,40 @@ function handleEvents(events) {
   }
 }
 
+// A run in progress is kept in the save as it goes: at every size-up, on a knock-down, when the
+// game pauses or the page is hidden, and every half minute of play. Each checkpoint holds the run's
+// results as if it had ended there as a loss (what giving up pays). If the page dies mid-run (a
+// crash, or a phone closing the tab to free memory), the next start books the checkpoint instead
+// of losing the run (see recoverRun); a run that ends normally clears it.
+function checkpoint() {
+  if (!liveRun || liveRun !== game || !save || game.state === 'won' || game.state === 'lost') return;
+  try {
+    save.openRun = { ctx: runCtx, results: game.resultsNow(false), at: now() };
+  } catch (err) {
+    return;
+  }
+  checkpointIn = CHECKPOINT_EVERY;
+  persist();
+}
+
+// Books a run the page died in the middle of, as it stood at its last checkpoint (see
+// meta.bookOpenRun). Returns its rewards, or null.
+function recoverRun() {
+  if (!save.openRun) return null;
+  const booked = bookOpenRun(save, now());
+  if (booked) runEnded(pace, { won: Boolean(booked.results.won), runSec: booked.results.time || 0 });
+  persist();
+  return booked && booked.rewards;
+}
+
 // The run is booked the moment it ends (so closing the tab loses nothing); the doubling ad adds
 // the second half on top.
 function onRunEnd(results) {
   ui.show('revive', false);
   ui.hint('');
   hub.closeModal();
+  liveRun = null;
+  save.openRun = null;
   const ctx = runCtx || { chapter: 1, mode: 'normal' };
   const rewards = runRewards(save, results, ctx);
   const levelsBefore = save.account.level;
@@ -397,6 +447,7 @@ function togglePause(force) {
   if (!game || game.state !== 'playing' || ui.hud.classList.contains('hidden')) return;
   paused = force ?? !paused;
   if (paused) {
+    checkpoint();
     input.release();
     ui.showPause({
       held: game.held,
@@ -422,9 +473,10 @@ function togglePause(force) {
         persist();
       },
       onResume: () => togglePause(false),
+      // Quitting ends the run like giving up: its results, and what it earned, are kept.
       onQuit: () => {
-        paused = false;
-        showHub('battle');
+        togglePause(false);
+        game.quit();
       },
       // Once the city is beaten the run counts as won, so it can be cashed out at any time.
       onCashOut: game.stats.bossDefeated ? () => {
@@ -467,59 +519,63 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'h') game.kaiju.hp = game.kaiju.maxHp;
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) togglePause(true);
+  if (!document.hidden) return;
+  togglePause(true);
+  checkpoint(); // (also mid-pick or knocked down, when there's no pausing)
 });
+// The page going away (closed, reloaded, or put to sleep by a phone): the last chance to bring the
+// run's checkpoint up to date.
+window.addEventListener('pagehide', checkpoint);
+
+// The browser can take the 3D view away (a phone short of memory, a GPU reset). three.js rebuilds
+// everything when it comes back; until then the run waits. If it doesn't come back, a note offers
+// to reload (the run is checkpointed first, so reloading books it).
+let lostNote = null;
+let lostTimer = 0;
+function contextLost() {
+  checkpoint();
+  clearTimeout(lostTimer);
+  lostTimer = setTimeout(() => {
+    if (!renderer.contextLost || lostNote) return;
+    lostNote = document.createElement('div');
+    lostNote.className = 'modal lost-note';
+    lostNote.innerHTML = '<div class="panel small"><h2>The graphics stopped</h2><p class="muted">Your browser paused the 3D view, usually to free up memory. Your progress is saved.</p><button class="btn primary">Reload</button></div>';
+    lostNote.querySelector('button').addEventListener('click', () => {
+      checkpoint();
+      location.reload();
+    });
+    appEl.appendChild(lostNote);
+  }, 2500);
+}
+function contextRestored() {
+  clearTimeout(lostTimer);
+  if (lostNote) lostNote.remove();
+  lostNote = null;
+}
+
+// An error in one frame is logged (the first few) and the game carries on: the next frame is
+// booked first, and the simulation, the drawing and the HUD are guarded apart, so one bad frame
+// can never stop the game for good.
+let frameErrors = 0;
+function guard(fn) {
+  try {
+    fn();
+  } catch (err) {
+    if (frameErrors++ < 5) console.error(err);
+  }
+}
 
 let last = performance.now();
 function frame(stamp) {
+  requestAnimationFrame(frame);
   const dt = Math.min(0.05, (stamp - last) / 1000);
   last = stamp;
-  if (game && renderer) {
-    const inRun = !ui.hud.classList.contains('hidden');
-    const playing = inRun && !paused && !newsUp && game.state === 'playing' && !platform.adPlaying;
-    platform.setPlaying(playing);
-    if (playing && pace) tickPlay(pace, dt);
-    if (inRun && !paused && !newsUp && !platform.adPlaying) {
-      const v = input.get();
-      const w = renderer.worldDir(v.x, v.y);
-      game.setInput(w.x, w.y);
-      if (input.takeDash()) game.tryDash();
-      if (v.x || v.y) movedFor += dt;
-      game.update(dt);
-      handleEvents(game.drainEvents());
-      // Ad pressure: once a run, when an ad revive could follow and the run nears the player's best
-      // (see AD_PRESSURE and adpacing.js). Never without ads, never on a first run.
-      if (pace && !game.firstRun && !game.pressureUsed && game.state === 'playing' && (pressureCheck -= dt) <= 0) {
-        pressureCheck = 0.5;
-        const adReady = platform.rewardedAds && game.reviveAvailable && game.freeRevives === 0;
-        if (pressureDue(pace, { damage: game.stats.damage, bestDamage: save.stats.bestDamage, adReady, now: now() }) && game.startPressure()) {
-          pressureStarted(pace);
-          persist();
-        }
-      }
-      if (hintUntil && (stamp > hintUntil || movedFor > 3)) {
-        hintUntil = 0;
-        ui.hint('');
-      }
-    }
-    // Behind the hub, wreckage settles in slow motion; a run plays at full speed.
-    renderer.render(game, inRun && !paused && !newsUp ? dt : dt * 0.25);
-    // The newspaper's photo is the frame just drawn, so it has to be taken straight after render.
-    if (newsAt && stamp >= newsAt && inRun && !paused && (game.state === 'playing' || game.state === 'picking')) {
-      newsAt = 0;
-      newsUp = true;
-      const k = game.kaiju;
-      const feet = renderer.project(k.x, k.y, 0);
-      const head = renderer.project(k.x, k.y, k.r * 2.4);
-      const photo = renderer.snapshot((feet.x + head.x) / 2, (feet.y + head.y) / 2, Math.hypot(head.x - feet.x, head.y - feet.y), 360, 240);
-      ui.showNewspaper(frontPage(game, newsStage), photo, () => {
-        // (the run stays held while the ad plays)
-        adBreakAfterNews(() => {
-          newsUp = false;
-        });
-      });
-      sfx.paper();
-    }
+  if (!game || !renderer) return;
+  const inRun = !ui.hud.classList.contains('hidden');
+  guard(() => simulate(stamp, dt, inRun));
+  // Nothing is drawn while an ad covers the game: the phone's graphics are the ad's.
+  if (!platform.adPlaying) guard(() => draw(stamp, dt, inRun));
+  guard(() => {
     music.update(musicState());
     warpFx.update(game.warp);
     // The HUD steps aside while the zoom-out and its title card play.
@@ -528,8 +584,63 @@ function frame(stamp) {
       ui.updateHud(game);
       updatePreyArrow();
     }
+  });
+}
+
+function simulate(stamp, dt, inRun) {
+  const held = paused || newsUp || platform.adPlaying || renderer.contextLost;
+  const playing = inRun && !held && game.state === 'playing';
+  platform.setPlaying(playing);
+  if (playing && pace) tickPlay(pace, dt);
+  if (playing && (checkpointIn -= dt) <= 0) checkpoint();
+  if (!inRun || held) return;
+  const v = input.get();
+  const w = renderer.worldDir(v.x, v.y);
+  game.setInput(w.x, w.y);
+  if (input.takeDash()) game.tryDash();
+  if (v.x || v.y) movedFor += dt;
+  game.update(dt);
+  handleEvents(game.drainEvents());
+  // Ad pressure: once a run, when an ad revive could follow and the run nears the player's best
+  // (see AD_PRESSURE and adpacing.js). Never without ads, never on a first run.
+  if (pace && !game.firstRun && !game.pressureUsed && game.state === 'playing' && (pressureCheck -= dt) <= 0) {
+    pressureCheck = 0.5;
+    const adReady = platform.rewardedAds && game.reviveAvailable && game.freeRevives === 0;
+    if (pressureDue(pace, { damage: game.stats.damage, bestDamage: save.stats.bestDamage, adReady, now: now() }) && game.startPressure()) {
+      pressureStarted(pace);
+      persist();
+    }
   }
-  requestAnimationFrame(frame);
+  if (hintUntil && (stamp > hintUntil || movedFor > 3)) {
+    hintUntil = 0;
+    ui.hint('');
+  }
+}
+
+function draw(stamp, dt, inRun) {
+  // Behind the hub, wreckage settles in slow motion; a run plays at full speed.
+  renderer.render(game, inRun && !paused && !newsUp ? dt : dt * 0.25);
+  // The newspaper's photo is the frame just drawn, so it has to be taken straight after render.
+  if (newsAt && stamp >= newsAt && inRun && !paused && !renderer.contextLost && (game.state === 'playing' || game.state === 'picking')) {
+    newsAt = 0;
+    newsUp = true;
+    const k = game.kaiju;
+    const feet = renderer.project(k.x, k.y, 0);
+    const head = renderer.project(k.x, k.y, k.r * 2.4);
+    let photo = null;
+    try {
+      photo = renderer.snapshot((feet.x + head.x) / 2, (feet.y + head.y) / 2, Math.hypot(head.x - feet.x, head.y - feet.y), 360, 240);
+    } catch (err) {
+      // No photo this time: the paper still runs.
+    }
+    ui.showNewspaper(frontPage(game, newsStage), photo, () => {
+      // (the run stays held while the ad plays)
+      adBreakAfterNews(() => {
+        newsUp = false;
+      });
+    });
+    sfx.paper();
+  }
 }
 
 const preyArrow = document.getElementById('preyArrow');
@@ -585,6 +696,8 @@ async function boot() {
   rollover(save, now());
   pace = paceState(save, now(), params.get('adarm'));
   startSession(pace, now());
+  // The last session ended mid-run (a crash, or the tab closed): that run is booked now.
+  const recovered = recoverRun();
   settings = save.settings;
   sfx.setMuted(settings.sound === false);
   sfx.hold('platform', platform.muteAudio);
@@ -594,6 +707,8 @@ async function boot() {
     if (!window.THREE) throw new Error('three.js did not load');
     renderer = new Renderer3D(canvas, { quality: defaultQuality(), pixelArt: params.get('look') === 'pixel' || settings.pixelArt === true, floaterLayer: document.getElementById('floaters') });
     renderer.onVfx = (list, g) => sfx.handleVfx(list, g);
+    renderer.onContextLost = contextLost;
+    renderer.onContextRestored = contextRestored;
     renderer.onQualityChange = (q, auto) => {
       settings.quality = q;
       persist();
@@ -621,6 +736,7 @@ async function boot() {
   if (params.has('play')) startRun({ kaijuId: KAIJU[params.get('kaiju')] ? params.get('kaiju') : 'rex', firstRun: true });
   else if (params.has('hub') || save.tutorialDone) showHub('battle');
   else startRun({ kaijuId: 'rex', firstRun: true });
+  if (recovered && hub.visible) hub.toast(`Your last run was cut short. It's been saved: +${hfmt(recovered.scrap)} scrap`);
   loading.classList.add('hidden');
   platform.loadingStop();
   requestAnimationFrame(frame);

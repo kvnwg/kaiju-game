@@ -770,6 +770,24 @@ export function applyRun(s, results, ctx, rewards, { doubled = false } = {}, now
   return out;
 }
 
+// A run the page died in the middle of (a crash, or a phone closing the tab): main.js keeps the
+// run's results in the save as it goes (s.openRun, as if it had ended there as a loss), and the
+// next start books it here like any finished run. Returns { results, rewards }, or null when
+// there was no such run. One that can't be read is dropped, never retried.
+export function bookOpenRun(s, now = Date.now(), rng = undefined) {
+  const open = s.openRun;
+  if (!open) return null;
+  s.openRun = null;
+  try {
+    const ctx = { chapter: 1, mode: 'normal', ...open.ctx };
+    const rewards = runRewards(s, open.results, ctx, rng);
+    applyRun(s, open.results, ctx, rewards, {}, now);
+    return { results: open.results, rewards };
+  } catch (err) {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- quests
 export function trackQuests(s, delta, now = Date.now()) {
   rollover(s, now);

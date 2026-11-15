@@ -73,6 +73,12 @@ export class Terrain {
     this.renderer = renderer;
     this.tiles = new Map();
     this.world = null;
+    // The sharpest a tile is painted (pixels a side): lower graphics settings ask for less, which
+    // quarters the memory per halving (see QUALITY.groundRes).
+    this.maxRes = 1024;
+    // Tile canvases are handed back here and reused (see takeCanvas): a phone counts every canvas
+    // against a memory cap until it is collected, and dropped ones are collected late.
+    this.canvasPool = new Map();
     this.uVox = { value: 1.5 };
     this.night = 0;
     this.waterColor = new THREE.Color(0x3a8ac0);
@@ -115,12 +121,35 @@ export class Terrain {
     this.tiles.clear();
   }
 
+  // A canvas of n x n pixels: one handed back earlier if there is one, else a new one.
+  takeCanvas(n) {
+    const pool = this.canvasPool.get(n);
+    const cv = (pool && pool.pop()) || document.createElement('canvas');
+    cv.width = n;
+    cv.height = n;
+    return cv;
+  }
+
+  // Keeps a few spare canvases of each size for the next tiles; any more are emptied on the spot,
+  // which frees their memory now instead of whenever the garbage collector gets to them.
+  giveCanvas(cv) {
+    if (!cv) return;
+    const n = cv.width;
+    let pool = this.canvasPool.get(n);
+    if (!pool) this.canvasPool.set(n, (pool = []));
+    if (n && pool.length < 3) pool.push(cv);
+    else cv.width = cv.height = 0;
+  }
+
   disposeTile(t) {
     this.scene.remove(t.mesh);
     t.mesh.geometry.dispose();
     t.mesh.material.dispose();
     t.map.dispose();
     t.glow.dispose();
+    this.giveCanvas(t.canvas);
+    this.giveCanvas(t.glowCanvas);
+    t.canvas = t.glowCanvas = null;
     if (t.water) {
       this.scene.remove(t.water);
       t.water.geometry.dispose();
@@ -147,7 +176,7 @@ export class Terrain {
     const ts = lod.ts;
     const size = ts * CELL;
     const R = span * 1.45 + 260;
-    const res = Math.min(1024, pow2(size / lod.upx));
+    const res = Math.min(this.maxRes, pow2(size / lod.upx));
     const want = [];
     const t0x = Math.floor((tx - R) / size);
     const t1x = Math.floor((tx + R) / size);
@@ -165,6 +194,8 @@ export class Terrain {
         const r = ts === 1 && d > span * 0.9 ? Math.max(64, res / 2) : res;
         if (!tile) want.push({ i, j, ts, res: r, prio: d });
         else if (tile.res < r) want.push({ i, j, ts, res: r, prio: d + span * 0.5 });
+        // (sharper than the graphics setting now allows: repainted smaller, to free the memory)
+        else if (tile.res > this.maxRes) want.push({ i, j, ts, res: r, prio: d + span * 2 });
         else if (!tile.complete && d < span * 1.6 && this.complete(i, j, ts)) want.push({ i, j, ts, res: tile.res, prio: d + span });
       }
     }
@@ -221,9 +252,9 @@ export class Terrain {
     const key = `${ts}:${i}:${j}`;
     const old = this.tiles.get(key);
     const k = res / size; // pixels per world unit
-    const cv = old && old.res === res ? old.canvas : document.createElement('canvas');
-    cv.width = res;
-    cv.height = res;
+    const reuse = Boolean(old && old.res === res && old.canvas);
+    const cv = reuse ? old.canvas : this.takeCanvas(res);
+    if (reuse) cv.width = res; // (clears it)
     const ctx = cv.getContext('2d');
     ctx.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
     const fine = (units) => units * k >= 2.5; // detail worth drawing at this resolution
@@ -739,9 +770,8 @@ export class Terrain {
     // Night light pools, baked per tile; their strength follows the time of day.
     const gres = Math.max(32, pow2(size / GLOW_UPX));
     const gk = gres / size;
-    const gv = old ? old.glowCanvas : document.createElement('canvas');
-    gv.width = gres;
-    gv.height = gres;
+    const gv = old && old.glowCanvas && old.glowCanvas.width === gres ? old.glowCanvas : this.takeCanvas(gres);
+    if (gv === (old && old.glowCanvas)) gv.width = gres; // (clears it)
     const gx = gv.getContext('2d');
     gx.setTransform(gk, 0, 0, gk, -x0 * gk, -y0 * gk);
     gx.fillStyle = '#000';
@@ -760,6 +790,9 @@ export class Terrain {
     gx.globalCompositeOperation = 'source-over';
 
     if (old) {
+      // (the canvases this tile took over stay with it)
+      if (old.canvas === cv) old.canvas = null;
+      if (old.glowCanvas === gv) old.glowCanvas = null;
       this.disposeTile(old);
       this.tiles.delete(key);
     }

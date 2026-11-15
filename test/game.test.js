@@ -952,3 +952,23 @@ test('the first three size bosses go easier, ramping up to the full fight at siz
   assert.ok(one.D < two.D && two.D < three.D && three.D < four.D, 'so do the hits');
   assert.ok(one.hits < four.hits * 0.4);
 });
+
+test('quitting from pause ends the run as a loss and keeps what it earned, like giving up', () => {
+  const g = new Game({ seed: 3 });
+  g.stats.scrap = 101;
+  g.stats.people = 7;
+  // A checkpoint taken mid-run is exactly what quitting there books.
+  const mid = g.resultsNow(false);
+  assert.equal(g.state, 'playing', 'taking the results does not end the run');
+  assert.ok(g.quit());
+  assert.equal(g.state, 'lost');
+  assert.deepEqual(g.results, mid);
+  assert.equal(g.results.scrap, 51, 'a loss keeps half the scrap');
+  assert.equal(g.results.people, 7);
+  assert.ok(g.drainEvents().some((e) => e.type === 'end'));
+  assert.equal(g.quit(), false, 'an ended run cannot be quit again');
+  // Once the city's boss is down, a checkpoint counts the run as won (as cashing out would).
+  const w = new Game({ seed: 3 });
+  w.stats.bossDefeated = true;
+  assert.equal(w.resultsNow(false).won, true);
+});

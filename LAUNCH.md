@@ -67,7 +67,7 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
 | Gameplay start/stop | Start when a run is being played, stop on pause, knock-downs, level-up picks, the newspaper, ads, results and menus (`src/platform.js`, `setPlaying`) |
 | Loading start/stop, happytime | Loading around boot; happytime when a chapter is won |
 | Lands new players in gameplay immediately | No title or play button: once the city has loaded, a new player is in their first run (controls tip on screen); returning players land in the hub |
-| Progress saving | Everything is one save in the SDK's Data module (a few KB; the limit is 1 MB), read after `SDK.init()` |
+| Progress saving | Everything is one save in the SDK's Data module (a few KB; the limit is 1 MB), read after `SDK.init()`. A run in progress is checkpointed into the save at every size-up, on a knock-down, on pause, when the page is hidden and every 30 s of play, so if the page dies mid-run (a crash, or a phone closing the tab) the next start books the run as it stood, as a loss, and says so. "Quit run" in the pause menu ends the run the same way and shows the results (it used to throw the run away) |
 | muteAudio setting | Obeyed at start and on change; the in-game sound toggle can't override it |
 | Midgame ads | Only after a size-up: the newspaper slams in, and once the player taps it away an ad break may follow (QA's suggestion); never during play, and never on a navigational button (a run ends on "Give up" or "Cash out" and goes straight to the results). On top of the SDK's 3-minute cap, `src/adpacing.js` waits for 3–5 minutes of play before the first one (longer in a player's first session), keeps 90 s of real play between breaks, skips one straight after a rewarded video, and skips the first break for players back after 3+ days |
 | Rewarded ads | Every rewarded button wears the same green tag: a video-camera icon and "AD" (revive, reroll, 2x rewards, free crates and eggs, the free daily deal, energy, gems, pass, patrol, wheel); the reward only after `adFinished`; a "try again later" message on failure; game muted and paused while an ad plays |
@@ -93,6 +93,11 @@ bigger rampages. Every time you grow, the local paper slams onto the screen with
   run badly on Safari).
 - A 4 GB Chromebook or an older phone: if late runs stutter, the game steps graphics down on its own,
   and the pause menu has Low graphics.
+- An older iPhone on Safari 15 (an iPhone 7 or 8, 2 GB): a whole run, city to space, without the
+  page reloading. A player on one reported crashes; the fixes were a memory leak (every building
+  design ever seen was kept; now unused ones are freed), smaller ground textures on Low, a game
+  loop that survives an error, recovery when the browser takes the 3D view away, and run
+  checkpoints so a crash no longer loses the run.
 - In the Developer Portal preview: an ad break after tapping away a size-up newspaper (after the
   first few minutes of play), none after "Give up", a rewarded ad for gems, and the game with an ad
   blocker on.

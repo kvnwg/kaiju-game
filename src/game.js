@@ -4762,9 +4762,25 @@ export class Game {
   // ---------------------------------------------------------------- results
   end(won) {
     if (this.state === 'won' || this.state === 'lost') return;
+    this.results = this.resultsNow(won);
+    this.state = this.results.won ? 'won' : 'lost';
+    this.emit('end', { results: this.results });
+  }
+
+  // Quitting from the pause menu ends the run as a loss, like giving up after a knock-down: the
+  // player keeps what the run has earned so far.
+  quit() {
+    if (this.state === 'won' || this.state === 'lost') return false;
+    this.end(false);
+    return true;
+  }
+
+  // The run's results as they stand right now, ended as a win or a loss. end() books these, and
+  // main.js keeps a copy in the save while the run goes on (a checkpoint, booked as a loss if the
+  // page dies mid-run).
+  resultsNow(won = false) {
     // Once the city's final boss is down the run counts as won, however far it got after that.
     won = won || Boolean(this.stats.bossDefeated);
-    this.state = won ? 'won' : 'lost';
     const s = this.stats;
     const scrapRaw = Math.round(s.scrap);
     const scrap = won ? scrapRaw : Math.round(scrapRaw * LOSS_SCRAP_KEEP);
@@ -4772,7 +4788,7 @@ export class Game {
     const score = Math.round(
       s.buildings * 10 + s.units * 5 + s.people + scrapRaw * 0.5 + (won ? 5000 : 0) + (s.landmark ? 1000 : 0) + (won ? Math.max(0, 900 - this.time) * 5 : 0),
     );
-    this.results = {
+    return {
       won, time: this.time, kaiju: this.def.name, kaijuId: this.def.id, city: this.cityDef.name, cityId: this.cityDef.id,
       difficulty: this.diff.id, stage: this.kaiju.stage, scrap, scrapRaw, damage: Math.round(s.damage), biomass: Math.round(s.biomass),
       buildings: s.buildings, destroyed: s.destroyed, units: s.units, people: s.people, landmark: s.landmark, rareMaterials: s.rareMaterials,
@@ -4785,7 +4801,6 @@ export class Game {
       objective: this.objective.text, frenzies: s.frenzies, countries: s.countries || 0,
       peak: s.peak, loop: this.loop, realm: this.realm, realmName: REALMS[this.realm].name,
     };
-    this.emit('end', { results: this.results });
   }
 
   debugGrow() {

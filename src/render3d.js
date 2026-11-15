@@ -22,15 +22,21 @@ import { GlobeView, GLOBE_LAND } from './globe3d.js';
 // drawn before the haze; debris: share of the usual flying debris; breaks: share of the usual
 // animated collapses each frame. 'lowest' is for devices that are really struggling.
 export const QUALITY = {
-  high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8, lod: 1, far: 1, debris: 1, breaks: 1 },
-  medium: { name: 'Medium', pixelRatio: 1, shadows: 1024, bloom: true, tilt: false, lights: 6, lod: 1, far: 1, debris: 1, breaks: 1 },
-  low: { name: 'Low', pixelRatio: 0.75, shadows: 0, bloom: false, tilt: false, lights: 4, lod: 1.15, far: 0.9, debris: 0.7, breaks: 1 },
-  lowest: { name: 'Lowest', pixelRatio: 0.5, shadows: 0, bloom: false, tilt: false, lights: 0, lod: 1.8, far: 0.7, debris: 0.35, breaks: 0.5 },
+  high: { name: 'High', pixelRatio: 1.25, shadows: 2048, bloom: true, tilt: true, lights: 8, lod: 1, far: 1, debris: 1, breaks: 1, groundRes: 1024, spareDesigns: 160 },
+  medium: { name: 'Medium', pixelRatio: 1, shadows: 1024, bloom: true, tilt: false, lights: 6, lod: 1, far: 1, debris: 1, breaks: 1, groundRes: 1024, spareDesigns: 120 },
+  // (Low and Lowest also paint the ground at a quarter and a sixteenth of the memory, and keep
+  // fewer building designs spare (see sweepVariants): old phones start on them, and memory is
+  // what runs out first there)
+  low: { name: 'Low', pixelRatio: 0.75, shadows: 0, bloom: false, tilt: false, lights: 4, lod: 1.15, far: 0.9, debris: 0.7, breaks: 1, groundRes: 512, spareDesigns: 50 },
+  lowest: { name: 'Lowest', pixelRatio: 0.5, shadows: 0, bloom: false, tilt: false, lights: 0, lod: 1.8, far: 0.7, debris: 0.35, breaks: 0.5, groundRes: 256, spareDesigns: 30 },
 };
 export const QUALITY_ORDER = ['high', 'medium', 'low', 'lowest'];
 // Real frame times (ms) that count as struggling, and as really struggling.
 const SLOW_FRAME = 40;
 const VERY_SLOW_FRAME = 80;
+// Building designs off screen for this long are freed, beyond the quality's spareDesigns (see
+// sweepVariants).
+const VARIANT_IDLE_MS = 15000;
 const YAW = 0.62;
 const VOID_GLINT = 0xc89aff; // every strike glints violet in void form
 const PITCH = 0.92; // ~53 degrees down
@@ -167,6 +173,20 @@ export class Renderer3D {
     this.pixelArt = pixelArt;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // The browser can take the WebGL context away (a phone short of memory, a GPU reset) and hand
+    // it back later; three.js keeps it restorable and re-uploads everything when it returns. The
+    // game holds the run in between (see main.js).
+    this.contextLost = false;
+    this.onContextLost = null;
+    this.onContextRestored = null;
+    canvas.addEventListener('webglcontextlost', () => {
+      this.contextLost = true;
+      if (this.onContextLost) this.onContextLost();
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false;
+      if (this.onContextRestored) this.onContextRestored();
+    });
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 1, 10000);
     this.uniforms = { uNight: { value: 0 } };
@@ -212,6 +232,7 @@ export class Renderer3D {
     this._pv = new THREE.Vector3();
     this._ps = new THREE.Vector3(1, 1, 1);
     this.variants = new Map();
+    this.nextSweep = 0;
     this.propCache = new Map();
     this.bld = new Map();
     this.buildQueue = [];
@@ -232,6 +253,7 @@ export class Renderer3D {
     if (!QUALITY[q]) q = 'medium';
     this.qualityName = q;
     this.quality = QUALITY[q];
+    this.terrain.maxRes = this.quality.groundRes;
     if (this.fx) this.fx.debrisCap = Math.round(this.fx.debrisMax * this.quality.debris);
     while (this.points.length > this.quality.lights) this.scene.remove(this.points.pop());
     while (this.points.length < this.quality.lights) {
@@ -739,10 +761,52 @@ export class Renderer3D {
     if (!v) {
       const built = buildBuilding(o.type, o.variant);
       const geo = toGeometry(meshGrid(built.grid, { v: built.dims.v, ox: built.origin.x, oz: built.origin.z }));
-      v = { key, built, geo, frac: null };
+      v = { key, built, geo, frac: null, used: 0 };
       this.variants.set(key, v);
     }
+    v.used = performance.now();
     return v;
+  }
+
+  // Building designs are made when first seen and kept while they're in use. A long run passes
+  // hundreds of them, and each holds its voxels, its mesh, coarse copies, a fracture map and rubble:
+  // kept forever they came to hundreds of MB, more than an older phone has to give. So designs
+  // nothing has drawn for a while (beyond a few kept spare) are freed here, and made again if the
+  // kaiju comes back to them. Run at the end of refreshBuildings, when everything on screen has
+  // just been marked as used.
+  sweepVariants(now) {
+    const spare = this.quality.spareDesigns;
+    if (now < this.nextSweep || this.variants.size <= spare) return;
+    this.nextSweep = now + 3000;
+    const held = new Set();
+    for (const rec of this.bld.values()) if (rec.v) held.add(rec.v.key);
+    for (const rec of this.collapses) if (rec.v) held.add(rec.v.key);
+    const idle = [...this.variants.values()].filter((v) => !held.has(v.key) && now - v.used > VARIANT_IDLE_MS).sort((a, b) => a.used - b.used);
+    for (let i = 0; i < idle.length && this.variants.size > spare; i++) this.dropVariant(idle[i]);
+  }
+
+  dropVariant(v) {
+    const key = v.key;
+    this.variants.delete(key);
+    v.geo.dispose();
+    for (const g of v.lods || []) if (g) g.dispose();
+    for (const [map, tags] of [[this.bInst, ['', ':L1', ':L2', ':L3']], [this.rInst, [':R0', ':R1', ':R2']]]) {
+      for (const tag of tags) {
+        const e = map.get(key + tag);
+        if (!e) continue;
+        if (e.im) {
+          this.scene.remove(e.im);
+          e.im.dispose();
+        }
+        map.delete(key + tag);
+      }
+    }
+    for (let level = 0; level <= 2; level++) {
+      const g = this.rubbleCache.get(`${key}:${level}`);
+      if (!g) continue;
+      g.dispose();
+      this.rubbleCache.delete(`${key}:${level}`);
+    }
   }
 
   fracture(v) {
@@ -859,6 +923,7 @@ export class Renderer3D {
     const missing = [];
     const list = [];
     const view = this.viewTest();
+    const now = performance.now();
     for (const o of game.grid.query(cx - R, cz - R, cx + R, cz + R)) {
       if (o.kind !== 'building') continue;
       const size = Math.max(o.w, o.h, o.height);
@@ -870,6 +935,7 @@ export class Renderer3D {
         missing.push(o);
         continue;
       }
+      v.used = now;
       if (o.state === 'intact') {
         if (rec && rec.mesh) continue;
         // The fewer pixels a building covers, the coarser the voxels it is drawn with.
@@ -956,6 +1022,7 @@ export class Renderer3D {
       this.remeshQueue.delete(rec);
       if (++n >= 3) break;
     }
+    this.sweepVariants(now);
   }
 
   remesh(rec) {

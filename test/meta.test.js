@@ -6,7 +6,7 @@ import {
   addItem, levelUp, levelCost, resetItem, merge, mergeFodder, mergeAll, equip, autoEquip, loadout, power, recommendedPower,
   buyMutation, mutationCost, runRewards, applyRun, questState, claimQuest, claimQuestBonus, DAILY_QUESTS, claimLogin, loginReady,
   addPassXp, passTier, passReward, claimPass, patrolPending, claimPatrol, quickPatrol, adsLeft, adWait, useAd, adEnergy, adGems,
-  buyEnergy, spinWheel, buyDeal, starUp, unlockKaiju, addAccountXp, featureOpen, notifications, buySkin,
+  buyEnergy, spinWheel, buyDeal, starUp, unlockKaiju, addAccountXp, featureOpen, notifications, buySkin, bookOpenRun,
   RARITY, GEAR, CRATES, EPIC, SKINS, PASS,
 } from '../src/meta.js';
 
@@ -357,4 +357,24 @@ test('admin mode unlocks everything: features, kaiju, skins, chapters, every mod
   const t = M.newSave(0);
   assert.ok(M.modeOpen(t, 1, 'normal'));
   assert.ok(!M.modeOpen(t, 1, 'hard'));
+});
+
+test('a run the page died in is booked once on the next start, and a broken one is dropped', () => {
+  const s = newSave(T0);
+  const before = { scrap: s.cur.scrap, runs: s.runs };
+  s.openRun = { ctx: { chapter: 1, mode: 'normal' }, results: { won: false, stage: 3, peak: 3, scrap: 50, people: 12, buildings: 4, damage: 900, gateKills: [1], kaijuId: 'rex' }, at: T0 };
+  const booked = bookOpenRun(s, T0 + MIN, createRng(9));
+  assert.ok(booked && booked.rewards.scrap > 0);
+  assert.equal(s.openRun, null);
+  assert.equal(s.runs, before.runs + 1);
+  assert.equal(s.cur.scrap, before.scrap + booked.rewards.scrap);
+  assert.equal(s.stats.people, 12);
+  assert.equal(s.tutorialDone, true);
+  assert.equal(bookOpenRun(s, T0 + 2 * MIN), null, 'nothing left to book');
+  assert.equal(s.runs, before.runs + 1);
+  // An unreadable checkpoint is thrown away rather than breaking the start.
+  s.openRun = { ctx: { chapter: 1 }, results: null };
+  assert.equal(bookOpenRun(s, T0 + 3 * MIN), null);
+  assert.equal(s.openRun, null);
+  assert.equal(s.runs, before.runs + 1);
 });
