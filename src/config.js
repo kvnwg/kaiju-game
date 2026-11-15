@@ -268,6 +268,16 @@ export const SWARM = {
   dmg: 0.5, // per-unit damage, since there are so many of them
   loot: 0.5, // swarm units are worth less each (melee mobs half again)
 };
+// The mobs that come after you (the `mob` melee units) are the threat to read and fight:
+// - by size, health x`hp`: more from size 4 up, where the kaiju's moves used to wipe them out
+//   before one in three (one in seven at size 5) ever reached it. Sizes 1-3 are left alone: there
+//   the mobs already hold their own against a kaiju without gear.
+// - and they keep up with gear that outclasses the chapter: health and damage x(how many times
+//   over the chapter's power the gear is)^`keepUp`. A square root, so gear still pays: a player
+//   2.2x over meets mobs 1.5x tougher, not 2.2x. Bosses don't scale this way (gear still wins
+//   the fights), and neither do players at or under the chapter's power.
+// Elites keep their own numbers (see ELITE).
+export const MOBS = { hp: [0, 1, 1, 1, 1.3, 1.6, 2, 1, 1.2, 1.2, 1.2, 1, 1], keepUp: 0.5 };
 
 // Pressure. Destruction fills a threat meter (0-100) that drains a few seconds after you stop;
 // threat speeds up and swells the military's response. Every so often a telegraphed strike
@@ -349,9 +359,11 @@ export const BOSS_FIGHT = {
 };
 
 export const GATE = { warn: 2.5, hits: 120, hitsPerLevel: 0.6, interval: 3.1, furious: 0.7, heal: 0.15, secondWind: 0.5 };
-// The first few bosses go easier (health and damage multipliers), ramping up to the full fight
-// at Wrecking Bill (size 4), where the stagger bosses start.
-export const GATE_EARLY = [null, { hp: 0.35, dmg: 0.45 }, { hp: 0.45, dmg: 0.55 }, { hp: 0.6, dmg: 0.7 }];
+// The city's size bosses ease in (health and damage multipliers). Wrecking Bill (size 4) and the
+// Mecha-Mayor (size 5) are the tanky stagger bosses (30x health): at full strength their fights
+// ran two and a half and three minutes even with good gear, longer than the final boss's, and
+// Bill knocked an ungeared kaiju down every time.
+export const GATE_EARLY = [null, { hp: 0.35, dmg: 0.45 }, { hp: 0.45, dmg: 0.55 }, { hp: 0.6, dmg: 0.7 }, { hp: 0.4, dmg: 0.75 }, { hp: 0.6, dmg: 0.85 }];
 export const GATE_BOSSES = [
   null,
   {

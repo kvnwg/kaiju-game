@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect, VOID_FORM } from '../src/game.js';
-import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, AD_PRESSURE, TRAITS, DASH, BOSS_FIGHT } from '../src/config.js';
+import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, GATE_EARLY, AD_PRESSURE, TRAITS, DASH, BOSS_FIGHT, MOBS } from '../src/config.js';
 import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, moveStats } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { createRng } from '../src/rng.js';
@@ -940,17 +940,69 @@ test('a void charge hits as hard as a full second of maxed Laser Eyes', () => {
   assert.ok(Math.abs(VOID_FORM.dashHit - s.dmg * 0.55 * 2 * 10) < 1e-9);
 });
 
-test('the first three size bosses go easier, ramping up to the full fight at size 4', () => {
-  const hpAt = (stage) => {
+test('the size bosses ramp up, and the tanky stagger bosses (sizes 4 and 5) ease in too', () => {
+  // Health in hits of the kaiju's base damage, and damage per hit as a share of max health.
+  const at = (stage) => {
     const g = new Game({ seed: 3 });
     if (stage > 1) g.debugJump(stage);
     g.spawnGateBoss();
-    return { hits: g.boss.maxHp / g.stage.damage / (GATE_BOSSES[stage].hits || 1) / (GATE_BOSSES[stage].hpMul || 1), D: g.boss.D / g.stage.maxHp };
+    return { hits: g.boss.maxHp / g.stage.damage, D: g.boss.D / g.stage.maxHp };
   };
-  const [one, two, three, four] = [1, 2, 3, 4].map(hpAt);
-  assert.ok(one.hits < two.hits && two.hits < three.hits && three.hits < four.hits, 'health ramps up');
-  assert.ok(one.D < two.D && two.D < three.D && three.D < four.D, 'so do the hits');
-  assert.ok(one.hits < four.hits * 0.4);
+  const bosses = [1, 2, 3, 4, 5].map(at);
+  for (let i = 1; i < bosses.length; i++) {
+    assert.ok(bosses[i - 1].hits < bosses[i].hits, `the size ${i + 1} boss takes more hits than the size ${i} one`);
+    assert.ok(bosses[i - 1].D < bosses[i].D, `and hits harder`);
+  }
+  assert.ok(bosses[0].hits < bosses[3].hits * 0.4);
+  // Wrecking Bill and the Mecha-Mayor (30x health) don't come in at full strength, Bill least of all.
+  for (const st of [4, 5]) assert.ok(GATE_BOSSES[st].hpMul >= BOSS_FIGHT.tanky && GATE_EARLY[st].hp < 1 && GATE_EARLY[st].dmg < 1);
+  assert.ok(GATE_EARLY[4].hp < GATE_EARLY[5].hp && GATE_EARLY[4].dmg < GATE_EARLY[5].dmg);
+});
+
+test("Wrecking Bill's swing is one ball: it hits once, however many of its impacts you stand in", () => {
+  const g = new Game({ seed: 3 });
+  g.debugJump(4);
+  g.spawnGateBoss();
+  const k = g.kaiju;
+  k.invuln = 0;
+  g.gateAttack(g.boss, 'swing');
+  const ring = g.hazards.filter((h) => h.group);
+  assert.ok(ring.length >= 8);
+  // Every impact lands right on the kaiju.
+  for (const h of ring) {
+    h.x = k.x;
+    h.y = k.y;
+  }
+  let hits = 0;
+  const take = g.takeDamage.bind(g);
+  g.takeDamage = (...a) => {
+    hits++;
+    take(...a);
+  };
+  for (let t = 0; t < 2.5; t += 1 / 30) {
+    k.invuln = 0;
+    g.updateHazards(1 / 30);
+  }
+  assert.equal(hits, 1);
+});
+
+test('the mobs that come after you keep up with gear that outclasses the chapter, and only then', () => {
+  const spawn = (meta, chapter = 1) => {
+    const g = new Game({ seed: 3, chapter, meta });
+    const k = g.kaiju;
+    return { mob: g.spawnUnit('drone', k.x + 30, k.y), other: g.spawnUnit('cop', k.x + 30, k.y) };
+  };
+  const bare = spawn(null);
+  const geared = spawn({ atkMul: 2.2, hpMul: 2.2 });
+  assert.ok(Math.abs(geared.mob.maxHp / bare.mob.maxHp - Math.sqrt(2.2)) < 1e-9, 'gear 2.2x over the chapter: mobs 1.48x tougher');
+  assert.ok(Math.abs(geared.mob.dmgMul / bare.mob.dmgMul - Math.sqrt(2.2)) < 1e-9, 'and 1.48x harder-hitting');
+  assert.equal(geared.other.maxHp, bare.other.maxHp, 'the rest of the military is the same');
+  assert.equal(geared.other.dmgMul, bare.other.dmgMul);
+  // Two chapters on (enemies 1.35x a chapter) the same gear is only a little over: mobs barely change.
+  assert.ok(spawn({ atkMul: 2.2, hpMul: 2.2 }, 3).mob.maxHp / spawn(null, 3).mob.maxHp < 1.15);
+  // From size 4 up the mobs are tougher for everyone; below it they are as they were.
+  assert.equal(MOBS.hp[1], 1);
+  assert.ok(MOBS.hp[4] > 1 && MOBS.hp[6] > MOBS.hp[4]);
 });
 
 test('quitting from pause ends the run as a loss and keeps what it earned, like giving up', () => {

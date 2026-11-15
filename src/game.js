@@ -1,6 +1,6 @@
 import {
   WORLD, CHAPTER_THEMES, STAGES, MAX_STAGE, LAST_STAGE, REALMS, KAIJU, CITIES, DIFFICULTIES, ENEMIES, ESCALATION, BOSS, GATE, GATE_EARLY, GATE_BOSSES, LIMITS,
-  BOAT_SCALE, UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
+  BOAT_SCALE, UNIT_HEAL, HOSPITAL, DOCTOR_HEAL, LOSS_SCRAP_KEEP, CROWD, TIER_HP, FIRST_RUN, AD_PRESSURE, TRAITS, BOSS_FIGHT, MOBS, canDamage, isSnack, lootFor, EAT_TIME, xpToNext, xpFor, XP, THREAT, ENEMY_SCALING, ELITES, ELITE, HEALING, SWARM, DASH, MULTI,
 } from './config.js';
 import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, offerAugments, applyPick, completedSets, maxLevel, moveStats, MOVE_SLOTS } from './augments.js';
 import { World, isWater, useCity, METRO } from './world.js';
@@ -136,6 +136,7 @@ export class Game {
     const base = DIFFICULTIES[difficulty];
     const cm = Math.pow(CHAPTER_MUL, chapter - 1);
     this.diff = { ...base, enemyHp: base.enemyHp * cm, enemyDmg: base.enemyDmg * cm };
+    this.chapterMul = cm;
     this.rng = createRng(seed);
     // Pets, pigeons and party guests draw from their own stream, so they never shift the rest.
     this.lifeRng = createRng((seed ^ 0x2c1b3c6d) >>> 0);
@@ -1778,6 +1779,12 @@ export class Game {
   }
 
   // How tough the military is right now: every level-up hardens new units.
+  // How far the gear outclasses this chapter (1 at or under its power), to the MOBS.keepUp
+  // power: what the mobs that come after you scale up by, to stay a threat.
+  get mobKeepUp() {
+    return Math.pow(Math.max(1, Math.sqrt(this.meta.atkMul * this.meta.hpMul) / this.chapterMul), MOBS.keepUp);
+  }
+
   enemyScale() {
     // The very first session ramps up half as fast, so a new player gets to see the boss.
     const l = (this.kaiju.level - 1) * (this.firstRun ? 0.5 : 1);
@@ -3384,9 +3391,10 @@ export class Game {
     const u = this.spawnGroup(e.type, undefined, 1)[0];
     u.elite = true;
     u.name = e.name;
-    u.hp *= ELITE.hp;
+    // (an elite keeps its own numbers, without the mob boost)
+    u.hp *= ELITE.hp / u.mobHp;
     u.maxHp = u.hp;
-    u.dmgMul *= ELITE.dmg;
+    u.dmgMul *= ELITE.dmg / (u.def.mob ? this.mobKeepUp : 1);
     u.r *= ELITE.size;
     u.tier = Math.max(u.tier, k.stage);
     this.emit('elite', { name: e.name });
@@ -3438,10 +3446,14 @@ export class Game {
   spawnUnit(type, x, y) {
     const def = this.scaledDef(type);
     const sc = this.enemyScale();
+    // The mobs that come after you are tougher than the rest, and keep up with gear that
+    // outclasses the chapter (see MOBS).
+    const keep = def.mob ? this.mobKeepUp : 1;
+    const mobHp = def.mob ? (MOBS.hp[this.kaiju.stage] || 1) * keep : 1;
     const u = {
       isUnit: true, type, def, x, y, r: def.r, tier: def.tier, scale: def.scale || 1,
-      hp: def.hp * this.diff.enemyHp * sc.hp, maxHp: def.hp * this.diff.enemyHp * sc.hp,
-      dmgMul: sc.dmg * SWARM.dmg,
+      hp: def.hp * this.diff.enemyHp * sc.hp * mobHp, maxHp: def.hp * this.diff.enemyHp * sc.hp * mobHp, mobHp,
+      dmgMul: sc.dmg * SWARM.dmg * keep,
       flying: Boolean(def.flying), cd: this.rng.range(0.6, def.cd || 1), fear: 0, flash: 0,
       heading: 0, aim: 0, strafe: this.rng.chance(0.5) ? 1 : -1, dead: false, age: 0, id: Math.random(),
       stress: 0, windup: 0, windupMax: 0,
@@ -4412,9 +4424,11 @@ export class Game {
         const sweep = p2 ? Math.PI * 2 : Math.PI * 1.4;
         b.state = 'windup';
         b.swingT = 1.7;
+        // One ball: however many of its impacts you are standing in, a swing hits you once.
+        const ball = { hit: false };
         for (let i = 0; i < n; i++) {
           const a = a0 - dirn * 0.5 + dirn * ((sweep * i) / n);
-          this.hazards.push({ kind: 'circle', x: b.x + Math.cos(a) * R, y: b.y + Math.sin(a) * R, r: s * 1.25, t: 0, delay: (0.7 + (i * 0.9) / n) * T, dmg: 0.13 * D, type: 'explosive', boss: true });
+          this.hazards.push({ kind: 'circle', x: b.x + Math.cos(a) * R, y: b.y + Math.sin(a) * R, r: s * 1.25, t: 0, delay: (0.7 + (i * 0.9) / n) * T, dmg: 0.13 * D, type: 'explosive', boss: true, group: ball });
         }
         this.schedule(1.7, () => {
           if (!alive()) return;
@@ -4661,6 +4675,11 @@ export class Game {
       } else if (h.kind === 'line') {
         hit = distToSegment(k.x, k.y, h.x1, h.y1, h.x2, h.y2) < h.w / 2 + k.r * 0.8;
         this.fx.beams.push({ x1: h.x1, y1: h.y1, x2: h.x2, y2: h.y2, width: h.w, life: 0.3, max: 0.3, color: h.beam || 0xff5555, h: h.w * 0.6 });
+      }
+      // (impacts that are all one blow, like a wrecking-ball swing, land once between them)
+      if (hit && h.group) {
+        if (h.group.hit) continue;
+        h.group.hit = true;
       }
       if (hit && k.dodging > 0) this.perfectDodge(h.x, h.y);
       if (hit) this.takeDamage(h.dmg, h.type);
