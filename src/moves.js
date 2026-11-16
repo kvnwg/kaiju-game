@@ -7,6 +7,7 @@ import { MOVES, ALWAYS_ON, moveStats, MOVE_POWER, evolutionFor } from './augment
 import { norm, distToRect, closestPoint, angleDiff, distToSegment } from './geom.js';
 
 const GHOST = 0xc58bff; // tint for Echo repeats
+const BREATH_TURN = 1.5; // how fast Atomic Breath's beam swings onto new targets (radians a second)
 // What a thrown tower looks like, by district.
 const JAVELIN_COLORS = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96, farm: 0xb83a2a, desert: 0xd8a878, snow: 0x8a5a3a, lantern: 0xc8302a, fair: 0xff5a8a, downtown: 0x6a8aa8 };
 // What Car Toss throws in each realm: cars in the city, junk and rocks in space, acorns in the garden.
@@ -146,6 +147,34 @@ export class MoveSystem {
     return out.slice(0, max).map((e) => e.t);
   }
 
+  // The direction (an angle) of the line, `len` long and `width` wide, that crosses the most of
+  // what is in reach, trying the way to each of the nearest few (units and the boss count double).
+  // null when there is nothing to hit.
+  bestLine(len, width, n = 10) {
+    const k = this.k;
+    const near = this.targets(len, n);
+    let best = null;
+    let most = 0;
+    for (const c of near) {
+      const a = Math.atan2(c.y - k.y, c.x - k.x);
+      const dx = Math.cos(a);
+      const dy = Math.sin(a);
+      let score = 0;
+      for (const t of near) {
+        const px = t.x - k.x;
+        const py = t.y - k.y;
+        const along = px * dx + py * dy;
+        const size = t.r || (t.w ? Math.max(t.w, t.h) / 2 : 0);
+        if (along > 0 && along < len + size && Math.abs(px * dy - py * dx) < width / 2 + size) score += t.isUnit || t === this.g.boss ? 2 : 1;
+      }
+      if (score > most) {
+        most = score;
+        best = a;
+      }
+    }
+    return best;
+  }
+
   base() {
     return this.g.baseDamage() * 0.8;
   }
@@ -213,8 +242,7 @@ export class MoveSystem {
     const k = this.k;
     const s = this.st('tailSpin');
     const S = this.size() * s.area;
-    // (a silver move: its spin reaches a little less far than it did, or it out-hit the golds)
-    const reach = k.r * (g.has('cycloneKing') ? 3.1 : 2.6) * S;
+    const reach = k.r * 3.1 * S;
     if (!this.targets(reach).length) return false;
     const spins = s.spins;
     const king = g.has('cycloneKing');
@@ -571,10 +599,17 @@ export class MoveSystem {
     const len = k.r * 13 * S * s.length;
     const melt = g.has('meltdown');
     const D = s.dmg * (melt ? 1.3 : 1);
-    if (!this.targets(len * 0.8).length) return false;
+    const width = k.r * 0.95 * S * s.width;
+    // The kaiju turns to breathe down the line that catches the most, and while the beam pours
+    // out it keeps swinging onto whatever is still standing.
+    const moves = this;
+    let aim = this.bestLine(len * 0.8, width);
+    if (aim === null) return false;
+    let want = aim;
+    let look = 0.3;
+    k.facing = { x: Math.cos(aim), y: Math.sin(aim) };
     const charge = 0.55;
     const dur = 1.2 * s.duration;
-    const width = k.r * 0.95 * S * s.width;
     const color = echo ? GHOST : 0x7df9ff;
     this.anim('breath', charge + dur, { charge });
     let tick = 0;
@@ -583,6 +618,15 @@ export class MoveSystem {
       t: 0,
       update(dt) {
         this.t += dt;
+        look -= dt;
+        if (look <= 0) {
+          look = 0.3;
+          const a = moves.bestLine(len * 0.8, width);
+          if (a !== null) want = a;
+        }
+        const turn = angleDiff(want, aim);
+        aim += Math.sign(turn) * Math.min(Math.abs(turn), BREATH_TURN * dt);
+        k.facing = { x: Math.cos(aim), y: Math.sin(aim) };
         if (this.t < charge) return;
         const f = k.facing;
         const x1 = k.x + f.x * k.r * 1.1;

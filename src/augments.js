@@ -10,23 +10,27 @@
 export const MOVE_SLOTS = 6;
 export const PASSIVE_SLOTS = 6;
 export const TIER_ORDER = ['silver', 'gold', 'prismatic'];
-const WEIGHT = { silver: 1, gold: 0.65, prismatic: 0.35 };
+// How often each tier comes up in an offer. (Prismatic was 0.35 across four moves; with Atomic
+// Breath a fifth, it is 0.28, so a prismatic comes up as often as before.)
+const WEIGHT = { silver: 1, gold: 0.65, prismatic: 0.28 };
 
 // A move's tier says how strong it is: prismatic moves hit hardest, then gold, then silver. The
 // moves' own numbers didn't follow their tiers (on average a prismatic hit no harder than a
 // silver, and bot first runs holding one won less often than runs without), so this scales each
 // move's damage for its tier; 1 is the move's own numbers. Measured as the damage one move at its
 // top level adds to a bot walking the city at size 4, against the strongest move as it was:
-// prismatic averages 80%, gold 71%, silver 54% (it was 55%, 64% and 55%). The prismatics also got
-// faster cooldowns (Building Hurl throws two). A move's evolution keeps any boost, never a cut
-// (see MoveSystem.power).
+// prismatic averages 86%, gold 74%, silver 55% (it was 54%, 67% and 55%). The prismatics also got
+// faster cooldowns, and Atomic Breath aims. The golds that kill whatever they touch (Vortex Belch,
+// Seismic Slam, Laser Eyes) take only small cuts: deeper ones barely changed what they clear but
+// cost them against bosses. A move's evolution keeps any boost, never a cut (see
+// MoveSystem.power).
 export const MOVE_POWER = {
   // silver
-  tailSpin: 0.75, carToss: 0.7, roar: 0.95, orbitingSpines: 0.95, spineMissiles: 0.75, clawStrike: 0.95, acidSpit: 0.85, magneticRoar: 1.05, magmaFootprints: 0.95, frenzyBite: 2.1,
+  tailSpin: 0.45, carToss: 0.6, roar: 0.95, orbitingSpines: 0.95, spineMissiles: 0.75, clawStrike: 0.95, acidSpit: 0.85, magneticRoar: 1.4, magmaFootprints: 1.3, frenzyBite: 2.1,
   // gold
-  seismicSlam: 0.65, vortexBelch: 0.35, laserEyes: 0.65, skyscraperJavelin: 1.1, lightningBreath: 1.6, atomicBreath: 2, iceBreath: 2,
+  seismicSlam: 0.8, vortexBelch: 0.6, laserEyes: 0.75, skyscraperJavelin: 1.1, lightningBreath: 1.6, iceBreath: 2,
   // prismatic
-  gravityBelch: 0.95, meteorCall: 1.6, buildingHurl: 1.9, broodCall: 1.75,
+  atomicBreath: 0.8, gravityBelch: 0.95, meteorCall: 1.6, buildingHurl: 1.9, broodCall: 1.75,
 };
 
 // Level tables for moves: the upgrade applied when reaching levels 2..8.
@@ -38,7 +42,7 @@ export const AUGMENTS = [
   // ---- moves
   { id: 'clawStrike', kind: 'move', name: 'Claw Strike', tier: 'silver', text: 'Rake what’s in front of you', cd: 2.2,
     levels: [up({ dmg: 0.3 }), up({ twice: true }, 'Strikes twice'), up({ area: 0.4 }), up({ cd: -0.2 }), up({ molten: true }, 'Claw marks burn'), up({ dmg: 0.4 }), up({ full: true }, 'Full-circle sweep')] },
-  { id: 'tailSpin', kind: 'move', name: 'Tail Spin', tier: 'silver', text: 'Spin and smash everything near', cd: 8,
+  { id: 'tailSpin', kind: 'move', name: 'Tail Spin', tier: 'silver', text: 'Spin and smash everything near', cd: 6,
     levels: [up({ area: 0.3 }), up({ spins: 1 }, 'Spins twice'), up({ cd: -0.2 }), up({ dmg: 0.4 }), up({ cyclone: true }, 'Becomes a cyclone'), up({ area: 0.3 }), up({ dmg: 0.5, duration: 0.5 }, 'Longer, harder cyclone')] },
   { id: 'spineMissiles', kind: 'move', name: 'Spine Missiles', tier: 'silver', text: 'Homing spines from your back', cd: 5, count: 4, unit: 'spines',
     levels: [up({ count: 2 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ cluster: true }, 'Spines split in 3'), up({ count: 2 }), up({ dmg: 0.4 }), up({ count: 4 })] },
@@ -50,7 +54,7 @@ export const AUGMENTS = [
     levels: [up({ dmg: 0.3 }), up({ length: 0.4 }), up({ sweepBack: true }, 'Sweeps back again'), up({ split: true }, 'Each beam splits in 3'), up({ cd: -0.2 }), up({ width: 0.5 }), up({ dmg: 0.5 })] },
   { id: 'seismicSlam', kind: 'move', name: 'Seismic Slam', tier: 'gold', text: 'Leap and slam a shockwave', cd: 8,
     levels: [up({ area: 0.25 }), up({ aftershock: 1 }, 'Adds an aftershock'), up({ cd: -0.2 }), up({ faults: true }, 'Cracks race outward'), up({ dmg: 0.4 }), up({ area: 0.25 }), up({ aftershock: 1 }, 'Second aftershock')] },
-  { id: 'atomicBreath', kind: 'move', name: 'Atomic Breath', tier: 'gold', text: 'Charge, then breathe a beam', cd: 7,
+  { id: 'atomicBreath', kind: 'move', name: 'Atomic Breath', tier: 'prismatic', text: 'Charge, then sweep a beam', cd: 7,
     levels: [up({ dmg: 0.3 }), up({ duration: 0.5 }), up({ napalm: true }, 'Leaves fire behind'), up({ length: 0.3 }), up({ cd: -0.2 }), up({ duration: 0.5 }), up({ dmg: 0.5, width: 0.5 })] },
   { id: 'meteorCall', kind: 'move', name: 'Meteor Call', tier: 'prismatic', text: 'Meteor on the biggest building', cd: 12, count: 1, unit: 'meteors',
     levels: [up({ cd: -0.15 }), up({ count: 2 }), up({ area: 0.4 }), up({ count: 2 }), up({ cd: -0.2 }), up({ dmg: 0.4 }), up({ count: 4 })] },

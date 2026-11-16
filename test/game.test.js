@@ -7,6 +7,7 @@ import { simulate, botStep } from './bot.js';
 import { createRng } from '../src/rng.js';
 import { waterField } from '../src/world.js';
 import { DOCTOR } from '../src/models.js';
+import { angleDiff } from '../src/geom.js';
 
 // Generate a wide area around the spawn point (normally the world streams in as you move).
 function wide(g, radius = 2600) {
@@ -1040,4 +1041,42 @@ test("every move's damage is scaled for its tier, and an evolution never comes o
   g.held.set('meteorCall', 8);
   g.held.set('extinctionEvent', 1);
   assert.equal(g.moves.power('meteorCall'), MOVE_POWER.meteorCall);
+});
+
+test('Atomic Breath turns to breathe down the line that catches the most, and swings after it', () => {
+  const g = new Game({ seed: 5 });
+  const k = g.kaiju;
+  // House size, nothing else around to shoot at: a squad lined up behind the kaiju, tough
+  // enough to outlast the beam and held where they are.
+  k.stage = 3;
+  k.r = 14;
+  k.invuln = 999;
+  g.held.set('atomicBreath', 1);
+  g.moves.timers.atomicBreath = 99; // cast by hand only
+  g.units.length = 0;
+  k.facing = { x: 1, y: 0 };
+  const line = (a) => [40, 60, 80, 100, 120].map((d) => ({ x: k.x + Math.cos(a) * d, y: k.y + Math.sin(a) * d }));
+  let spots = line(Math.PI);
+  const squad = spots.map((p) => {
+    const u = g.spawnUnit('walker', p.x, p.y);
+    u.hp = u.maxHp = 1e9;
+    return u;
+  });
+  const run = (frames) => {
+    for (let i = 0; i < frames; i++) {
+      squad.forEach((u, j) => Object.assign(u, spots[j]));
+      g.update(1 / 60);
+      g.drainEvents();
+      g.drainVfx();
+    }
+  };
+  assert.ok(g.moves.cast('atomicBreath', false), 'something in reach');
+  assert.ok(k.facing.x < -0.95, `turned round to face the squad: ${JSON.stringify(k.facing)}`);
+  // Still charging, the squad moves round to the kaiju's side: the beam swings after it.
+  run(30);
+  const to = Math.PI - 0.9;
+  spots = line(to);
+  run(60);
+  assert.ok(Math.abs(angleDiff(Math.atan2(k.facing.y, k.facing.x), to)) < 0.2, `swung onto the squad: ${JSON.stringify(k.facing)}`);
+  assert.ok(squad.every((u) => u.hp < 1e9), 'the beam burned every one of them');
 });
