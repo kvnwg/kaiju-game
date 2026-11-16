@@ -3236,7 +3236,8 @@ export class Game {
     if (b && !b.dead && b.state !== 'enter' && distToSegment(b.x, b.y, x1, y1, x2, y2) < width / 2 + b.r && fresh(b)) this.damageBoss(dmg);
   }
 
-  callMeteor() {
+  // `power`: Meteor Call's tier scaling (see MoveSystem.power).
+  callMeteor(power = 1) {
     const k = this.kaiju;
     const half = this.viewSpan() * 0.6;
     let target = null;
@@ -3252,7 +3253,7 @@ export class Game {
       friendly: true, kind: 'circle', x: pos.x, y: pos.y, r: radius, t: 0, delay: 1.3, meteor: true,
       onHit: () => {
         if (target) this.damageObject(target, target.maxHp * 3, norm(target.x - k.x, target.y - k.y), 'hit', { x: target.x, y: target.y });
-        this.areaDamage(pos.x, pos.y, radius * 1.5, this.baseDamage() * 6, 'hit');
+        this.areaDamage(pos.x, pos.y, radius * 1.5, this.baseDamage() * 6 * power, 'hit');
         this.spawnExplosion(pos.x, pos.y, radius * 1.4);
         this.shake = Math.max(this.shake, 0.8);
       },

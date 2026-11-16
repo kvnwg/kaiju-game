@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, distToRect, VOID_FORM } from '../src/game.js';
 import { STAGES, MAX_STAGE, xpToNext, GATE_BOSSES, GATE_EARLY, AD_PRESSURE, TRAITS, DASH, BOSS_FIGHT, MOBS } from '../src/config.js';
-import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, moveStats } from '../src/augments.js';
+import { AUGMENT_BY_ID, MOVES, ALWAYS_ON, moveStats, MOVE_POWER } from '../src/augments.js';
 import { simulate, botStep } from './bot.js';
 import { createRng } from '../src/rng.js';
 import { waterField } from '../src/world.js';
@@ -1023,4 +1023,21 @@ test('quitting from pause ends the run as a loss and keeps what it earned, like 
   const w = new Game({ seed: 3 });
   w.stats.bossDefeated = true;
   assert.equal(w.resultsNow(false).won, true);
+});
+
+test("every move's damage is scaled for its tier, and an evolution never comes out weaker", () => {
+  for (const m of MOVES) assert.ok(MOVE_POWER[m.id] > 0, `${m.name} has a power`);
+  const g = new Game({ seed: 3 });
+  // A move hits with its own numbers times its power.
+  g.held.set('tailSpin', 8);
+  assert.equal(g.moves.st('tailSpin').dmg, moveStats('tailSpin', 8).dmg * MOVE_POWER.tailSpin);
+  // Evolved, a move that was cut goes back to its own numbers (Cyclone King is as strong as ever)...
+  assert.ok(MOVE_POWER.tailSpin < 1);
+  g.held.set('cycloneKing', 1);
+  assert.equal(g.moves.power('tailSpin'), 1);
+  // ...and one that was boosted keeps the boost (Extinction Event rides on Meteor Call).
+  assert.ok(MOVE_POWER.meteorCall > 1);
+  g.held.set('meteorCall', 8);
+  g.held.set('extinctionEvent', 1);
+  assert.equal(g.moves.power('meteorCall'), MOVE_POWER.meteorCall);
 });

@@ -3,7 +3,7 @@
 // when something is in reach; the visuals are described through game.fx
 // (slashes, beams, rings, swirls, cracks) and the kaiju's animation state (kaiju.anim).
 import { canDamage } from './config.js';
-import { MOVES, ALWAYS_ON, moveStats } from './augments.js';
+import { MOVES, ALWAYS_ON, moveStats, MOVE_POWER, evolutionFor } from './augments.js';
 import { norm, distToRect, closestPoint, angleDiff, distToSegment } from './geom.js';
 
 const GHOST = 0xc58bff; // tint for Echo repeats
@@ -36,7 +36,17 @@ export class MoveSystem {
   }
 
   st(id) {
-    return moveStats(id, this.g.level(id));
+    const s = moveStats(id, this.g.level(id));
+    s.dmg *= this.power(id);
+    return s;
+  }
+
+  // How hard this move hits for its tier (see MOVE_POWER). Once evolved it keeps any boost but
+  // never a cut, so no evolution comes out weaker than it was.
+  power(id) {
+    const p = MOVE_POWER[id] ?? 1;
+    const evo = evolutionFor(id);
+    return evo && this.g.has(evo.id) ? Math.max(1, p) : p;
   }
 
   cooldown(id) {
@@ -203,7 +213,8 @@ export class MoveSystem {
     const k = this.k;
     const s = this.st('tailSpin');
     const S = this.size() * s.area;
-    const reach = k.r * 3.1 * S;
+    // (a silver move: its spin reaches a little less far than it did, or it out-hit the golds)
+    const reach = k.r * (g.has('cycloneKing') ? 3.1 : 2.6) * S;
     if (!this.targets(reach).length) return false;
     const spins = s.spins;
     const king = g.has('cycloneKing');
@@ -540,7 +551,7 @@ export class MoveSystem {
         a += (g.rng.next() - 0.5) * 0.5;
         const nx = px + Math.cos(a) * seg;
         const ny = py + Math.sin(a) * seg;
-        g.lineDamage(px, py, nx, ny, k.r * (chasm ? 1.6 : 0.9), g.baseDamage() * (chasm ? 6 : 3));
+        g.lineDamage(px, py, nx, ny, k.r * (chasm ? 1.6 : 0.9), g.baseDamage() * (chasm ? 6 : 3) * this.power('seismicSlam'));
         g.fx.beams.push({ x1: px, y1: py, x2: nx, y2: ny, width: k.r * (chasm ? 1.1 : 0.5), life: chasm ? 4 : 1.6, max: chasm ? 4 : 1.6, color: echo ? GHOST : chasm ? 0xff4a10 : 0xff7a1a, h: 0.4, noFlash: true });
         // Earthbreaker: the chasm swallows any unit your size or smaller.
         if (chasm) for (const u of g.units) if (!u.dead && !u.flying && u.tier <= k.stage && distToSegment(u.x, u.y, px, py, nx, ny) < k.r * 0.9 + u.r) g.killUnit(u);
@@ -615,17 +626,21 @@ export class MoveSystem {
   meteorCall(echo) {
     const g = this.g;
     const k = this.k;
-    const ok = g.callMeteor();
+    const ok = g.callMeteor(this.power('meteorCall'));
     if (!ok) return false;
     this.anim('summon', 1);
     const s = this.st('meteorCall');
     if (s.count > 1) {
       const span = g.viewSpan() * 0.35;
+      // The extra meteors come down on whatever is coming for you, nearest first (anywhere
+      // nearby once there is nothing left to aim at).
+      const aims = this.targets(span * 1.4, s.count - 1);
       for (let i = 0; i < s.count - 1; i++) {
         const a = g.rng.next() * Math.PI * 2;
         const d = span * (0.3 + g.rng.next() * 0.7);
-        const x = k.x + Math.cos(a) * d;
-        const y = k.y + Math.sin(a) * d;
+        const t = aims[i];
+        const x = t ? t.x + Math.cos(a) * k.r * 0.4 : k.x + Math.cos(a) * d;
+        const y = t ? t.y + Math.sin(a) * k.r * 0.4 : k.y + Math.sin(a) * d;
         const r = k.r * 2.2 * this.size() * s.area;
         g.hazards.push({
           friendly: true, kind: 'circle', x, y, r, t: 0, delay: 1.4 + i * 0.22, meteor: true, ghost: echo,
@@ -735,9 +750,11 @@ export class MoveSystem {
     const targets = this.targets(k.r * 13 * S, Math.max(3, s.count)).sort((a, b) => (b.isUnit ? 1 : 0) - (a.isUnit ? 1 : 0));
     if (!targets.length) return false;
     // Rip up the biggest building within arm's reach.
-    const near = g.objectsNear(k.x, k.y, k.r * 3).filter((o) => o.structure && !o.walkable && !o.landmark && o.tier <= k.stage && canDamage(o.tier, k.stage, false));
+    const near = g.objectsNear(k.x, k.y, k.r * 4.5).filter((o) => o.structure && !o.walkable && !o.landmark && o.tier <= k.stage && canDamage(o.tier, k.stage, false));
     near.sort((a, b) => b.w * b.h * b.height - a.w * a.h * a.height);
-    if (!near.length) return false;
+    // Nothing left standing within reach (the kaiju flattened it): it tears a slab out of the
+    // street and throws that instead.
+    if (!near.length) near.push({ x: k.x, y: k.y, w: k.r * 1.4, h: k.r * 1.4, height: k.r, style: 'docks', state: 'gone' });
     this.anim('heave', 0.6);
     const colors = { neon: 0x3a3f4a, brick: 0x9a4a3a, garden: 0xd8d2c4, pastel: 0xe8c8a8, suburb: 0xd9c8a8, docks: 0x8a8f96, farm: 0xb83a2a, desert: 0xd8a878, snow: 0x8a5a3a, lantern: 0xc8302a, fair: 0xff5a8a };
     for (let i = 0; i < s.count; i++) {
@@ -1029,9 +1046,12 @@ export class MoveSystem {
     this.anim('breath', charge + dur, { charge, tint: 'ice' });
     const freeze = (u) => {
       if (u.dead || u.type === 'jet' || u.frozen > 0) return;
-      g.damageUnit(u, this.base() * 0.6 * s.dmg);
+      g.damageUnit(u, this.base() * 1.2 * s.dmg);
       if (!u.dead) u.frozen = freezeFor;
     };
+    // The frost also cracks what it blows across (units it only freezes: the next hit shatters them).
+    const frost = this.base() * 0.5 * s.dmg;
+    const inCone = (px, py, pad = 0) => Math.hypot(px - k.x, py - k.y) < reach + pad && Math.abs(angleDiff(Math.atan2(py - k.y, px - k.x), ang)) < arc / 2 + 0.1;
     let tick = 0;
     this.active.push({
       t: 0,
@@ -1050,6 +1070,10 @@ export class MoveSystem {
           for (const u of g.units) {
             const d = Math.hypot(u.x - k.x, u.y - k.y);
             if (d < reach + u.r && Math.abs(angleDiff(Math.atan2(u.y - k.y, u.x - k.x), ang)) < arc / 2 + 0.1) freeze(u);
+          }
+          for (const o of g.objectsNear(k.x, k.y, reach)) {
+            const cp = closestPoint(k.x, k.y, o);
+            if (inCone(cp.x, cp.y)) g.damageObject(o, frost, norm(o.x - k.x, o.y - k.y), 'hit', cp);
           }
           for (const p of g.people) if (!p.taken && Math.hypot(p.x - k.x, p.y - k.y) < reach && Math.abs(angleDiff(Math.atan2(p.y - k.y, p.x - k.x), ang)) < arc / 2) g.flingPerson(p, false, k);
         }

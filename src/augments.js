@@ -12,6 +12,23 @@ export const PASSIVE_SLOTS = 6;
 export const TIER_ORDER = ['silver', 'gold', 'prismatic'];
 const WEIGHT = { silver: 1, gold: 0.65, prismatic: 0.35 };
 
+// A move's tier says how strong it is: prismatic moves hit hardest, then gold, then silver. The
+// moves' own numbers didn't follow their tiers (on average a prismatic hit no harder than a
+// silver, and bot first runs holding one won less often than runs without), so this scales each
+// move's damage for its tier; 1 is the move's own numbers. Measured as the damage one move at its
+// top level adds to a bot walking the city at size 4, against the strongest move as it was:
+// prismatic averages 80%, gold 71%, silver 54% (it was 55%, 64% and 55%). The prismatics also got
+// faster cooldowns (Building Hurl throws two). A move's evolution keeps any boost, never a cut
+// (see MoveSystem.power).
+export const MOVE_POWER = {
+  // silver
+  tailSpin: 0.75, carToss: 0.7, roar: 0.95, orbitingSpines: 0.95, spineMissiles: 0.75, clawStrike: 0.95, acidSpit: 0.85, magneticRoar: 1.05, magmaFootprints: 0.95, frenzyBite: 2.1,
+  // gold
+  seismicSlam: 0.65, vortexBelch: 0.35, laserEyes: 0.65, skyscraperJavelin: 1.1, lightningBreath: 1.6, atomicBreath: 2, iceBreath: 2,
+  // prismatic
+  gravityBelch: 0.95, meteorCall: 1.6, buildingHurl: 1.9, broodCall: 1.75,
+};
+
 // Level tables for moves: the upgrade applied when reaching levels 2..8.
 // Numbers are relative (dmg: 0.3 = +30% damage, cd: -0.2 = 20% faster); `text` overrides the
 // generated description for signature upgrades.
@@ -21,7 +38,7 @@ export const AUGMENTS = [
   // ---- moves
   { id: 'clawStrike', kind: 'move', name: 'Claw Strike', tier: 'silver', text: 'Rake what’s in front of you', cd: 2.2,
     levels: [up({ dmg: 0.3 }), up({ twice: true }, 'Strikes twice'), up({ area: 0.4 }), up({ cd: -0.2 }), up({ molten: true }, 'Claw marks burn'), up({ dmg: 0.4 }), up({ full: true }, 'Full-circle sweep')] },
-  { id: 'tailSpin', kind: 'move', name: 'Tail Spin', tier: 'silver', text: 'Spin and smash everything near', cd: 6,
+  { id: 'tailSpin', kind: 'move', name: 'Tail Spin', tier: 'silver', text: 'Spin and smash everything near', cd: 8,
     levels: [up({ area: 0.3 }), up({ spins: 1 }, 'Spins twice'), up({ cd: -0.2 }), up({ dmg: 0.4 }), up({ cyclone: true }, 'Becomes a cyclone'), up({ area: 0.3 }), up({ dmg: 0.5, duration: 0.5 }, 'Longer, harder cyclone')] },
   { id: 'spineMissiles', kind: 'move', name: 'Spine Missiles', tier: 'silver', text: 'Homing spines from your back', cd: 5, count: 4, unit: 'spines',
     levels: [up({ count: 2 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ cluster: true }, 'Spines split in 3'), up({ count: 2 }), up({ dmg: 0.4 }), up({ count: 4 })] },
@@ -33,17 +50,17 @@ export const AUGMENTS = [
     levels: [up({ dmg: 0.3 }), up({ length: 0.4 }), up({ sweepBack: true }, 'Sweeps back again'), up({ split: true }, 'Each beam splits in 3'), up({ cd: -0.2 }), up({ width: 0.5 }), up({ dmg: 0.5 })] },
   { id: 'seismicSlam', kind: 'move', name: 'Seismic Slam', tier: 'gold', text: 'Leap and slam a shockwave', cd: 8,
     levels: [up({ area: 0.25 }), up({ aftershock: 1 }, 'Adds an aftershock'), up({ cd: -0.2 }), up({ faults: true }, 'Cracks race outward'), up({ dmg: 0.4 }), up({ area: 0.25 }), up({ aftershock: 1 }, 'Second aftershock')] },
-  { id: 'atomicBreath', kind: 'move', name: 'Atomic Breath', tier: 'gold', text: 'Charge, then breathe a beam', cd: 9,
+  { id: 'atomicBreath', kind: 'move', name: 'Atomic Breath', tier: 'gold', text: 'Charge, then breathe a beam', cd: 7,
     levels: [up({ dmg: 0.3 }), up({ duration: 0.5 }), up({ napalm: true }, 'Leaves fire behind'), up({ length: 0.3 }), up({ cd: -0.2 }), up({ duration: 0.5 }), up({ dmg: 0.5, width: 0.5 })] },
-  { id: 'meteorCall', kind: 'move', name: 'Meteor Call', tier: 'prismatic', text: 'Meteor on the biggest building', cd: 18, count: 1, unit: 'meteors',
+  { id: 'meteorCall', kind: 'move', name: 'Meteor Call', tier: 'prismatic', text: 'Meteor on the biggest building', cd: 12, count: 1, unit: 'meteors',
     levels: [up({ cd: -0.15 }), up({ count: 2 }), up({ area: 0.4 }), up({ count: 2 }), up({ cd: -0.2 }), up({ dmg: 0.4 }), up({ count: 4 })] },
   { id: 'lightningBreath', kind: 'move', name: 'Lightning Breath', tier: 'gold', text: 'Lightning arcs through metal', cd: 3.5, count: 3, unit: 'jumps',
     levels: [up({ dmg: 0.3 }), up({ count: 2 }, 'Chains further'), up({ cd: -0.2 }), up({ dmg: 0.3 }), up({ fork: true }, 'Every bolt forks'), up({ count: 2 }), up({ dmg: 0.5 })] },
-  { id: 'buildingHurl', kind: 'move', name: 'Building Hurl', tier: 'prismatic', text: 'Throw a building at a squad', cd: 7, count: 1, unit: 'buildings',
-    levels: [up({ dmg: 0.3 }), up({ area: 0.3 }), up({ cd: -0.2 }), up({ count: 1 }, 'Throws two'), up({ dmg: 0.4 }), up({ quake: true }, 'Landing shockwave'), up({ count: 1 })] },
+  { id: 'buildingHurl', kind: 'move', name: 'Building Hurl', tier: 'prismatic', text: 'Throw buildings at a squad', cd: 7, count: 2, unit: 'buildings',
+    levels: [up({ dmg: 0.3 }), up({ area: 0.3 }), up({ cd: -0.2 }), up({ count: 1 }, 'Throws three'), up({ dmg: 0.4 }), up({ quake: true }, 'Landing shockwave'), up({ count: 1 })] },
   { id: 'acidSpit', kind: 'move', name: 'Acid Spit', tier: 'silver', text: 'Globs leave melting puddles', cd: 3.5, count: 1, unit: 'globs',
     levels: [up({ count: 1 }), up({ dmg: 0.3 }), up({ area: 0.4 }, 'Bigger puddles'), up({ cd: -0.2 }), up({ count: 1 }), up({ duration: 0.5 }), up({ splash: true }, 'Globs splash in 3')] },
-  { id: 'iceBreath', kind: 'move', name: 'Ice Breath', tier: 'gold', text: 'Freeze foes; frozen ones shatter', cd: 7,
+  { id: 'iceBreath', kind: 'move', name: 'Ice Breath', tier: 'gold', text: 'Freeze foes; frozen ones shatter', cd: 5.5,
     levels: [up({ area: 0.3 }), up({ duration: 0.4 }), up({ cd: -0.2 }), up({ dmg: 0.4 }), up({ nova: true }, 'Frost nova all around'), up({ area: 0.3 }), up({ duration: 0.6 }, 'Freeze lasts much longer')] },
   { id: 'vortexBelch', kind: 'move', name: 'Vortex Belch', tier: 'gold', text: 'A whirlwind drags units in', cd: 9, count: 1, unit: 'vortexes',
     levels: [up({ area: 0.3 }), up({ duration: 0.4 }), up({ cd: -0.2 }), up({ dmg: 0.4 }), up({ count: 1 }, 'Two vortexes'), up({ area: 0.3 }), up({ implode: true }, 'Ends in a blast')] },
@@ -53,14 +70,14 @@ export const AUGMENTS = [
     levels: [up({ area: 0.3 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ blast: true }, 'The heap explodes'), up({ area: 0.3 }), up({ dmg: 0.4 }), up({ heavy: true }, 'Pulls tanks and mechs too')] },
   { id: 'frenzyBite', kind: 'move', name: 'Frenzy Bite', tier: 'silver', text: 'Bite flurry on the toughest foe', cd: 3, count: 3, unit: 'bites',
     levels: [up({ count: 1 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ count: 1 }), up({ crit: true }, 'Last bite crits'), up({ dmg: 0.4 }), up({ count: 2 })] },
-  { id: 'broodCall', kind: 'move', name: 'Brood Call', tier: 'prismatic', text: 'Hatchlings swarm your enemies', cd: 12, count: 3, unit: 'hatchlings',
+  { id: 'broodCall', kind: 'move', name: 'Brood Call', tier: 'prismatic', text: 'Hatchlings swarm your enemies', cd: 9, count: 3, unit: 'hatchlings',
     levels: [up({ count: 1 }), up({ dmg: 0.3 }), up({ duration: 0.4 }), up({ count: 1 }), up({ cd: -0.2 }), up({ boom: true }, 'Hatchlings burst on death'), up({ count: 2 })] },
   // Rips up the tallest thing in reach (a skyscraper if there is one, anything breakable if not)
   // and spears it through everything in a line.
   { id: 'skyscraperJavelin', kind: 'move', name: 'Skyscraper Javelin', tier: 'gold', text: 'Rip up a tower, spear a line', cd: 7, count: 1, unit: 'towers',
     levels: [up({ dmg: 0.3 }), up({ length: 0.4 }, 'Flies much further'), up({ blast: true }, 'Explodes where it lands'), up({ cd: -0.2 }), up({ count: 1 }, 'Throws two towers'), up({ width: 0.5 }, 'Wider skewer'), up({ dmg: 0.5, trench: true }, 'Leaves a burning trench')] },
   // Belches a black hole that swallows what is near, then spits it all back out.
-  { id: 'gravityBelch', kind: 'move', name: 'Gravity Belch', tier: 'prismatic', text: 'Black hole in, barrage out', cd: 11, count: 6, unit: 'shots',
+  { id: 'gravityBelch', kind: 'move', name: 'Gravity Belch', tier: 'prismatic', text: 'Black hole in, barrage out', cd: 8, count: 6, unit: 'shots',
     levels: [up({ area: 0.3 }), up({ count: 2 }), up({ dmg: 0.3 }), up({ cd: -0.2 }), up({ crush: true }, 'The hole crushes what it holds'), up({ duration: 0.4 }, 'Pulls for longer'), up({ count: 4, dmg: 0.4 })] },
   // Always on while you walk: every step leaves a pool of lava.
   { id: 'magmaFootprints', kind: 'move', name: 'Magma Footprints', tier: 'silver', text: 'Your steps leave burning lava', cd: 0.3,
